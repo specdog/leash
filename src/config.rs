@@ -28,6 +28,26 @@ impl Profile {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AcceleratorBackend {
+    #[default]
+    None,
+    Cpu,
+    Cuda,
+}
+
+impl AcceleratorBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct HarnessConfig {
@@ -42,6 +62,8 @@ pub struct HarnessConfig {
     pub serial_baud: u32,
     pub drive_invert: bool,
     pub drive_swap: bool,
+    pub accelerator: AcceleratorBackend,
+    pub require_accelerator: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -58,6 +80,8 @@ pub struct PartialHarnessConfig {
     pub serial_baud: Option<u32>,
     pub drive_invert: Option<bool>,
     pub drive_swap: Option<bool>,
+    pub accelerator: Option<AcceleratorBackend>,
+    pub require_accelerator: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +148,8 @@ struct ConfigBuilder {
     serial_baud: Resolved<u32>,
     drive_invert: Resolved<bool>,
     drive_swap: Resolved<bool>,
+    accelerator: Resolved<AcceleratorBackend>,
+    require_accelerator: Resolved<bool>,
     config_file: Option<String>,
 }
 
@@ -141,6 +167,8 @@ impl Default for HarnessConfig {
             serial_baud: 115_200,
             drive_invert: false,
             drive_swap: false,
+            accelerator: AcceleratorBackend::None,
+            require_accelerator: false,
         }
     }
 }
@@ -159,6 +187,7 @@ impl HarnessConfig {
                 self.profile.as_str()
             );
         }
+        crate::accelerator::resolve_accelerator(self.accelerator, self.require_accelerator)?;
         Ok(())
     }
 }
@@ -218,6 +247,8 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         serial_baud: parse_env(env, "LEASH_SERIAL_BAUD", parse_u32)?,
         drive_invert: parse_env(env, "LEASH_DRIVE_INVERT", parse_bool)?,
         drive_swap: parse_env(env, "LEASH_DRIVE_SWAP", parse_bool)?,
+        accelerator: parse_env(env, "LEASH_ACCELERATOR", parse_accelerator)?,
+        require_accelerator: parse_env(env, "LEASH_REQUIRE_ACCELERATOR", parse_bool)?,
     })
 }
 
@@ -236,6 +267,15 @@ fn parse_profile(value: &str) -> anyhow::Result<Profile> {
         "sim" => Ok(Profile::Sim),
         "waveshare-ugv" => Ok(Profile::WaveshareUgv),
         _ => anyhow::bail!("expected sim or waveshare-ugv"),
+    }
+}
+
+fn parse_accelerator(value: &str) -> anyhow::Result<AcceleratorBackend> {
+    match value {
+        "none" => Ok(AcceleratorBackend::None),
+        "cpu" => Ok(AcceleratorBackend::Cpu),
+        "cuda" => Ok(AcceleratorBackend::Cuda),
+        _ => anyhow::bail!("expected none, cpu, or cuda"),
     }
 }
 
@@ -280,6 +320,8 @@ fn env_var_for_field(field: &str) -> &'static str {
         "serial_baud" => "LEASH_SERIAL_BAUD",
         "drive_invert" => "LEASH_DRIVE_INVERT",
         "drive_swap" => "LEASH_DRIVE_SWAP",
+        "accelerator" => "LEASH_ACCELERATOR",
+        "require_accelerator" => "LEASH_REQUIRE_ACCELERATOR",
         _ => "LEASH_UNKNOWN",
     }
 }
@@ -299,6 +341,8 @@ impl Default for ConfigBuilder {
             serial_baud: Resolved::defaulted(config.serial_baud),
             drive_invert: Resolved::defaulted(config.drive_invert),
             drive_swap: Resolved::defaulted(config.drive_swap),
+            accelerator: Resolved::defaulted(config.accelerator),
+            require_accelerator: Resolved::defaulted(config.require_accelerator),
             config_file: None,
         }
     }
@@ -360,6 +404,13 @@ impl ConfigBuilder {
         if let Some(value) = partial.drive_swap {
             self.drive_swap.set(value, source("drive_swap"));
         }
+        if let Some(value) = partial.accelerator {
+            self.accelerator.set(value, source("accelerator"));
+        }
+        if let Some(value) = partial.require_accelerator {
+            self.require_accelerator
+                .set(value, source("require_accelerator"));
+        }
     }
 
     fn apply_profile_defaults(&mut self) {
@@ -384,6 +435,8 @@ impl ConfigBuilder {
             serial_baud: self.serial_baud.value,
             drive_invert: self.drive_invert.value,
             drive_swap: self.drive_swap.value,
+            accelerator: self.accelerator.value,
+            require_accelerator: self.require_accelerator.value,
         };
         let physical = config.profile.is_physical();
         let physical_actuation_enabled = config.allow_physical_actuation;
@@ -449,6 +502,18 @@ impl ConfigBuilder {
                 json!(config.drive_swap),
                 self.drive_swap.source,
                 physical.then_some("physical-drive-map"),
+            ),
+            field(
+                "accelerator",
+                json!(config.accelerator.as_str()),
+                self.accelerator.source,
+                (config.accelerator != AcceleratorBackend::None).then_some("accelerator"),
+            ),
+            field(
+                "require_accelerator",
+                json!(config.require_accelerator),
+                self.require_accelerator.source,
+                config.require_accelerator.then_some("accelerator-required"),
             ),
         ];
 
@@ -551,6 +616,42 @@ mod config_tests {
             attention_for(&resolved, "allow_physical_actuation"),
             Some("physical-actuation")
         );
+    }
+
+    #[test]
+    fn resolves_accelerator_precedence_with_sources() {
+        let config_path = write_temp_config(
+            "accelerator",
+            r#"{"accelerator":"cpu","require_accelerator":true}"#,
+        );
+        let env = BTreeMap::from([("LEASH_ACCELERATOR".to_string(), "cuda".to_string())]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: Some(config_path.clone()),
+            blueprint: None,
+            env,
+            cli: PartialHarnessConfig {
+                accelerator: Some(AcceleratorBackend::Cpu),
+                ..PartialHarnessConfig::default()
+            },
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.accelerator, AcceleratorBackend::Cpu);
+        assert!(resolved.config.require_accelerator);
+        assert_eq!(source_for(&resolved, "accelerator"), "cli");
+        assert!(source_for(&resolved, "require_accelerator").starts_with("config-file:"));
+        assert_eq!(attention_for(&resolved, "accelerator"), Some("accelerator"));
+        let _ = fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn rejects_required_accelerator_without_backend() {
+        let config = HarnessConfig {
+            require_accelerator: true,
+            ..HarnessConfig::default()
+        };
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("required"));
     }
 
     #[test]

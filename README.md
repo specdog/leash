@@ -104,6 +104,19 @@ leash status bench
 leash stop bench
 ```
 
+## Accelerator Selection
+
+The runtime defaults to no accelerator and remains CPU-safe in CI:
+
+```bash
+leash show-config --accelerator cpu --require-accelerator
+leash show-config --accelerator cuda
+```
+
+The `cuda` backend is feature-gated and currently provides the configuration
+boundary for later device probing and backend implementation. Standard builds
+do not require GPU hardware or vendor SDKs.
+
 ## Inspect Configuration
 
 Check the resolved runtime config before starting a service:
