@@ -2,7 +2,9 @@
 
 ## Product
 
-A Rust harness runtime for onchain-rover control. Exposes robot hardware through a CLI/HTTP server and MCP stdio interface, letting LLM agents command physical rovers. Feature-gated hardware adapters (Waveshare UGV first). Safety gates at every layer.
+A Rust harness runtime for robot control. DimOS-inspired parity surface built Rust-first, MCP-first, simulation-safe. Exposes robot hardware through a typed module graph, CLI/HTTP server, and MCP stdio interface. LLM agents command physical robots through composable blueprints. Feature-gated hardware adapters (Waveshare UGV first, then quadrupeds, humanoids, drones, arms). Safety gates at every layer. Replay and simulation workflows require zero hardware.
+
+**Product benchmark**: `dimensionalOS/dimos` (3.5k stars, Python). Leash targets the same operating surface — blueprints, module graph, MCP tooling, replay, transport abstraction, telemetry — in Rust with stronger safety defaults.
 
 ## What the User Sees
 
@@ -10,19 +12,37 @@ A Rust harness runtime for onchain-rover control. Exposes robot hardware through
 
 ```
 $ leash serve --http 127.0.0.1:9000
-[leash] harness loaded: waveshare-ugv (feature-gated)
+[leash] module graph loaded: 5 modules, 12 streams
+[leash] blueprints: ugv-nav, sim-replay, agent-debug
 [leash] safety gates: motor-limit, estop, watchdog
 [leash] HTTP server listening on 127.0.0.1:9000
 [leash] MCP stdio ready
+[leash] replay buffer: 0s (idle)
 ```
 
 ### Interface: MCP (LLM Agent)
 
 ```
+Tool: leash_module_list()
+Tool: leash_module_status(name)
+Tool: leash_blueprint_start(name)
 Tool: leash_motor(direction, speed, duration_ms)
 Tool: leash_sensor(sensor_name)
 Tool: leash_estop()
-Tool: leash_status()
+Tool: leash_replay_start(session_id)
+Tool: leash_telemetry(stream_name)
+```
+
+### Interface: Module Graph (Dev)
+
+```
+$ leash graph list
+MODULE          STATE     INPUTS          OUTPUTS
+motor_ctrl      running   cmd_vel         odom, health
+lidar_proc      running   raw_scans       pointcloud
+nav_planner     running   pointcloud,odom path, cmd_vel
+safety_gate     running   cmd_vel, estop  cmd_vel_safe
+telemetry_out   running   *               json_stream
 ```
 
 ## User Stories
@@ -37,3 +57,8 @@ Tool: leash_status()
 | LS-06 | CI smoke-tests MCP, HTTP, and safety gates | P1 | `cargo test --features smoke` passes |
 | LS-07 | Package published to crates.io | P2 | `cargo install leash` works |
 | LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
+| LS-09 | Developer defines a module with typed inputs/outputs | P0 | Module appears in `leash graph list` with correct streams |
+| LS-10 | Operator runs a blueprint in sim mode | P0 | Full nav pipeline executes without hardware |
+| LS-11 | Developer replays a recorded session | P1 | Replay reproduces exact telemetry stream |
+| LS-12 | Operator views live telemetry graph | P1 | `leash telemetry` shows real-time stream data |
+| LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |

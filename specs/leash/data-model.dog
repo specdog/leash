@@ -4,7 +4,7 @@
 
 ### Entity: Harness
 
-The core Rust runtime library. Reads hardware config, manages safety gates, routes commands to adapters.
+The core Rust runtime library. Contains the module graph, manages safety gates, routes commands to adapters, and hosts blueprints.
 
 ```yaml
 entity: Harness
@@ -21,13 +21,123 @@ properties:
     type: string
     required: true
     description: Active safety gate stack
+  live_mode:
+    type: boolean
+    required: true
+    default: false
+    description: Explicit physical actuation gate
 states: [planned, mapped, extracted, stabilized, released]
 lifecycle: planned → mapped → extracted → stabilized → released
 ```
 
+### Entity: ModuleGraph
+
+Typed module runtime. Modules declare inputs, outputs, lifecycle, health, and metadata. Streams are typed and validated at graph construction. First implementation in-process and sim-safe.
+
+```yaml
+entity: ModuleGraph
+type: entity
+properties:
+  module_count:
+    type: number
+    required: true
+  stream_count:
+    type: number
+    required: true
+  isolation:
+    type: enum
+    required: true
+    values: [in_process, cross_process, network]
+    default: in_process
+states: [planned, designed, implemented, tested, active]
+lifecycle: planned → designed → implemented → tested → active
+```
+
+### Entity: Blueprints
+
+Runnable catalog of robot configs, sim scenarios, replay sessions, and agentic demos. Every demo and robot stack is a versioned, runnable blueprint. No ad-hoc wiring.
+
+```yaml
+entity: Blueprints
+type: entity
+properties:
+  catalog:
+    type: string
+    required: true
+    description: Blueprint names (ugv-nav, sim-replay, agent-debug)
+  versioned:
+    type: boolean
+    required: true
+    default: true
+states: [planned, cataloged, implemented, tested]
+lifecycle: planned → cataloged → implemented → tested
+```
+
+### Entity: Transport
+
+Abstraction layer for module communication. Works identically across in-process channels, cross-process IPC, TCP network, and ecosystem bridges (ROS2, Zenoh). Modules never know their peer's location.
+
+```yaml
+entity: Transport
+type: entity
+properties:
+  backends:
+    type: string
+    required: true
+    description: in-process, cross-process, tcp, bridge
+  default_backend:
+    type: enum
+    required: true
+    values: [in_process, cross_process, tcp]
+    default: in_process
+states: [planned, designed, implemented, tested]
+lifecycle: planned → designed → implemented → tested
+```
+
+### Entity: Telemetry
+
+Live introspection and visualization. Graph views, stream monitors, command center, Rerun-style spatial views. Feeds both CLI (`leash telemetry`) and MCP tool output.
+
+```yaml
+entity: Telemetry
+type: entity
+properties:
+  views:
+    type: string
+    required: true
+    description: graph, streams, spatial, command-center
+  output:
+    type: enum
+    required: true
+    values: [json_stream, cli, mcp]
+states: [planned, implemented, active]
+lifecycle: planned → implemented → active
+```
+
+### Entity: Replay
+
+Simulation-first, deterministic replay engine. Recorded sessions reproduce identical telemetry from the same inputs. Zero hardware requirement. Core safety and debugging primitive.
+
+```yaml
+entity: Replay
+type: entity
+properties:
+  buffer_format:
+    type: string
+    required: true
+    default: "leash-replay-v1"
+  determinism:
+    type: boolean
+    required: true
+    default: true
+    description: Identical telemetry from same inputs
+states: [planned, implemented, verified]
+lifecycle: planned → implemented → verified
+```
+
 ### Entity: CLI
 
-Command-line interface and localhost HTTP compatibility server. Thin shell around the harness.
+Command-line interface and localhost HTTP compatibility server. Lifecycle commands: run, daemon, status, log, stop, restart, list, show-config. Thin shell around the harness.
 
 ```yaml
 entity: CLI
@@ -40,14 +150,14 @@ properties:
   commands:
     type: string
     required: true
-    description: Subcommands (serve, status, estop)
+    description: Subcommands (serve, status, estop, graph, replay, telemetry)
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: MCPServer
 
-MCP stdio server exposing robot tools to local LLM clients. Tool set: motor, sensor, estop, status.
+MCP stdio server exposing robot tools and module graph status to local LLM clients. Tool set: motor, sensor, estop, status, module_list, module_status, blueprint_start, replay_start, telemetry.
 
 ```yaml
 entity: MCPServer
@@ -111,7 +221,7 @@ lifecycle: planned → mapped → documented → tested
 
 ### Entity: Safety
 
-Smoke-test scripts for MCP, HTTP, and safety gate verification. Gates every release.
+Smoke-test scripts for MCP, HTTP, module graph, replay determinism, and safety gate verification. Gates every release.
 
 ```yaml
 entity: Safety
@@ -120,7 +230,7 @@ properties:
   test_targets:
     type: string
     required: true
-    description: MCP, HTTP, safety-gates
+    description: MCP, HTTP, safety-gates, module-graph, replay
   feature_flag:
     type: string
     required: true
@@ -184,6 +294,15 @@ cardinality: 1:1
 required: true
 ```
 
+### Relationship: Harness → ModuleGraph
+
+```yaml
+relationship: Harness → ModuleGraph
+verb: contains
+cardinality: 1:1
+required: true
+```
+
 ### Relationship: Harness → CLI
 
 ```yaml
@@ -211,6 +330,69 @@ cardinality: 1:many
 required: true
 ```
 
+### Relationship: Blueprints → ModuleGraph
+
+```yaml
+relationship: Blueprints → ModuleGraph
+verb: instantiates
+cardinality: 1:many
+required: true
+```
+
+### Relationship: Blueprints → Harness
+
+```yaml
+relationship: Blueprints → Harness
+verb: targets
+cardinality: many:1
+required: true
+```
+
+### Relationship: Transport → ModuleGraph
+
+```yaml
+relationship: Transport → ModuleGraph
+verb: connects
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Telemetry → ModuleGraph
+
+```yaml
+relationship: Telemetry → ModuleGraph
+verb: observes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Telemetry → Harness
+
+```yaml
+relationship: Telemetry → Harness
+verb: introspects
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Replay → Blueprints
+
+```yaml
+relationship: Replay → Blueprints
+verb: exercises
+cardinality: 1:many
+required: true
+```
+
+### Relationship: Replay → Telemetry
+
+```yaml
+relationship: Replay → Telemetry
+verb: feeds
+cardinality: 1:1
+required: true
+```
+
 ### Relationship: UGVAdapter → Harness
 
 ```yaml
@@ -230,6 +412,15 @@ cardinality: 1:1
 required: true
 ```
 
+### Relationship: Safety → ModuleGraph
+
+```yaml
+relationship: Safety → ModuleGraph
+verb: gates
+cardinality: 1:1
+required: true
+```
+
 ### Relationship: Safety → UGVAdapter
 
 ```yaml
@@ -237,6 +428,15 @@ relationship: Safety → UGVAdapter
 verb: gates
 cardinality: 1:1
 required: false
+```
+
+### Relationship: Safety → Replay
+
+```yaml
+relationship: Safety → Replay
+verb: verifies
+cardinality: 1:1
+required: true
 ```
 
 ### Relationship: ReleasePipeline → Harness
@@ -254,5 +454,23 @@ required: true
 relationship: Bridge → CLI
 verb: documents_for
 cardinality: many:1
+required: true
+```
+
+### Relationship: MCPServer → ModuleGraph
+
+```yaml
+relationship: MCPServer → ModuleGraph
+verb: exposes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: MCPServer → Blueprints
+
+```yaml
+relationship: MCPServer → Blueprints
+verb: launches
+cardinality: 1:many
 required: true
 ```
