@@ -6,6 +6,7 @@
 
 pub mod capability;
 pub mod config;
+pub mod daemon;
 #[cfg(feature = "http")]
 pub mod http;
 #[cfg(feature = "mcp")]
@@ -16,6 +17,7 @@ pub mod types;
 
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{HarnessConfig, Profile};
+pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
 pub use types::{Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame};
