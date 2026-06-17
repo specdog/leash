@@ -32,6 +32,7 @@ pub struct Health {
     pub estop: bool,
     pub deadman_ok: bool,
     pub physical_actuation_enabled: bool,
+    pub modules: Vec<ModuleInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

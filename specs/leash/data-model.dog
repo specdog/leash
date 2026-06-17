@@ -635,7 +635,7 @@ properties:
   clients:
     type: string
     required: true
-    description: Python, JS/TS examples
+    description: typed client examples
 states: [planned, implemented, documented]
 lifecycle: planned → implemented → documented
 ```
