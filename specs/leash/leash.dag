@@ -6,14 +6,16 @@
       0,
       "Harness",
       "entity",
-      "The core Rust runtime library. Reads hardware config, manages safety gates, routes commands to adapters.",
+      "The core Rust runtime library. Contains the module graph, manages safety gates, routes commands to adapters, and hosts blueprints.",
       [
         "name",
         "s!",
         "adapters",
         "s!",
         "safety_gates",
-        "s!"
+        "s!",
+        "live_mode",
+        "b!"
       ],
       [
         "planned",
@@ -24,42 +26,60 @@
       ],
       [
         [
-          7,
+          12,
           "provisions",
           "1:1",
           1
         ],
         [
           1,
-          "powers",
-          "1:1",
-          1
-        ],
-        [
-          2,
-          "powers",
-          "1:1",
-          1
-        ],
-        [
-          4,
-          "exposes_through",
-          "1:many",
-          1
-        ],
-        [
-          3,
-          "adapts",
-          "1:1"
-        ],
-        [
-          5,
-          "gates",
+          "contains",
           "1:1",
           1
         ],
         [
           6,
+          "powers",
+          "1:1",
+          1
+        ],
+        [
+          7,
+          "powers",
+          "1:1",
+          1
+        ],
+        [
+          9,
+          "exposes_through",
+          "1:many",
+          1
+        ],
+        [
+          2,
+          "targets",
+          "many:1",
+          1
+        ],
+        [
+          4,
+          "introspects",
+          "1:1",
+          1
+        ],
+        [
+          8,
+          "adapts",
+          "1:1"
+        ],
+        [
+          10,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          11,
           "packages",
           "1:1",
           1
@@ -68,9 +88,212 @@
     ],
     [
       1,
+      "ModuleGraph",
+      "entity",
+      "Typed module runtime. Modules declare inputs, outputs, lifecycle, health, and metadata. Streams are typed and validated at graph construction. First implementation in-process and sim-safe.",
+      [
+        "module_count",
+        "n!",
+        "stream_count",
+        "n!",
+        "isolation",
+        "e!"
+      ],
+      [
+        "planned",
+        "designed",
+        "implemented",
+        "tested",
+        "active"
+      ],
+      [
+        [
+          0,
+          "contains",
+          "1:1",
+          1
+        ],
+        [
+          2,
+          "instantiates",
+          "1:many",
+          1
+        ],
+        [
+          3,
+          "connects",
+          "1:1",
+          1
+        ],
+        [
+          4,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          10,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          7,
+          "exposes",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      2,
+      "Blueprints",
+      "entity",
+      "Runnable catalog of robot configs, sim scenarios, replay sessions, and agentic demos. Every demo and robot stack is a versioned, runnable blueprint. No ad-hoc wiring.",
+      [
+        "catalog",
+        "s!",
+        "versioned",
+        "b!"
+      ],
+      [
+        "planned",
+        "cataloged",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          1,
+          "instantiates",
+          "1:many",
+          1
+        ],
+        [
+          0,
+          "targets",
+          "many:1",
+          1
+        ],
+        [
+          5,
+          "exercises",
+          "1:many",
+          1
+        ],
+        [
+          7,
+          "launches",
+          "1:many",
+          1
+        ]
+      ]
+    ],
+    [
+      3,
+      "Transport",
+      "entity",
+      "Abstraction layer for module communication. Works identically across in-process channels, cross-process IPC, TCP network, and ecosystem bridges (ROS2, Zenoh). Modules never know their peer's location.",
+      [
+        "backends",
+        "s!",
+        "default_backend",
+        "e!"
+      ],
+      [
+        "planned",
+        "designed",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          1,
+          "connects",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      4,
+      "Telemetry",
+      "entity",
+      "Live introspection and visualization. Graph views, stream monitors, command center, Rerun-style spatial views. Feeds both CLI (`leash telemetry`) and MCP tool output.",
+      [
+        "views",
+        "s!",
+        "output",
+        "e!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "active"
+      ],
+      [
+        [
+          1,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          0,
+          "introspects",
+          "1:1",
+          1
+        ],
+        [
+          5,
+          "feeds",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      5,
+      "Replay",
+      "entity",
+      "Simulation-first, deterministic replay engine. Recorded sessions reproduce identical telemetry from the same inputs. Zero hardware requirement. Core safety and debugging primitive.",
+      [
+        "buffer_format",
+        "s!",
+        "determinism",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "verified"
+      ],
+      [
+        [
+          2,
+          "exercises",
+          "1:many",
+          1
+        ],
+        [
+          4,
+          "feeds",
+          "1:1",
+          1
+        ],
+        [
+          10,
+          "verifies",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      6,
       "CLI",
       "entity",
-      "Command-line interface and localhost HTTP compatibility server. Thin shell around the harness.",
+      "Command-line interface and localhost HTTP compatibility server. Lifecycle commands: run, daemon, status, log, stop, restart, list, show-config. Thin shell around the harness.",
       [
         "http_port",
         "n!",
@@ -91,7 +314,7 @@
           1
         ],
         [
-          4,
+          9,
           "documents_for",
           "many:1",
           1
@@ -99,10 +322,10 @@
       ]
     ],
     [
-      2,
+      7,
       "MCPServer",
       "entity",
-      "MCP stdio server exposing robot tools to local LLM clients. Tool set: motor, sensor, estop, status.",
+      "MCP stdio server exposing robot tools and module graph status to local LLM clients. Tool set: motor, sensor, estop, status, module_list, module_status, blueprint_start, replay_start, telemetry.",
       [
         "tools",
         "s!",
@@ -121,11 +344,23 @@
           "powers",
           "1:1",
           1
+        ],
+        [
+          1,
+          "exposes",
+          "1:1",
+          1
+        ],
+        [
+          2,
+          "launches",
+          "1:many",
+          1
         ]
       ]
     ],
     [
-      3,
+      8,
       "UGVAdapter",
       "entity",
       "Feature-gated Waveshare Ubuntu UGV hardware adapter. Only compiles when `--features ugv` is set.",
@@ -150,14 +385,14 @@
           "1:1"
         ],
         [
-          5,
+          10,
           "gates",
           "1:1"
         ]
       ]
     ],
     [
-      4,
+      9,
       "Bridge",
       "entity",
       "Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime.",
@@ -181,7 +416,7 @@
           1
         ],
         [
-          1,
+          6,
           "documents_for",
           "many:1",
           1
@@ -189,10 +424,10 @@
       ]
     ],
     [
-      5,
+      10,
       "Safety",
       "entity",
-      "Smoke-test scripts for MCP, HTTP, and safety gate verification. Gates every release.",
+      "Smoke-test scripts for MCP, HTTP, module graph, replay determinism, and safety gate verification. Gates every release.",
       [
         "test_targets",
         "s!",
@@ -212,14 +447,26 @@
           1
         ],
         [
-          3,
+          1,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          8,
           "gates",
           "1:1"
+        ],
+        [
+          5,
+          "verifies",
+          "1:1",
+          1
         ]
       ]
     ],
     [
-      6,
+      11,
       "ReleasePipeline",
       "entity",
       "Packages the harness for crates.io and GitHub binary releases.",
@@ -244,7 +491,7 @@
       ]
     ],
     [
-      7,
+      12,
       "Bootstrap",
       "entity",
       "Crate skeleton, license (MIT+trademark), CI pipeline, repo provenance.",
@@ -273,11 +520,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 1821,
-    "ct": 1821,
-    "dt": 521,
-    "sv": 71.4,
-    "cs": 71.4,
-    "saved": 1300
+    "st": 3735,
+    "ct": 3735,
+    "dt": 1099,
+    "sv": 70.6,
+    "cs": 70.6,
+    "saved": 2636
   }
 }

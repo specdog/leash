@@ -8,3 +8,10 @@
 4. External bridge clients depend on stable interfaces. Existing robot bridge APIs must not break without a compatibility shim.
 5. Smoke tests gate every release. MCP, HTTP, and safety gate smoke tests must pass before any publish.
 6. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands.
+7. Sim-safe by default. The harness must run without hardware present. CI, demos, and blueprint smoke tests require zero physical robots.
+8. Explicit physical actuation gate. Any command that moves a motor must pass an explicit `--live` flag or hardware attestation. Sim mode is the default.
+9. Module graph with typed streams. Every module declares inputs, outputs, lifecycle, and health. Streams are typed and validated at graph construction time.
+10. Replay determinism. Recorded sessions must reproduce identical telemetry when replayed against the same inputs. Replay is a safety and debugging primitive.
+11. Transport abstraction. Module communication works identically across in-process, cross-process, and network transports. No module knows its peer's location.
+12. Blueprint catalog. Every demo, robot config, and replay scenario is a versioned, runnable blueprint. No ad-hoc wiring at runtime.
+13. DimOS parity, not DimOS clone. Leash targets the same operating surface and user stories as DimOS, but in Rust with stronger defaults, local-first execution, and MCP-native agent integration. No Python, no ROS dependency.
