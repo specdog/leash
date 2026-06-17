@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{capability::CapabilityDescriptor, module::ModuleInfo};
+use crate::{accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -32,6 +32,7 @@ pub struct Health {
     pub estop: bool,
     pub deadman_ok: bool,
     pub physical_actuation_enabled: bool,
+    pub accelerator: AcceleratorStatus,
     pub modules: Vec<ModuleInfo>,
 }
 
@@ -45,6 +46,7 @@ pub struct Capabilities {
     pub endpoints: Vec<String>,
     pub mcp_tools: Vec<String>,
     pub speed_modes: Vec<SpeedMode>,
+    pub accelerator: AcceleratorStatus,
     pub modules: Vec<ModuleInfo>,
     pub capabilities: Vec<CapabilityDescriptor>,
 }

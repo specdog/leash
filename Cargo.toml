@@ -32,6 +32,7 @@ http = ["dep:axum", "dep:futures-util", "dep:tower-http"]
 mcp = ["dep:rmcp", "dep:schemars"]
 waveshare-ugv = ["dep:serialport"]
 bridge-compat = ["http"]
+cuda = []
 
 [dependencies]
 anyhow = "1.0"
