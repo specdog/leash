@@ -1,0 +1,24 @@
+{
+  "name": "leash",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/specdog/leash.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/specdog/leash/issues"
+  },
+  "homepage": "https://github.com/specdog/leash#readme",
+  "dependencies": {
+    "dotdog": "^0.8.3"
+  }
+}
