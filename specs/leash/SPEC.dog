@@ -1,0 +1,39 @@
+# Leash — Robot Harness
+
+## Product
+
+A Rust harness runtime for onchain-rover control. Exposes robot hardware through a CLI/HTTP server and MCP stdio interface, letting LLM agents command physical rovers. Feature-gated hardware adapters (Waveshare UGV first). Safety gates at every layer.
+
+## What the User Sees
+
+### Interface: CLI
+
+```
+$ leash serve --http 127.0.0.1:9000
+[leash] harness loaded: waveshare-ugv (feature-gated)
+[leash] safety gates: motor-limit, estop, watchdog
+[leash] HTTP server listening on 127.0.0.1:9000
+[leash] MCP stdio ready
+```
+
+### Interface: MCP (LLM Agent)
+
+```
+Tool: leash_motor(direction, speed, duration_ms)
+Tool: leash_sensor(sensor_name)
+Tool: leash_estop()
+Tool: leash_status()
+```
+
+## User Stories
+
+| ID | Story | Pri | Acceptance |
+|----|-------|-----|------------|
+| LS-01 | Operator starts harness with `leash serve` | P0 | HTTP + MCP endpoints respond |
+| LS-02 | LLM agent commands rover motor via MCP | P0 | Rover moves; safety gate enforces limits |
+| LS-03 | Operator hits estop via CLI | P0 | All motors halt within 100ms |
+| LS-04 | Integrator adds new robot bridge | P1 | Existing bridge clients work unchanged |
+| LS-05 | Hardware vendor contributes UGV adapter | P1 | Feature-gated, compiles only when enabled |
+| LS-06 | CI smoke-tests MCP, HTTP, and safety gates | P1 | `cargo test --features smoke` passes |
+| LS-07 | Package published to crates.io | P2 | `cargo install leash` works |
+| LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
