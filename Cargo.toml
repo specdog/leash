@@ -1,0 +1,45 @@
+[package]
+name = "leash-harness"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Composable local-LLM and robotics harness with MCP, CLI, and safe robot adapters"
+repository = "https://github.com/specdog/leash"
+homepage = "https://github.com/specdog/leash"
+readme = "README.md"
+keywords = ["mcp", "robotics", "local-llm", "harness", "telemetry"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "leash"
+path = "src/bin/leash.rs"
+
+[features]
+default = ["sim", "http", "mcp"]
+sim = []
+http = ["dep:axum", "dep:futures-util", "dep:tower-http"]
+mcp = ["dep:rmcp", "dep:schemars"]
+waveshare-ugv = ["dep:serialport"]
+bridge-compat = ["http"]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive", "env"] }
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.43", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+axum = { version = "0.7", optional = true, features = ["ws"] }
+futures-util = { version = "0.3", optional = true }
+rmcp = { version = "1.7", optional = true, default-features = false, features = ["server", "macros", "transport-io"] }
+schemars = { version = "1.0", optional = true, features = ["derive"] }
+serialport = { version = "4.6", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "time"] }

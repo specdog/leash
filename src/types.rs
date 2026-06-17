@@ -1,0 +1,137 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SpeedMode {
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for SpeedMode {
+    fn default() -> Self {
+        Self::Medium
+    }
+}
+
+impl SpeedMode {
+    pub fn cap(self) -> f64 {
+        match self {
+            Self::Low => 0.22,
+            Self::Medium => 0.35,
+            Self::High => 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct Health {
+    pub ok: bool,
+    pub role: String,
+    pub profile: String,
+    pub uptime_ms: u128,
+    pub estop: bool,
+    pub deadman_ok: bool,
+    pub physical_actuation_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct Capabilities {
+    pub ok: bool,
+    pub role: String,
+    pub profile: String,
+    pub physical: bool,
+    pub endpoints: Vec<String>,
+    pub mcp_tools: Vec<String>,
+    pub speed_modes: Vec<SpeedMode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct TelemetryFrame {
+    pub ts_ms: u128,
+    pub robot: String,
+    pub profile: String,
+    pub battery_v: Option<f64>,
+    pub left_cmd: f64,
+    pub right_cmd: f64,
+    pub odometry_left: Option<f64>,
+    pub odometry_right: Option<f64>,
+    pub session_id: Option<String>,
+    pub deadman_ok: bool,
+    pub estop: bool,
+    pub stopped_by_deadman: bool,
+    pub soft_odometry_limited: bool,
+    pub soft_odometry_limit_m: f64,
+    pub speed_mode: SpeedMode,
+    pub max_speed: f64,
+    pub sensors: SensorSnapshot,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SensorSnapshot {
+    pub battery: BatteryStatus,
+    pub odometry: OdometryStatus,
+    pub camera: CameraStatus,
+    pub raw_frame: RawFrameStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct BatteryStatus {
+    pub status: String,
+    pub voltage_v: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct OdometryStatus {
+    pub status: String,
+    pub left_m: Option<f64>,
+    pub right_m: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraStatus {
+    pub status: String,
+    pub health: String,
+    pub stream_url: Option<String>,
+    pub snapshot_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct RawFrameStatus {
+    pub status: String,
+    pub source: String,
+    pub last_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CaptureResult {
+    pub ok: bool,
+    pub source: String,
+    pub content_type: String,
+    pub byte_len: usize,
+    pub captured_at_ms: u128,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct DriveOutcome {
+    pub ok: bool,
+    pub left: f64,
+    pub right: f64,
+    pub speed_mode: SpeedMode,
+    pub max_speed: f64,
+    pub stopped_by_deadman: bool,
+    pub soft_odometry_limited: bool,
+}
