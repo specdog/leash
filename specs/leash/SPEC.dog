@@ -2,9 +2,9 @@
 
 ## Product
 
-A Rust harness runtime for robot control. DimOS-inspired parity surface built Rust-first, MCP-first, simulation-safe. Exposes robot hardware through a CLI/HTTP server and MCP stdio interface. LLM agents command physical robots through pilot-token-authorized sessions. Feature-gated hardware adapters (Waveshare UGV first, then quadrupeds, humanoids, drones, arms). Safety gates at every layer (deadman, estop, soft-odometry-limit, physical-actuation-gate). Sim-safe by default — zero hardware required.
+A Rust harness runtime for robot control. Leash is built Rust-first, MCP-first, and simulation-safe. It exposes robot hardware through a CLI/HTTP server and MCP stdio interface. LLM agents command physical robots through pilot-token-authorized sessions. Feature-gated hardware adapters (Waveshare UGV first, then quadrupeds, humanoids, drones, arms). Safety gates at every layer (deadman, estop, soft-odometry-limit, physical-actuation-gate). Sim-safe by default — zero hardware required.
 
-**Product benchmark**: `dimensionalOS/dimos` (3.5k stars, Python). Leash targets the same operating surface in Rust.
+Leash targets a generic robotics operating surface: typed modules, reusable run targets, replay, local-agent control, telemetry, and explicit physical safety boundaries.
 
 ## What the User Sees
 
@@ -70,7 +70,7 @@ WS   /ws/telemetry         → streaming TelemetryFrame JSON
 | LS-03 | Operator hits estop via CLI/MCP | P0 | All motors halt, estop latched until reset |
 | LS-04 | Operator runs sim profile with zero hardware | P0 | Telemetry streams, drive commands log only |
 | LS-05 | Hardware vendor enables Waveshare UGV | P1 | `--features waveshare-ugv` + `--allow-physical-actuation` |
-| LS-06 | CI smoke-tests MCP, HTTP, and physical gate | P1 | `smoke-http.sh`, `smoke-mcp.py`, `smoke-physical-gate.sh` |
+| LS-06 | CI smoke-tests MCP, HTTP, and physical gate | P1 | `smoke-http.sh`, `smoke-mcp.sh`, `smoke-physical-gate.sh` |
 | LS-07 | Package published to crates.io | P2 | `cargo install leash-harness` works |
 | LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
 | LS-09 | Developer defines a module with typed inputs/outputs | P1 | Module appears in module graph with correct streams |

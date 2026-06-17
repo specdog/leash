@@ -38,10 +38,14 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 
-curl -fsS "$base/health" | python3 -m json.tool >/dev/null
-curl -fsS "$base/capabilities" | python3 -m json.tool >/dev/null
-curl -fsS "$base/telemetry" | python3 -m json.tool >/dev/null
-curl -fsS "$base/sensors" | python3 -m json.tool >/dev/null
-curl -fsS -X POST "$base/motors/stop" | python3 -m json.tool >/dev/null
+parse_json() {
+  node -e 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))' >/dev/null
+}
+
+curl -fsS "$base/health" | parse_json
+curl -fsS "$base/capabilities" | parse_json
+curl -fsS "$base/telemetry" | parse_json
+curl -fsS "$base/sensors" | parse_json
+curl -fsS -X POST "$base/motors/stop" | parse_json
 
 echo "http smoke ok: $base"
