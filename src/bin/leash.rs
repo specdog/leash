@@ -1,13 +1,18 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use leash_harness::{
     capability::default_capability_descriptors,
     config::{resolve_config, ConfigRequest, PartialHarnessConfig},
+    daemon::{
+        spawn_daemon, stop_process, tail_file, RunRecord, RunRegistry, StopOutcome,
+        DEFAULT_RUN_NAME,
+    },
     module::default_module_graph,
     Harness, HarnessConfig, Profile,
 };
+use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -27,10 +32,15 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Serve(Serve),
+    #[cfg(feature = "http")]
+    Run(RunArgs),
+    Status(StatusArgs),
+    Log(LogArgs),
+    Restart(RestartArgs),
     Graph(GraphArgs),
     ShowConfig(ShowConfigArgs),
     Health(HttpTarget),
-    Stop(HttpTarget),
+    Stop(StopArgs),
 }
 
 #[derive(Debug, Args)]
@@ -99,6 +109,56 @@ struct HttpTarget {
 }
 
 #[derive(Debug, Args)]
+struct RunArgs {
+    #[arg(default_value = DEFAULT_RUN_NAME)]
+    name: String,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    daemon: bool,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+
+    #[arg(long)]
+    listen: Option<SocketAddr>,
+}
+
+#[derive(Debug, Args)]
+struct StatusArgs {
+    name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct LogArgs {
+    #[arg(default_value = DEFAULT_RUN_NAME)]
+    name: String,
+
+    #[arg(long, default_value_t = 80)]
+    lines: usize,
+}
+
+#[derive(Debug, Args)]
+struct StopArgs {
+    #[arg(default_value = DEFAULT_RUN_NAME)]
+    name: String,
+
+    #[arg(long)]
+    url: Option<String>,
+
+    #[arg(long, default_value_t = 2_000)]
+    graceful_timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
+struct RestartArgs {
+    #[arg(default_value = DEFAULT_RUN_NAME)]
+    name: String,
+
+    #[arg(long, default_value_t = 2_000)]
+    graceful_timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
 struct GraphArgs {
     #[arg(default_value = "sim")]
     blueprint: String,
@@ -148,6 +208,37 @@ async fn main() -> Result<()> {
                 leash_harness::http::serve_http(harness, listen).await?;
             }
         },
+        #[cfg(feature = "http")]
+        Command::Run(args) => {
+            let config = config_from_args(args.runtime, args.listen, cli.config.clone())?;
+            if args.daemon {
+                let record = start_daemon_run(&args.name, &config)?;
+                println!("{}", serde_json::to_string_pretty(&record)?);
+            } else {
+                let listen = config.listen;
+                let harness = Harness::new(config)?;
+                leash_harness::http::serve_http(harness, listen).await?;
+            }
+        }
+        Command::Status(args) => {
+            let output = daemon_status(args.name.as_deref())?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Command::Log(args) => {
+            let registry = RunRegistry::from_env()?;
+            let Some(record) = registry.read(&args.name)? else {
+                bail!("run '{}' was not found", args.name);
+            };
+            let text = tail_file(&record.log_path, args.lines)?;
+            if !text.is_empty() {
+                println!("{text}");
+            }
+        }
+        Command::Restart(args) => {
+            let record =
+                restart_daemon_run(&args.name, Duration::from_millis(args.graceful_timeout_ms))?;
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        }
         Command::Graph(args) => {
             let graph = graph_from_args(&args)?;
             match args.format {
@@ -176,16 +267,15 @@ async fn main() -> Result<()> {
                     .await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
-        Command::Stop(target) => {
-            let client = reqwest::Client::new();
-            let value: serde_json::Value = client
-                .post(format!("{}/motors/stop", target.url.trim_end_matches('/')))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            println!("{}", serde_json::to_string_pretty(&value)?);
+        Command::Stop(args) => {
+            if let Some(url) = args.url {
+                let value = stop_http_target(&url).await?;
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                let output =
+                    stop_daemon_run(&args.name, Duration::from_millis(args.graceful_timeout_ms))?;
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
         }
     }
 
@@ -217,6 +307,187 @@ impl RuntimeArgs {
             ..PartialHarnessConfig::default()
         })
     }
+}
+
+#[derive(Debug, Serialize)]
+struct StatusOutput {
+    ok: bool,
+    state_dir: String,
+    stale_removed: Vec<String>,
+    runs: Vec<RunStatus>,
+}
+
+#[derive(Debug, Serialize)]
+struct RunStatus {
+    name: String,
+    pid: u32,
+    running: bool,
+    transport: String,
+    profile: String,
+    listen: String,
+    log_path: String,
+    args: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct StopOutput {
+    ok: bool,
+    name: String,
+    pid: u32,
+    outcome: StopOutcome,
+}
+
+#[cfg(feature = "http")]
+fn start_daemon_run(name: &str, config: &HarnessConfig) -> Result<RunRecord> {
+    let registry = RunRegistry::from_env()?;
+    registry.cleanup_stale()?;
+    if let Some(existing) = registry.read(name)? {
+        bail!(
+            "run '{}' is already registered with pid {}",
+            name,
+            existing.pid
+        );
+    }
+    let args = serve_http_args(config);
+    spawn_run_record(name, config, args)
+}
+
+fn restart_daemon_run(name: &str, graceful_timeout: Duration) -> Result<RunRecord> {
+    let registry = RunRegistry::from_env()?;
+    let Some(record) = registry.read(name)? else {
+        bail!("run '{name}' was not found");
+    };
+    if leash_harness::daemon::is_process_alive(record.pid) {
+        stop_process(record.pid, graceful_timeout)?;
+    }
+    registry.remove(name)?;
+    let pid = spawn_daemon(&std::env::current_exe()?, &record.args, &record.log_path)?;
+    let now = leash_harness::daemon::now_ms();
+    let restarted = RunRecord {
+        pid,
+        started_at_ms: now,
+        updated_at_ms: now,
+        ..record
+    };
+    registry.write(&restarted)?;
+    Ok(restarted)
+}
+
+fn stop_daemon_run(name: &str, graceful_timeout: Duration) -> Result<StopOutput> {
+    let registry = RunRegistry::from_env()?;
+    let Some(record) = registry.read(name)? else {
+        bail!("run '{name}' was not found");
+    };
+    let outcome = stop_process(record.pid, graceful_timeout)?;
+    registry.remove(name)?;
+    Ok(StopOutput {
+        ok: true,
+        name: record.name,
+        pid: record.pid,
+        outcome,
+    })
+}
+
+fn daemon_status(name: Option<&str>) -> Result<StatusOutput> {
+    let registry = RunRegistry::from_env()?;
+    let stale_removed = registry
+        .cleanup_stale()?
+        .into_iter()
+        .map(|record| record.name)
+        .collect::<Vec<_>>();
+    let records = if let Some(name) = name {
+        registry.read(name)?.into_iter().collect()
+    } else {
+        registry.list()?
+    };
+    let runs = records
+        .into_iter()
+        .map(|record| RunStatus {
+            running: leash_harness::daemon::is_process_alive(record.pid),
+            name: record.name,
+            pid: record.pid,
+            transport: record.transport,
+            profile: record.profile,
+            listen: record.listen,
+            log_path: record.log_path.display().to_string(),
+            args: record.args,
+        })
+        .collect::<Vec<_>>();
+    Ok(StatusOutput {
+        ok: true,
+        state_dir: registry.root().display().to_string(),
+        stale_removed,
+        runs,
+    })
+}
+
+#[cfg(feature = "http")]
+fn spawn_run_record(name: &str, config: &HarnessConfig, args: Vec<String>) -> Result<RunRecord> {
+    let registry = RunRegistry::from_env()?;
+    let log_path = registry.log_path(name)?;
+    let pid = spawn_daemon(&std::env::current_exe()?, &args, &log_path)?;
+    let now = leash_harness::daemon::now_ms();
+    let record = RunRecord {
+        name: name.to_string(),
+        pid,
+        transport: "http".to_string(),
+        profile: config.profile.as_str().to_string(),
+        listen: config.listen.to_string(),
+        log_path,
+        args,
+        started_at_ms: now,
+        updated_at_ms: now,
+    };
+    registry.write(&record)?;
+    Ok(record)
+}
+
+#[cfg(feature = "http")]
+fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
+    let mut args = vec![
+        "serve".to_string(),
+        "http".to_string(),
+        "--role".to_string(),
+        config.role.clone(),
+        "--profile".to_string(),
+        config.profile.as_str().to_string(),
+        "--listen".to_string(),
+        config.listen.to_string(),
+        "--deadman-ms".to_string(),
+        config.deadman_ms.to_string(),
+        "--soft-odometry-limit-m".to_string(),
+        config.soft_odometry_limit_m.to_string(),
+        "--serial-port".to_string(),
+        config.serial_port.clone(),
+        "--serial-baud".to_string(),
+        config.serial_baud.to_string(),
+    ];
+    if config.allow_untokened_drive {
+        args.push("--allow-untokened-drive".to_string());
+    } else {
+        args.push("--no-untokened-drive".to_string());
+    }
+    if config.allow_physical_actuation {
+        args.push("--allow-physical-actuation".to_string());
+    }
+    if config.drive_invert {
+        args.push("--drive-invert".to_string());
+    }
+    if config.drive_swap {
+        args.push("--drive-swap".to_string());
+    }
+    args
+}
+
+async fn stop_http_target(url: &str) -> Result<serde_json::Value> {
+    let client = reqwest::Client::new();
+    Ok(client
+        .post(format!("{}/motors/stop", url.trim_end_matches('/')))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
 }
 
 fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
