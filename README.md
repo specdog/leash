@@ -113,9 +113,10 @@ leash show-config --accelerator cpu --require-accelerator
 leash show-config --accelerator cuda
 ```
 
-The `cuda` backend is feature-gated and currently provides the configuration
-boundary for later device probing and backend implementation. Standard builds
-do not require GPU hardware or vendor SDKs.
+Health and capabilities include an accelerator probe inventory. The CPU backend
+is always available; the `cuda` backend is a feature-gated placeholder that
+reports compile/probe status until a real device backend is attached. Standard
+builds do not require GPU hardware or vendor SDKs.
 
 ## Inspect Configuration
 
