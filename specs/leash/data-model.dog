@@ -4,15 +4,21 @@
 
 ### Entity: Harness
 
-The core Rust runtime library. Contains the module graph, manages safety gates, routes commands to adapters, and hosts blueprints.
+The core Rust runtime library. Manages safety gates (deadman, estop, soft-odometry-limit, physical-actuation-gate), pilot token sessions with TTL, sim vs physical drivers, and telemetry broadcast. Monolithic for now; module graph is a planned extraction.
 
 ```yaml
 entity: Harness
 type: entity
 properties:
-  name:
+  role:
     type: string
     required: true
+    default: "robot"
+  profile:
+    type: enum
+    required: true
+    values: [sim, waveshare-ugv]
+    default: sim
   adapters:
     type: string
     required: true
@@ -20,19 +26,34 @@ properties:
   safety_gates:
     type: string
     required: true
-    description: Active safety gate stack
-  live_mode:
+    description: deadman, estop, soft-odometry-limit, physical-actuation-gate
+  deadman_ms:
+    type: number
+    required: true
+    default: 400
+    description: Auto-stop if no command within this window
+  soft_odometry_limit_m:
+    type: number
+    required: true
+    default: 0.0
+    description: Odometry-based travel cap; 0 means disabled
+  allow_physical_actuation:
     type: boolean
     required: true
     default: false
-    description: Explicit physical actuation gate
+    description: Must be true or LEASH_ALLOW_PHYSICAL_ACTUATION=1 for physical profiles
+  allow_untokened_drive:
+    type: boolean
+    required: true
+    default: true
+    description: Whether drive commands without a pilot token are accepted
 states: [planned, mapped, extracted, stabilized, released]
 lifecycle: planned → mapped → extracted → stabilized → released
 ```
 
 ### Entity: ModuleGraph
 
-Typed module runtime. Modules declare inputs, outputs, lifecycle, health, and metadata. Streams are typed and validated at graph construction. First implementation in-process and sim-safe.
+Typed module runtime. Modules declare inputs, outputs, lifecycle, health, and metadata. Streams are typed and validated at graph construction. First implementation in-process and sim-safe. Not yet extracted from the monolithic Harness.
 
 ```yaml
 entity: ModuleGraph
@@ -96,7 +117,7 @@ lifecycle: planned → designed → implemented → tested
 
 ### Entity: Telemetry
 
-Live introspection and visualization. Graph views, stream monitors, command center, Rerun-style spatial views. Feeds both CLI (`leash telemetry`) and MCP tool output.
+Live telemetry streaming via broadcast channel and WebSocket. TelemetryFrame with odometry, battery, speed mode, estop, deadman, sensor snapshots. Visualization (graph views, command center) not yet built; data pipeline exists.
 
 ```yaml
 entity: Telemetry
@@ -109,7 +130,7 @@ properties:
   output:
     type: enum
     required: true
-    values: [json_stream, cli, mcp]
+    values: [json_stream, ws, cli, mcp]
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```
@@ -137,27 +158,31 @@ lifecycle: planned → implemented → verified
 
 ### Entity: CLI
 
-Command-line interface and localhost HTTP compatibility server. Lifecycle commands: run, daemon, status, log, stop, restart, list, show-config. Thin shell around the harness.
+Command-line interface and localhost HTTP server. Subcommands: serve (mcp|http), health, stop. Feature-gated transports. HTTP server exposes 16 REST + WebSocket endpoints.
 
 ```yaml
 entity: CLI
 type: entity
 properties:
-  http_port:
-    type: number
+  listen:
+    type: string
     required: true
-    default: 9000
+    default: "127.0.0.1:8000"
   commands:
     type: string
     required: true
-    description: Subcommands (serve, status, estop, graph, replay, telemetry)
+    description: serve (mcp|http), health, stop
+  http_endpoints:
+    type: string
+    required: true
+    description: health, capabilities, telemetry, sensors, camera/status, capture, pilot/authorize, pilot/speed-mode, drive, motors/drive, motors/stop, estop, estop/reset, stream, ws/telemetry
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: MCPServer
 
-MCP stdio server exposing robot tools and module graph status to local LLM clients. Tool set: motor, sensor, estop, status, module_list, module_status, blueprint_start, replay_start, telemetry.
+MCP stdio server (rmcp crate). 7 tools exposed to local LLM clients: health, capabilities, observe, invoke_capability (authorize/drive/stop/estop/estop_reset/speed_mode), stop, estop, capture.
 
 ```yaml
 entity: MCPServer
@@ -166,7 +191,7 @@ properties:
   tools:
     type: string
     required: true
-    description: Exposed MCP tool list
+    description: health, capabilities, observe, invoke_capability, stop, estop, capture
   transport:
     type: enum
     required: true
@@ -177,7 +202,7 @@ lifecycle: planned → implemented → tested → released
 
 ### Entity: UGVAdapter
 
-Feature-gated Waveshare Ubuntu UGV hardware adapter. Only compiles when `--features ugv` is set.
+Feature-gated Waveshare Ubuntu UGV hardware adapter. Serial port JSON-line protocol. Configurable drive inversion, drive swap, baud rate. Only compiles with `--features waveshare-ugv`.
 
 ```yaml
 entity: UGVAdapter
@@ -190,18 +215,30 @@ properties:
   feature_flag:
     type: string
     required: true
-    default: "ugv"
-  motor_channels:
+    default: "waveshare-ugv"
+  serial_port:
+    type: string
+    required: true
+    default: "/dev/ttyTHS1"
+  serial_baud:
     type: number
     required: true
-    default: 4
+    default: 115200
+  drive_invert:
+    type: boolean
+    required: true
+    default: false
+  drive_swap:
+    type: boolean
+    required: true
+    default: false
 states: [planned, implemented, feature_gated, documented]
 lifecycle: planned → implemented → feature_gated → documented
 ```
 
 ### Entity: Bridge
 
-Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime.
+Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime. Feature flag `bridge-compat` exists; actual shim code not yet written.
 
 ```yaml
 entity: Bridge
@@ -221,7 +258,7 @@ lifecycle: planned → mapped → documented → tested
 
 ### Entity: Safety
 
-Smoke-test scripts for MCP, HTTP, module graph, replay determinism, and safety gate verification. Gates every release.
+Runtime safety gates (deadman, estop, soft-odometry-limit, physical-actuation-gate) plus smoke-test scripts for MCP, HTTP, and physical gate verification.
 
 ```yaml
 entity: Safety
@@ -230,18 +267,22 @@ properties:
   test_targets:
     type: string
     required: true
-    description: MCP, HTTP, safety-gates, module-graph, replay
+    description: MCP, HTTP, physical-gate, safety-gates (deadman, estop, soft-odometry-limit)
   feature_flag:
     type: string
     required: true
     default: "smoke"
+  scripts:
+    type: string
+    required: true
+    description: smoke-http.sh, smoke-mcp.py, smoke-physical-gate.sh
 states: [planned, implemented, verified]
 lifecycle: planned → implemented → verified
 ```
 
 ### Entity: ReleasePipeline
 
-Packages the harness for crates.io and GitHub binary releases.
+Packages the harness for crates.io and GitHub binary releases. Cargo.toml metadata complete; CI release workflow not yet configured.
 
 ```yaml
 entity: ReleasePipeline
@@ -261,7 +302,7 @@ lifecycle: planned → configured → publishing
 
 ### Entity: Bootstrap
 
-Crate skeleton, license (MIT+trademark), CI pipeline, repo provenance.
+Crate skeleton complete. MIT license, Cargo.toml (leash-harness 0.1.0), CI workflow at `.github/workflows/ci.yml`, repo provenance. CI has not yet passed (no green build).
 
 ```yaml
 entity: Bootstrap
@@ -270,7 +311,7 @@ properties:
   license:
     type: string
     required: true
-    default: "MIT+trademark"
+    default: "MIT"
   ci_platform:
     type: string
     required: true
@@ -278,7 +319,11 @@ properties:
   crate_name:
     type: string
     required: true
-    default: "leash"
+    default: "leash-harness"
+  features:
+    type: string
+    required: true
+    description: default=sim+http+mcp, waveshare-ugv, bridge-compat
 states: [planned, bootstrapped, ci_green]
 lifecycle: planned → bootstrapped → ci_green
 ```
@@ -400,7 +445,7 @@ relationship: UGVAdapter → Harness
 verb: adapts
 cardinality: 1:1
 required: false
-description: Only when --features ugv is enabled
+description: Only when --features waveshare-ugv and allow_physical_actuation=true
 ```
 
 ### Relationship: Safety → Harness
