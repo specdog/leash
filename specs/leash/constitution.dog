@@ -2,16 +2,17 @@
 
 ## Core Rules
 
-1. Safety gates are non-negotiable. Every motor command passes through motor-limit, estop, and watchdog before reaching hardware.
-2. Feature-gating is mandatory for hardware-specific adapters. The UGV adapter must not compile unless explicitly enabled (`--features ugv`).
-3. The harness runtime is a library first. CLI and MCP server are thin shells around it.
-4. External bridge clients depend on stable interfaces. Existing robot bridge APIs must not break without a compatibility shim.
-5. Smoke tests gate every release. MCP, HTTP, and safety gate smoke tests must pass before any publish.
-6. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands.
-7. Sim-safe by default. The harness must run without hardware present. CI, demos, and blueprint smoke tests require zero physical robots.
-8. Explicit physical actuation gate. Any command that moves a motor must pass an explicit `--live` flag or hardware attestation. Sim mode is the default.
-9. Module graph with typed streams. Every module declares inputs, outputs, lifecycle, and health. Streams are typed and validated at graph construction time.
-10. Replay determinism. Recorded sessions must reproduce identical telemetry when replayed against the same inputs. Replay is a safety and debugging primitive.
-11. Transport abstraction. Module communication works identically across in-process, cross-process, and network transports. No module knows its peer's location.
-12. Blueprint catalog. Every demo, robot config, and replay scenario is a versioned, runnable blueprint. No ad-hoc wiring at runtime.
-13. DimOS parity, not DimOS clone. Leash targets the same operating surface and user stories as DimOS, but in Rust with stronger defaults, local-first execution, and MCP-native agent integration. No Python, no ROS dependency.
+1. Safety gates are non-negotiable. Every motor command passes through deadman, estop, soft-odometry-limit, and physical-actuation-gate before reaching hardware.
+2. Feature-gating is mandatory for hardware-specific adapters. The Waveshare UGV adapter must not compile unless enabled (`--features waveshare-ugv`). Physical profile refuses to start without `--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1`.
+3. The harness runtime is a library first. CLI and MCP server are thin shells around the `Harness` struct.
+4. Pilot token authorization. Drive commands require a valid pilot token with TTL. Tokens expire. Untokened drive is configurable but defaults on for sim.
+5. Deadman switch. If no drive command arrives within `deadman_ms` (default 400ms), motors are automatically stopped. This is a runtime safety gate, not config-level.
+6. Smoke tests gate every release. MCP, HTTP, and physical-gate smoke tests must pass before any publish.
+7. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands — MCP is the agent interface.
+8. Sim-safe by default. The harness must run without hardware present. CI, demos, and smoke tests require zero physical robots. Sim profile logs commands instead of actuating.
+9. Explicit physical actuation gate. Physical profiles (waveshare-ugv) require `allow_physical_actuation: true` in config or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` env var.
+10. Module graph with typed streams (planned). Every module declares inputs, outputs, lifecycle, and health. Streams are typed and validated at graph construction time.
+11. Replay determinism (planned). Recorded sessions must reproduce identical telemetry when replayed against the same inputs. Replay is a safety and debugging primitive.
+12. Transport abstraction (planned). Module communication works identically across in-process, cross-process, and network transports. No module knows its peer's location.
+13. Blueprint catalog (planned). Every demo, robot config, and replay scenario is a versioned, runnable blueprint. No ad-hoc wiring at runtime.
+14. DimOS parity, not DimOS clone. Leash targets the same operating surface and user stories as DimOS, but in Rust with stronger defaults, local-first execution, and MCP-native agent integration. No Python, no ROS dependency.
