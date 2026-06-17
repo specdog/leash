@@ -1,7 +1,8 @@
 # Bot Install
 
 Leash can be installed on a bot host as a user service. The install path is
-source-based for now; release binaries are tracked separately.
+source-based for Ubuntu UGV and Jetson hosts until Linux aarch64 release
+binaries are proven in CI.
 
 ## Sim Install
 

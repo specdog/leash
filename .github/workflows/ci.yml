@@ -15,6 +15,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
       - run: cargo test --no-default-features --features sim,mcp
+      - run: cargo package --locked
       - run: cargo run --quiet -- show-config waveshare-ugv --listen 0.0.0.0:8000 --allow-physical-actuation | node -e 'const fs=require("node:fs"); const config=JSON.parse(fs.readFileSync(0,"utf8")); if (!config.physical || !config.physical_actuation_enabled || config.network_bind !== "0.0.0.0:8000") process.exit(1);'
       - run: scripts/smoke-http.sh
       - run: scripts/smoke-mcp.sh
