@@ -638,6 +638,9 @@ mod tests {
             health.accelerator.active,
             crate::config::AcceleratorBackend::None
         );
+        assert!(health.accelerator.probes.iter().any(|probe| probe.backend
+            == crate::config::AcceleratorBackend::Cpu
+            && probe.available));
         assert_eq!(health.modules.len(), 3);
         assert!(health
             .modules
@@ -661,5 +664,36 @@ mod tests {
             crate::config::AcceleratorBackend::Cpu
         );
         assert!(health.accelerator.available);
+        assert!(health.accelerator.probes.iter().any(|probe| probe.backend
+            == crate::config::AcceleratorBackend::Cpu
+            && probe.selected
+            && probe.available));
+    }
+
+    #[tokio::test]
+    async fn capabilities_include_accelerator_probe_inventory() {
+        let harness = Harness::new(HarnessConfig {
+            accelerator: crate::config::AcceleratorBackend::Cuda,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let capabilities = harness.capabilities();
+        assert_eq!(
+            capabilities.accelerator.requested,
+            crate::config::AcceleratorBackend::Cuda
+        );
+        assert_eq!(
+            capabilities.accelerator.active,
+            crate::config::AcceleratorBackend::Cpu
+        );
+        assert!(capabilities
+            .accelerator
+            .probes
+            .iter()
+            .any(
+                |probe| probe.backend == crate::config::AcceleratorBackend::Cuda
+                    && !probe.available
+            ));
     }
 }
