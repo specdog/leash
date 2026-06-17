@@ -42,7 +42,14 @@ parse_json() {
   node -e 'JSON.parse(require("node:fs").readFileSync(0, "utf8"))' >/dev/null
 }
 
-curl -fsS "$base/health" | parse_json
+assert_health_modules() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("health ok was not true");
+if (!Array.isArray(payload.modules) || payload.modules.length < 3) throw new Error("health modules were missing");
+if (!payload.modules.every((module) => module.state === "running")) throw new Error("not all modules were running");'
+}
+
+curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | parse_json
 curl -fsS "$base/telemetry" | parse_json
 curl -fsS "$base/sensors" | parse_json

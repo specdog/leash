@@ -16,6 +16,6 @@ pub mod types;
 
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{HarnessConfig, Profile};
-pub use module::{ModuleGraph, ModuleInfo, ModuleState};
+pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
 pub use types::{Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame};
