@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use leash_harness::{
     capability::default_capability_descriptors,
-    config::{resolve_config, ConfigRequest, PartialHarnessConfig},
+    config::{resolve_config, AcceleratorBackend, ConfigRequest, PartialHarnessConfig},
     daemon::{
         spawn_daemon, stop_process, tail_file, RunRecord, RunRegistry, StopOutcome,
         DEFAULT_RUN_NAME,
@@ -91,6 +91,12 @@ struct RuntimeArgs {
 
     #[arg(long, action = ArgAction::SetTrue)]
     drive_swap: bool,
+
+    #[arg(long, value_enum)]
+    accelerator: Option<AcceleratorBackend>,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    require_accelerator: bool,
 }
 
 #[derive(Debug, Args)]
@@ -304,6 +310,8 @@ impl RuntimeArgs {
             serial_baud: self.serial_baud,
             drive_invert: self.drive_invert.then_some(true),
             drive_swap: self.drive_swap.then_some(true),
+            accelerator: self.accelerator,
+            require_accelerator: self.require_accelerator.then_some(true),
             ..PartialHarnessConfig::default()
         })
     }
@@ -461,6 +469,8 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
         config.serial_port.clone(),
         "--serial-baud".to_string(),
         config.serial_baud.to_string(),
+        "--accelerator".to_string(),
+        config.accelerator.as_str().to_string(),
     ];
     if config.allow_untokened_drive {
         args.push("--allow-untokened-drive".to_string());
@@ -475,6 +485,9 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     }
     if config.drive_swap {
         args.push("--drive-swap".to_string());
+    }
+    if config.require_accelerator {
+        args.push("--require-accelerator".to_string());
     }
     args
 }

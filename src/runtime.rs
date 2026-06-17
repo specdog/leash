@@ -18,6 +18,7 @@ use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 use crate::{
+    accelerator::{resolve_accelerator, AcceleratorStatus},
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
@@ -170,11 +171,13 @@ pub struct Harness {
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
+    accelerator: AcceleratorStatus,
 }
 
 impl Harness {
     pub fn new(config: HarnessConfig) -> Result<Self> {
         config.validate()?;
+        let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
 
         let driver: Arc<dyn RobotDriver> = match config.profile {
             Profile::Sim => Arc::new(SimDriver),
@@ -203,6 +206,7 @@ impl Harness {
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
             coordinator: Arc::new(RwLock::new(coordinator)),
+            accelerator,
         };
         harness.spawn_deadman();
         harness.spawn_telemetry_loop();
@@ -240,6 +244,7 @@ impl Harness {
                     .ok()
                     .as_deref()
                     == Some("1"),
+            accelerator: self.accelerator.clone(),
             modules: coordinator.graph().modules,
         }
     }
@@ -274,6 +279,7 @@ impl Harness {
                 "modules".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
+            accelerator: self.accelerator.clone(),
             modules: self.coordinator.read().graph().modules,
             capabilities: self.capability_registry().descriptors().to_vec(),
         }
@@ -628,10 +634,32 @@ mod tests {
         let health = harness.health();
 
         assert!(health.ok);
+        assert_eq!(
+            health.accelerator.active,
+            crate::config::AcceleratorBackend::None
+        );
         assert_eq!(health.modules.len(), 3);
         assert!(health
             .modules
             .iter()
             .all(|module| module.state == crate::module::ModuleState::Running));
+    }
+
+    #[tokio::test]
+    async fn cpu_accelerator_is_reported_without_hardware() {
+        let harness = Harness::new(HarnessConfig {
+            accelerator: crate::config::AcceleratorBackend::Cpu,
+            require_accelerator: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let health = harness.health();
+        assert!(health.ok);
+        assert_eq!(
+            health.accelerator.active,
+            crate::config::AcceleratorBackend::Cpu
+        );
+        assert!(health.accelerator.available);
     }
 }

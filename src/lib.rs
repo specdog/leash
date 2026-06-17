@@ -4,6 +4,7 @@
 //! features and also require an explicit runtime gate before any motor command is
 //! allowed to reach hardware.
 
+pub mod accelerator;
 pub mod capability;
 pub mod config;
 pub mod daemon;
@@ -15,8 +16,9 @@ pub mod module;
 pub mod runtime;
 pub mod types;
 
+pub use accelerator::AcceleratorStatus;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
-pub use config::{HarnessConfig, Profile};
+pub use config::{AcceleratorBackend, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
