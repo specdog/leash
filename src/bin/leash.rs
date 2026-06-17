@@ -1,8 +1,11 @@
 use std::net::SocketAddr;
 
-use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
-use leash_harness::{Harness, HarnessConfig, Profile};
+use anyhow::{bail, Result};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use leash_harness::{
+    capability::default_capability_descriptors, module::default_module_graph, Harness,
+    HarnessConfig, Profile,
+};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -19,6 +22,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Serve(Serve),
+    Graph(GraphArgs),
     Health(HttpTarget),
     Stop(HttpTarget),
 }
@@ -85,6 +89,24 @@ struct HttpTarget {
     url: String,
 }
 
+#[derive(Debug, Args)]
+struct GraphArgs {
+    #[arg(default_value = "sim")]
+    blueprint: String,
+
+    #[arg(long, value_enum, default_value_t = GraphFormat::Json)]
+    format: GraphFormat,
+
+    #[arg(long, env = "LEASH_ROLE", default_value = "robot")]
+    role: String,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum GraphFormat {
+    Json,
+    Dot,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
@@ -104,6 +126,13 @@ async fn main() -> Result<()> {
                 leash_harness::http::serve_http(harness, listen).await?;
             }
         },
+        Command::Graph(args) => {
+            let graph = graph_from_args(&args)?;
+            match args.format {
+                GraphFormat::Json => println!("{}", serde_json::to_string_pretty(&graph)?),
+                GraphFormat::Dot => print!("{}", graph.to_dot()),
+            }
+        }
         Command::Health(target) => {
             let value: serde_json::Value =
                 reqwest::get(format!("{}/health", target.url.trim_end_matches('/')))
@@ -127,6 +156,24 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
+    let profile = match args.blueprint.as_str() {
+        "sim" => Profile::Sim,
+        "waveshare-ugv" => Profile::WaveshareUgv,
+        other => bail!("unknown graph target '{other}'; expected sim or waveshare-ugv"),
+    };
+    let capabilities = default_capability_descriptors()
+        .into_iter()
+        .map(|descriptor| descriptor.name)
+        .collect();
+    let config = HarnessConfig {
+        role: args.role.clone(),
+        profile,
+        ..HarnessConfig::default()
+    };
+    Ok(default_module_graph(&config, capabilities))
 }
 
 fn config_from_args(args: RuntimeArgs, listen: Option<SocketAddr>) -> Result<HarnessConfig> {
