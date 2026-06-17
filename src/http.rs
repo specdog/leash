@@ -12,7 +12,7 @@ use axum::{
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time;
 use tower_http::cors::CorsLayer;
@@ -24,13 +24,6 @@ struct PilotTokenReq {
     token: String,
     ttl_secs: Option<u64>,
     speed_mode: Option<SpeedMode>,
-}
-
-#[derive(Debug, Serialize)]
-struct PilotTokenResp {
-    ok: bool,
-    ttl_secs: u64,
-    speed_mode: SpeedMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +52,7 @@ pub fn router(harness: Harness) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/capabilities", get(capabilities))
+        .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
         .route("/sensors", get(sensors))
         .route("/camera/status", get(camera_status))
@@ -85,6 +79,10 @@ async fn capabilities(State(harness): State<Harness>) -> Json<crate::types::Capa
     Json(harness.capabilities())
 }
 
+async fn modules(State(harness): State<Harness>) -> Json<crate::module::ModuleGraph> {
+    Json(harness.module_graph())
+}
+
 async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::TelemetryFrame> {
     Json(harness.telemetry())
 }
@@ -104,58 +102,78 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
     }))
 }
 
-async fn capture(State(harness): State<Harness>) -> Json<crate::types::CaptureResult> {
-    Json(harness.capture())
+async fn capture(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
+    Ok(Json(
+        harness
+            .capability_registry()
+            .invoke_value("capture", json!({}))?,
+    ))
 }
 
 async fn pilot_authorize(
     State(harness): State<Harness>,
     Json(req): Json<PilotTokenReq>,
-) -> Result<Json<PilotTokenResp>, HttpError> {
-    let ttl_secs = req.ttl_secs.unwrap_or(120);
-    let speed_mode = req.speed_mode.unwrap_or_default();
-    harness.authorize(req.token, ttl_secs, speed_mode)?;
-    Ok(Json(PilotTokenResp {
-        ok: true,
-        ttl_secs,
-        speed_mode,
-    }))
+) -> Result<Json<Value>, HttpError> {
+    Ok(Json(harness.capability_registry().invoke_value(
+        "authorize",
+        json!({
+            "token": req.token,
+            "ttl_secs": req.ttl_secs,
+            "speed_mode": req.speed_mode,
+        }),
+    )?))
 }
 
 async fn pilot_speed_mode(
     State(harness): State<Harness>,
     Json(req): Json<SpeedModeReq>,
 ) -> Result<Json<Value>, HttpError> {
-    harness.set_speed_mode(req.token.as_deref(), req.speed_mode)?;
-    Ok(Json(json!({ "ok": true, "speed_mode": req.speed_mode })))
+    Ok(Json(harness.capability_registry().invoke_value(
+        "speed_mode",
+        json!({
+            "token": req.token,
+            "speed_mode": req.speed_mode,
+        }),
+    )?))
 }
 
 async fn drive(
     State(harness): State<Harness>,
     Json(req): Json<DriveReq>,
-) -> Result<Json<crate::types::DriveOutcome>, HttpError> {
-    Ok(Json(harness.drive(
-        req.token.as_deref(),
-        req.left,
-        req.right,
-        req.speed_mode,
+) -> Result<Json<Value>, HttpError> {
+    Ok(Json(harness.capability_registry().invoke_value(
+        "drive",
+        json!({
+            "token": req.token,
+            "left": req.left,
+            "right": req.right,
+            "speed_mode": req.speed_mode,
+        }),
     )?))
 }
 
-async fn motors_stop(
-    State(harness): State<Harness>,
-) -> Result<Json<crate::types::DriveOutcome>, HttpError> {
-    Ok(Json(harness.stop()?))
+async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
+    Ok(Json(
+        harness
+            .capability_registry()
+            .invoke_value("stop", json!({}))?,
+    ))
 }
 
 async fn estop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
-    harness.estop()?;
-    Ok(Json(json!({ "ok": true, "estop": true })))
+    Ok(Json(
+        harness
+            .capability_registry()
+            .invoke_value("estop", json!({}))?,
+    ))
 }
 
-async fn estop_reset(State(harness): State<Harness>) -> Json<Value> {
-    harness.reset_estop();
-    Json(json!({ "ok": true, "estop": false }))
+async fn estop_reset(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
+    Ok(Json(
+        harness
+            .capability_registry()
+            .invoke_value("estop_reset", json!({}))?,
+    ))
 }
 
 async fn stream(State(harness): State<Harness>) -> Response {

@@ -41,6 +41,14 @@ impl LeashMcp {
     }
 
     #[tool(
+        name = "modules",
+        description = "List harness modules and stream metadata"
+    )]
+    pub async fn modules(&self) -> Json<crate::module::ModuleGraph> {
+        Json(self.harness.module_graph())
+    }
+
+    #[tool(
         name = "observe",
         description = "Read the latest telemetry and sensor state"
     )]
@@ -56,48 +64,20 @@ impl LeashMcp {
         &self,
         params: Parameters<InvokeCapabilityParams>,
     ) -> Result<String, String> {
-        let params = params.0;
-        let value = match params.capability.as_str() {
-            "authorize" => {
-                let token = params.token.ok_or("authorize requires token")?;
-                let ttl_secs = params.ttl_secs.unwrap_or(120);
-                let speed_mode = params.speed_mode.unwrap_or_default();
-                self.harness
-                    .authorize(token, ttl_secs, speed_mode)
-                    .map_err(|err| err.to_string())?;
-                serde_json::json!({ "ok": true, "ttl_secs": ttl_secs, "speed_mode": speed_mode })
-            }
-            "drive" => {
-                let left = params.left.ok_or("drive requires left")?;
-                let right = params.right.ok_or("drive requires right")?;
-                serde_json::to_value(
-                    self.harness
-                        .drive(params.token.as_deref(), left, right, params.speed_mode)
-                        .map_err(|err| err.to_string())?,
-                )
-                .map_err(|err| err.to_string())?
-            }
-            "stop" | "motors.stop" => {
-                serde_json::to_value(self.harness.stop().map_err(|err| err.to_string())?)
-                    .map_err(|err| err.to_string())?
-            }
-            "estop" => {
-                self.harness.estop().map_err(|err| err.to_string())?;
-                serde_json::json!({ "ok": true, "estop": true })
-            }
-            "estop_reset" | "estop/reset" => {
-                self.harness.reset_estop();
-                serde_json::json!({ "ok": true, "estop": false })
-            }
-            "speed_mode" => {
-                let speed_mode = params.speed_mode.ok_or("speed_mode requires speed_mode")?;
-                self.harness
-                    .set_speed_mode(params.token.as_deref(), speed_mode)
-                    .map_err(|err| err.to_string())?;
-                serde_json::json!({ "ok": true, "speed_mode": speed_mode })
-            }
-            other => return Err(format!("unknown capability '{other}'")),
-        };
+        let mut args = serde_json::to_value(&params.0).map_err(|err| err.to_string())?;
+        let capability = args
+            .get("capability")
+            .and_then(|value| value.as_str())
+            .ok_or("capability is required")?
+            .to_string();
+        if let Some(object) = args.as_object_mut() {
+            object.remove("capability");
+        }
+        let value = self
+            .harness
+            .capability_registry()
+            .invoke_value(&capability, args)
+            .map_err(|err| err.to_string())?;
         serde_json::to_string_pretty(&value).map_err(|err| err.to_string())
     }
 
@@ -106,7 +86,14 @@ impl LeashMcp {
         description = "Send a non-latching zero-speed motor stop"
     )]
     pub async fn stop(&self) -> Result<Json<crate::types::DriveOutcome>, String> {
-        self.harness.stop().map(Json).map_err(|err| err.to_string())
+        let value = self
+            .harness
+            .capability_registry()
+            .invoke_value("stop", serde_json::json!({}))
+            .map_err(|err| err.to_string())?;
+        serde_json::from_value(value)
+            .map(Json)
+            .map_err(|err| err.to_string())
     }
 
     #[tool(
@@ -114,7 +101,10 @@ impl LeashMcp {
         description = "Latch emergency stop until estop_reset is invoked"
     )]
     pub async fn estop(&self) -> Result<String, String> {
-        self.harness.estop().map_err(|err| err.to_string())?;
+        self.harness
+            .capability_registry()
+            .invoke_value("estop", serde_json::json!({}))
+            .map_err(|err| err.to_string())?;
         Ok("estop latched".to_string())
     }
 
@@ -122,18 +112,30 @@ impl LeashMcp {
         name = "capture",
         description = "Capture a deterministic frame or physical adapter capture metadata"
     )]
-    pub async fn capture(&self) -> Json<crate::types::CaptureResult> {
-        Json(self.harness.capture())
+    pub async fn capture(&self) -> Result<Json<crate::types::CaptureResult>, String> {
+        let value = self
+            .harness
+            .capability_registry()
+            .invoke_value("capture", serde_json::json!({}))
+            .map_err(|err| err.to_string())?;
+        serde_json::from_value(value)
+            .map(Json)
+            .map_err(|err| err.to_string())
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InvokeCapabilityParams {
     pub capability: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub left: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub right: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
 }
 

@@ -18,7 +18,9 @@ use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 use crate::{
+    capability::CapabilityRegistry,
     config::{HarnessConfig, Profile},
+    module::{default_module_graph, ModuleGraph},
     types::{
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, DriveOutcome, Health,
         OdometryStatus, RawFrameStatus, SensorSnapshot, SpeedMode, TelemetryFrame,
@@ -206,6 +208,14 @@ impl Harness {
         self.telemetry_tx.subscribe()
     }
 
+    pub fn capability_registry(&self) -> CapabilityRegistry {
+        CapabilityRegistry::new(self.clone())
+    }
+
+    pub fn module_graph(&self) -> ModuleGraph {
+        default_module_graph(&self.config, self.capability_registry().names())
+    }
+
     pub fn health(&self) -> Health {
         let command = self.command.lock().clone();
         Health {
@@ -250,8 +260,11 @@ impl Harness {
                 "stop".to_string(),
                 "estop".to_string(),
                 "capture".to_string(),
+                "modules".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
+            modules: self.module_graph().modules,
+            capabilities: self.capability_registry().descriptors().to_vec(),
         }
     }
 

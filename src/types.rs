@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{capability::CapabilityDescriptor, module::ModuleInfo};
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +44,8 @@ pub struct Capabilities {
     pub endpoints: Vec<String>,
     pub mcp_tools: Vec<String>,
     pub speed_modes: Vec<SpeedMode>,
+    pub modules: Vec<ModuleInfo>,
+    pub capabilities: Vec<CapabilityDescriptor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
