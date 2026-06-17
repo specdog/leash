@@ -1,10 +1,12 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::{bail, Result};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use leash_harness::{
-    capability::default_capability_descriptors, module::default_module_graph, Harness,
-    HarnessConfig, Profile,
+    capability::default_capability_descriptors,
+    config::{resolve_config, ConfigRequest, PartialHarnessConfig},
+    module::default_module_graph,
+    Harness, HarnessConfig, Profile,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -15,6 +17,9 @@ use tracing_subscriber::EnvFilter;
     about = "Composable local-LLM and robot harness"
 )]
 struct Cli {
+    #[arg(long, env = "LEASH_CONFIG", global = true)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -23,6 +28,7 @@ struct Cli {
 enum Command {
     Serve(Serve),
     Graph(GraphArgs),
+    ShowConfig(ShowConfigArgs),
     Health(HttpTarget),
     Stop(HttpTarget),
 }
@@ -43,34 +49,37 @@ enum Transport {
 
 #[derive(Debug, Args)]
 struct RuntimeArgs {
-    #[arg(long, env = "LEASH_ROLE", default_value = "robot")]
-    role: String,
+    #[arg(long)]
+    role: Option<String>,
 
-    #[arg(long, env = "LEASH_PROFILE", value_enum, default_value_t = Profile::Sim)]
-    profile: Profile,
+    #[arg(long, value_enum)]
+    profile: Option<Profile>,
 
-    #[arg(long, env = "LEASH_ALLOW_UNTOKENED_DRIVE", default_value_t = true)]
+    #[arg(long, action = ArgAction::SetTrue)]
     allow_untokened_drive: bool,
 
-    #[arg(long, env = "LEASH_ALLOW_PHYSICAL_ACTUATION", default_value_t = false)]
+    #[arg(long, action = ArgAction::SetTrue)]
+    no_untokened_drive: bool,
+
+    #[arg(long, action = ArgAction::SetTrue)]
     allow_physical_actuation: bool,
 
-    #[arg(long, env = "LEASH_DEADMAN_MS", default_value_t = 400)]
-    deadman_ms: u64,
+    #[arg(long)]
+    deadman_ms: Option<u64>,
 
-    #[arg(long, env = "LEASH_SOFT_ODOMETRY_LIMIT_M", default_value_t = 0.0)]
-    soft_odometry_limit_m: f64,
+    #[arg(long)]
+    soft_odometry_limit_m: Option<f64>,
 
-    #[arg(long, env = "LEASH_SERIAL_PORT", default_value = "/dev/ttyTHS1")]
-    serial_port: String,
+    #[arg(long)]
+    serial_port: Option<String>,
 
-    #[arg(long, env = "LEASH_SERIAL_BAUD", default_value_t = 115_200)]
-    serial_baud: u32,
+    #[arg(long)]
+    serial_baud: Option<u32>,
 
-    #[arg(long, env = "LEASH_DRIVE_INVERT", default_value_t = false)]
+    #[arg(long, action = ArgAction::SetTrue)]
     drive_invert: bool,
 
-    #[arg(long, env = "LEASH_DRIVE_SWAP", default_value_t = false)]
+    #[arg(long, action = ArgAction::SetTrue)]
     drive_swap: bool,
 }
 
@@ -79,8 +88,8 @@ struct HttpServeArgs {
     #[command(flatten)]
     runtime: RuntimeArgs,
 
-    #[arg(long, env = "LEASH_LISTEN", default_value = "127.0.0.1:8000")]
-    listen: SocketAddr,
+    #[arg(long)]
+    listen: Option<SocketAddr>,
 }
 
 #[derive(Debug, Args)]
@@ -101,6 +110,18 @@ struct GraphArgs {
     role: String,
 }
 
+#[derive(Debug, Args)]
+struct ShowConfigArgs {
+    #[arg(value_enum)]
+    blueprint: Option<Profile>,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+
+    #[arg(long)]
+    listen: Option<SocketAddr>,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum GraphFormat {
     Json,
@@ -116,13 +137,14 @@ async fn main() -> Result<()> {
         Command::Serve(serve) => match serve.transport {
             #[cfg(feature = "mcp")]
             Transport::Mcp(args) => {
-                let harness = Harness::new(config_from_args(args, None)?)?;
+                let harness = Harness::new(config_from_args(args, None, cli.config.clone())?)?;
                 leash_harness::mcp::serve_stdio(harness).await?;
             }
             #[cfg(feature = "http")]
             Transport::Http(args) => {
-                let listen = args.listen;
-                let harness = Harness::new(config_from_args(args.runtime, Some(listen))?)?;
+                let config = config_from_args(args.runtime, args.listen, cli.config.clone())?;
+                let listen = config.listen;
+                let harness = Harness::new(config)?;
                 leash_harness::http::serve_http(harness, listen).await?;
             }
         },
@@ -132,6 +154,18 @@ async fn main() -> Result<()> {
                 GraphFormat::Json => println!("{}", serde_json::to_string_pretty(&graph)?),
                 GraphFormat::Dot => print!("{}", graph.to_dot()),
             }
+        }
+        Command::ShowConfig(args) => {
+            let mut cli_overrides = args.runtime.into_partial_config()?;
+            if let Some(listen) = args.listen {
+                cli_overrides.listen = Some(listen);
+            }
+            let resolved = resolve_config(ConfigRequest::from_process(
+                cli.config.clone(),
+                args.blueprint,
+                cli_overrides,
+            ))?;
+            println!("{}", serde_json::to_string_pretty(&resolved)?);
         }
         Command::Health(target) => {
             let value: serde_json::Value =
@@ -158,6 +192,33 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+impl RuntimeArgs {
+    fn into_partial_config(self) -> Result<PartialHarnessConfig> {
+        if self.allow_untokened_drive && self.no_untokened_drive {
+            bail!("use either --allow-untokened-drive or --no-untokened-drive, not both");
+        }
+        Ok(PartialHarnessConfig {
+            role: self.role,
+            profile: self.profile,
+            allow_untokened_drive: if self.allow_untokened_drive {
+                Some(true)
+            } else if self.no_untokened_drive {
+                Some(false)
+            } else {
+                None
+            },
+            allow_physical_actuation: self.allow_physical_actuation.then_some(true),
+            deadman_ms: self.deadman_ms,
+            soft_odometry_limit_m: self.soft_odometry_limit_m,
+            serial_port: self.serial_port,
+            serial_baud: self.serial_baud,
+            drive_invert: self.drive_invert.then_some(true),
+            drive_swap: self.drive_swap.then_some(true),
+            ..PartialHarnessConfig::default()
+        })
+    }
+}
+
 fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
     let profile = match args.blueprint.as_str() {
         "sim" => Profile::Sim,
@@ -176,20 +237,16 @@ fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
     Ok(default_module_graph(&config, capabilities))
 }
 
-fn config_from_args(args: RuntimeArgs, listen: Option<SocketAddr>) -> Result<HarnessConfig> {
-    Ok(HarnessConfig {
-        role: args.role,
-        profile: args.profile,
-        listen: listen.unwrap_or_else(|| HarnessConfig::default().listen),
-        allow_untokened_drive: args.allow_untokened_drive,
-        allow_physical_actuation: args.allow_physical_actuation,
-        deadman_ms: args.deadman_ms,
-        soft_odometry_limit_m: args.soft_odometry_limit_m,
-        serial_port: args.serial_port,
-        serial_baud: args.serial_baud,
-        drive_invert: args.drive_invert,
-        drive_swap: args.drive_swap,
-    })
+fn config_from_args(
+    args: RuntimeArgs,
+    listen: Option<SocketAddr>,
+    config_path: Option<PathBuf>,
+) -> Result<HarnessConfig> {
+    let mut cli = args.into_partial_config()?;
+    if let Some(listen) = listen {
+        cli.listen = Some(listen);
+    }
+    Ok(resolve_config(ConfigRequest::from_process(config_path, None, cli))?.config)
 }
 
 fn init_tracing() {

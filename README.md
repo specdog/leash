@@ -56,6 +56,20 @@ curl -s http://127.0.0.1:8000/telemetry
 curl -s -X POST http://127.0.0.1:8000/motors/stop
 ```
 
+## Inspect Configuration
+
+Check the resolved runtime config before starting a service:
+
+```bash
+leash show-config
+leash show-config waveshare-ugv --listen 0.0.0.0:8000 --allow-physical-actuation
+```
+
+The output includes each field's source, physical-actuation flags, and network
+bind address. Precedence is default, config file, blueprint default,
+environment, then CLI. If present, `--config` or `LEASH_CONFIG` points at a JSON
+config file.
+
 ## Waveshare UGV Example
 
 The Waveshare Ubuntu UGV adapter is not part of the default build:
@@ -99,7 +113,7 @@ See [docs/BOT_INSTALL.md](docs/BOT_INSTALL.md).
 
 ```bash
 scripts/smoke-http.sh
-scripts/smoke-mcp.py
+scripts/smoke-mcp.sh
 scripts/smoke-physical-gate.sh
 ```
 
@@ -109,4 +123,3 @@ Leash is extracted from the `robot-harness` in
 `https://github.com/0xSoftBoi/onchain-rover`, originally built for the Clanker
 500 / Onchain Rover hackathon project. The sidecar, x402, race UI, and chain
 flows stay in that project and are treated here as examples or integrations.
-
