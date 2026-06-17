@@ -18,9 +18,9 @@ use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 use crate::{
-    capability::CapabilityRegistry,
+    capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
-    module::{default_module_graph, ModuleGraph},
+    module::{default_module_graph, ModuleCoordinator, ModuleGraph},
     types::{
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, DriveOutcome, Health,
         OdometryStatus, RawFrameStatus, SensorSnapshot, SpeedMode, TelemetryFrame,
@@ -169,6 +169,7 @@ pub struct Harness {
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
+    coordinator: Arc<RwLock<ModuleCoordinator>>,
 }
 
 impl Harness {
@@ -185,6 +186,13 @@ impl Harness {
             Profile::WaveshareUgv => RawTelemetry::physical(),
         };
 
+        let capabilities = default_capability_descriptors()
+            .into_iter()
+            .map(|descriptor| descriptor.name)
+            .collect();
+        let mut coordinator = ModuleCoordinator::new(default_module_graph(&config, capabilities));
+        coordinator.start()?;
+
         let (telemetry_tx, _) = broadcast::channel(128);
         let harness = Self {
             config,
@@ -194,6 +202,7 @@ impl Harness {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
+            coordinator: Arc::new(RwLock::new(coordinator)),
         };
         harness.spawn_deadman();
         harness.spawn_telemetry_loop();
@@ -213,13 +222,14 @@ impl Harness {
     }
 
     pub fn module_graph(&self) -> ModuleGraph {
-        default_module_graph(&self.config, self.capability_registry().names())
+        self.coordinator.read().graph()
     }
 
     pub fn health(&self) -> Health {
         let command = self.command.lock().clone();
+        let coordinator = self.coordinator.read();
         Health {
-            ok: true,
+            ok: coordinator.is_healthy(),
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             uptime_ms: self.started_at.elapsed().as_millis(),
@@ -230,6 +240,7 @@ impl Harness {
                     .ok()
                     .as_deref()
                     == Some("1"),
+            modules: coordinator.graph().modules,
         }
     }
 
@@ -263,7 +274,7 @@ impl Harness {
                 "modules".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
-            modules: self.module_graph().modules,
+            modules: self.coordinator.read().graph().modules,
             capabilities: self.capability_registry().descriptors().to_vec(),
         }
     }
@@ -609,5 +620,18 @@ mod tests {
     async fn capture_is_deterministic_for_role() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         assert_eq!(harness.capture().sha256, harness.capture().sha256);
+    }
+
+    #[tokio::test]
+    async fn health_includes_running_module_state() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let health = harness.health();
+
+        assert!(health.ok);
+        assert_eq!(health.modules.len(), 3);
+        assert!(health
+            .modules
+            .iter()
+            .all(|module| module.state == crate::module::ModuleState::Running));
     }
 }
