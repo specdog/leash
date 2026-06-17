@@ -6,9 +6,20 @@ license = "MIT"
 description = "Composable local-LLM and robotics harness with MCP, CLI, and safe robot adapters"
 repository = "https://github.com/specdog/leash"
 homepage = "https://github.com/specdog/leash"
+documentation = "https://docs.rs/leash-harness"
 readme = "README.md"
 keywords = ["mcp", "robotics", "local-llm", "harness", "telemetry"]
 categories = ["command-line-utilities", "development-tools"]
+include = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "LICENSE",
+  "README.md",
+  "docs/**",
+  "examples/**",
+  "scripts/**",
+  "src/**",
+]
 
 [[bin]]
 name = "leash"

@@ -9,17 +9,38 @@ or `--allow-physical-actuation` is set.
 
 ## Install
 
-From source:
+From the current repository checkout:
 
 ```bash
 cargo install --path .
 ```
 
-After publish:
+From GitHub source:
+
+```bash
+cargo install --git https://github.com/specdog/leash leash-harness
+```
+
+After crates.io publish:
 
 ```bash
 cargo install leash-harness
 ```
+
+From a GitHub release archive:
+
+```bash
+version=v0.1.0
+target=x86_64-unknown-linux-gnu
+curl -L -o "leash-$target.tar.gz" \
+  "https://github.com/specdog/leash/releases/download/$version/leash-$target.tar.gz"
+tar -xzf "leash-$target.tar.gz"
+install -m 0755 "leash-$target/leash" "$HOME/.local/bin/leash"
+```
+
+Release binaries start with common desktop targets: Linux x86_64, macOS
+x86_64, macOS arm64, and Windows x86_64. Ubuntu UGV and Jetson installs should
+use the source install path until Linux aarch64 cross-builds are proven.
 
 ## Local LLM / MCP
 
@@ -108,6 +129,8 @@ scripts/install-bot.sh \
 ```
 
 See [docs/BOT_INSTALL.md](docs/BOT_INSTALL.md).
+
+Release steps are tracked in [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Smoke Tests
 
