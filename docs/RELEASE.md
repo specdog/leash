@@ -26,6 +26,17 @@ scripts/smoke-mcp.sh
 scripts/smoke-physical-gate.sh
 ```
 
+Verify the feature matrix before tagging:
+
+```bash
+cargo check --no-default-features --lib
+cargo check
+cargo check --no-default-features --features mcp
+cargo check --no-default-features --features sim,http
+cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,bridge-compat
+cargo check --all-features
+```
+
 Check a bot preflight config before publishing bot-facing notes:
 
 ```bash

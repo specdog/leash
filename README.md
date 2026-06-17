@@ -42,6 +42,27 @@ Release binaries start with common desktop targets: Linux x86_64, macOS
 x86_64, macOS arm64, and Windows x86_64. Ubuntu UGV and Jetson installs should
 use the source install path until Linux aarch64 cross-builds are proven.
 
+## Feature Tiers
+
+Leash keeps the default install simulation-safe. Optional surfaces are grouped
+by feature tier so CI can prove the important build shapes without requiring
+hardware.
+
+| Tier | Cargo features | Surface | Hardware requirement | Release proof |
+| --- | --- | --- | --- | --- |
+| Core library | `--no-default-features --lib` | config resolution, runtime types, capability registry, module graph, accelerator probes | none | `cargo check --no-default-features --lib` |
+| Default runtime | `default` (`sim,http,mcp`) | simulation profile, HTTP server, stdio MCP server, daemon runs | none | `cargo check`; full test and smoke suite |
+| MCP-only | `--no-default-features --features mcp` | stdio MCP tools and JSON schemas | none | `cargo check --no-default-features --features mcp` |
+| HTTP simulation | `--no-default-features --features sim,http` | HTTP routes, WebSocket telemetry, simulation driver | none | `cargo check --no-default-features --features sim,http`; HTTP smoke |
+| Interop bridge | `bridge-compat` | existing bridge/client HTTP compatibility | none unless combined with a physical profile | compile as part of hardware-adapter matrix |
+| Hardware adapter | `waveshare-ugv` with `http,mcp,bridge-compat` for bot installs | Waveshare UGV serial adapter and physical profile | compile-only in CI; live actuation requires `LEASH_ALLOW_PHYSICAL_ACTUATION=1` or `--allow-physical-actuation` | `cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,bridge-compat`; physical-gate smoke |
+| Accelerator placeholder | `cuda` | backend selection and probe inventory | none; no vendor SDK required until a real backend lands | `cargo check --all-features`; accelerator tests |
+
+Reserved roadmap tiers are dashboard, replay, visualization, and perception
+adapters. They are not installable Cargo features yet; each tier should add its
+own feature flag, no-hardware build proof, and smoke coverage when the
+implementation lands.
+
 ## Local LLM / MCP
 
 Run a stdio MCP server:

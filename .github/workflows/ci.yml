@@ -22,3 +22,28 @@ jobs:
       - run: scripts/smoke-mcp.sh
       - run: scripts/smoke-physical-gate.sh
       - run: scripts/smoke-daemon.sh
+
+  feature-matrix:
+    name: feature-matrix (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core-only-lib
+            command: cargo check --no-default-features --lib
+          - name: default
+            command: cargo check
+          - name: mcp-only
+            command: cargo check --no-default-features --features mcp
+          - name: http-sim
+            command: cargo check --no-default-features --features sim,http
+          - name: hardware-adapter
+            command: cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,bridge-compat
+          - name: all-features
+            command: cargo check --all-features
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev
+      - run: ${{ matrix.command }}
