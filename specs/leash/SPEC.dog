@@ -2,79 +2,105 @@
 
 ## Product
 
-A Rust harness runtime for robot control. DimOS-inspired parity surface built Rust-first, MCP-first, simulation-safe. Exposes robot hardware through a CLI/HTTP server and MCP stdio interface. LLM agents command physical robots through pilot-token-authorized sessions. Feature-gated hardware adapters (Waveshare UGV first, then quadrupeds, humanoids, drones, arms). Safety gates at every layer (deadman, estop, soft-odometry-limit, physical-actuation-gate). Sim-safe by default — zero hardware required.
+A Rust harness runtime for robot control. DimOS-inspired parity surface built Rust-first, MCP-first, simulation-safe. LLM agents command physical robots through pilot-token-authorized sessions routed through a shared CapabilityRegistry with safety policy gates. Feature-gated hardware adapters (Waveshare UGV, MAVLink drone, manipulator arm). Safety classes: observe-only, sim-control, physical-stop, physical-motion, physical-high-risk. Blueprint catalog with `leash list` + `leash run`. Sim-safe by default — zero hardware required.
 
 **Product benchmark**: `dimensionalOS/dimos` (3.5k stars, Python). Leash targets the same operating surface in Rust.
 
+## Current State
+
+| Entity | State | Ref |
+|--------|-------|-----|
+| Harness | stabilized | sim+physical drivers, safety gates, telemetry |
+| CLI | implemented | serve mcp\|http, health, stop |
+| MCPServer | implemented | 7 tools via rmcp |
+| UGVAdapter | feature_gated | waveshare-ugv |
+| Safety | implemented | deadman, estop, soft-odometry, smoke scripts |
+| Bootstrap | bootstrapped | crate, license, CI (not yet green) |
+| Telemetry | implemented | broadcast, WS streaming |
+| ReleasePipeline | configured | Cargo.toml metadata |
+
 ## What the User Sees
 
-### Interface: CLI
+### CLI: serve
 
 ```
 $ leash serve mcp
 [leash] profile: sim, role: robot
-[leash] safety gates: deadman(400ms), estop, soft-odometry-limit(0.0m), physical-gate(off)
-[leash] MCP stdio ready
+[leash] safety: deadman(400ms), estop, odometry-limit(0.0m), physical-gate(off)
+[leash] MCP stdio ready (7 tools)
 
 $ leash serve http --listen 127.0.0.1:8000
-[leash] profile: sim, role: robot
-[leash] HTTP server listening on 127.0.0.1:8000
-[leash] endpoints: /health, /capabilities, /telemetry, /drive, /estop, /ws/telemetry, ...
-
-$ leash health --url http://127.0.0.1:8000
-{ "ok": true, "role": "robot", "profile": "sim", "uptime_ms": 12043, "estop": false, ... }
-
-$ leash stop --url http://127.0.0.1:8000
-{ "ok": true, "left": 0.0, "right": 0.0, ... }
+[leash] HTTP server on 127.0.0.1:8000 (16 endpoints + WS)
 ```
 
-### Interface: MCP (LLM Agent)
+### CLI: daemon (planned)
 
 ```
-Tool: health           → harness health and safety state
-Tool: capabilities     → endpoints, MCP tools, speed modes
-Tool: observe          → latest telemetry frame (odometry, battery, sensors)
-Tool: invoke_capability → authorize, drive, stop, estop, estop_reset, speed_mode
-Tool: stop             → non-latching zero-speed motor stop
-Tool: estop            → latch emergency stop
-Tool: capture          → deterministic frame capture (SVG)
+$ leash run --daemon sim-http
+[leash] daemon started (pid 18432), log: ~/.local/state/leash/sim-http.log
+$ leash status
+$ leash log sim-http
+$ leash stop sim-http
 ```
 
-### Interface: HTTP REST
+### CLI: blueprints (planned)
 
 ```
-GET  /health              → Health struct
-GET  /capabilities         → Capabilities struct
-GET  /telemetry            → TelemetryFrame (latest)
-GET  /sensors              → sensor snapshot
-GET  /camera/status        → camera health + stream URLs
-POST /capture              → CaptureResult (SVG frame + sha256)
-POST /pilot/authorize      → { token, ttl_secs, speed_mode } → PilotTokenResp
-POST /pilot/speed-mode     → { token, speed_mode }
-POST /drive                → { token, left, right, speed_mode } → DriveOutcome
-POST /motors/drive         → alias for /drive
-POST /motors/stop          → DriveOutcome (zeroed)
-POST /stop                 → alias for /motors/stop
-POST /estop                → { ok: true, estop: true }
-POST /estop/reset          → { ok: true, estop: false }
-GET  /stream               → SVG frame (image/svg+xml)
-WS   /ws/telemetry         → streaming TelemetryFrame JSON
+$ leash list
+sim-http     sim     http      no-hardware    Sim HTTP harness
+sim-mcp      sim     mcp       no-hardware    Sim MCP harness
+compat-http  sim     http      no-hardware    Bridge compatibility demo
+waveshare-ugv  physical  http  waveshare-ugv  Waveshare UGV (HARDWARE)
+```
+
+### MCP (LLM Agent)
+
+```
+Tool: health, capabilities, observe, invoke_capability, stop, estop, capture
+Planned: patrol_start, patrol_stop, memory_tag, memory_query, nav_set_goal, nav_cancel
+```
+
+### HTTP REST
+
+```
+GET  /health, /capabilities, /telemetry, /sensors, /camera/status, /stream
+POST /capture, /pilot/authorize, /pilot/speed-mode, /drive, /motors/stop, /estop, /estop/reset
+WS   /ws/telemetry
+Planned: /agent/send, /capabilities/list, /policy/check
 ```
 
 ## User Stories
 
-| ID | Story | Pri | Acceptance |
-|----|-------|-----|------------|
-| LS-01 | Operator starts harness with `leash serve mcp` | P0 | MCP stdio ready, tools respond |
-| LS-02 | LLM agent commands rover motor via MCP invoke_capability | P0 | Speed-capped, deadman-enforced drive |
-| LS-03 | Operator hits estop via CLI/MCP | P0 | All motors halt, estop latched until reset |
-| LS-04 | Operator runs sim profile with zero hardware | P0 | Telemetry streams, drive commands log only |
-| LS-05 | Hardware vendor enables Waveshare UGV | P1 | `--features waveshare-ugv` + `--allow-physical-actuation` |
-| LS-06 | CI smoke-tests MCP, HTTP, and physical gate | P1 | `smoke-http.sh`, `smoke-mcp.py`, `smoke-physical-gate.sh` |
-| LS-07 | Package published to crates.io | P2 | `cargo install leash-harness` works |
-| LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
-| LS-09 | Developer defines a module with typed inputs/outputs | P1 | Module appears in module graph with correct streams |
-| LS-10 | Operator runs a blueprint in sim mode | P1 | Full nav pipeline executes without hardware |
-| LS-11 | Developer replays a recorded session | P2 | Replay reproduces exact telemetry stream |
-| LS-12 | Operator views live telemetry via WebSocket | P0 | `ws://127.0.0.1:8000/ws/telemetry` streams frames |
-| LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |
+| ID | Story | Pri | Issue |
+|----|-------|-----|-------|
+| LS-01 | Operator starts harness with `leash serve mcp` | P0 | #5, #6 |
+| LS-02 | LLM agent commands rover via MCP invoke_capability | P0 | #6 |
+| LS-03 | Operator hits estop via CLI/MCP | P0 | #5 |
+| LS-04 | Operator runs sim profile with zero hardware | P0 | #3, #4 |
+| LS-05 | Hardware vendor enables Waveshare UGV adapter | P1 | #7 |
+| LS-06 | CI smoke-tests MCP, HTTP, and physical gate | P1 | #10 |
+| LS-07 | Package published to crates.io | P2 | #9 |
+| LS-08 | Binary release on GitHub | P2 | #9 |
+| LS-09 | Developer discovers blueprints with `leash list` | P1 | #16 |
+| LS-10 | Operator runs a blueprint with `leash run` | P1 | #15 |
+| LS-11 | Operator manages daemon lifecycle (status, log, stop, restart) | P1 | #18 |
+| LS-12 | Operator inspects config with `leash show-config` | P2 | #19 |
+| LS-13 | Developer defines typed module with coordinator lifecycle | P1 | #13, #17 |
+| LS-14 | Developer wires modules via transport backends | P2 | #22 |
+| LS-15 | Operator views live telemetry via WebSocket/SSE | P1 | #23 |
+| LS-16 | Developer replays recorded sensor session | P2 | #24 |
+| LS-17 | LLM agent sends one-shot command via `leash agent-send` | P1 | #28 |
+| LS-18 | Developer configures model provider for agent | P1 | #29 |
+| LS-19 | Capability invocation checked against safety policy | P0 | #27, #30 |
+| LS-20 | Operator views command center dashboard | P2 | #31 |
+| LS-21 | Developer uses occupancy-grid + costmap messages | P2 | #33 |
+| LS-22 | Sim waypoint router navigates to goal | P2 | #34 |
+| LS-23 | Agent triggers patrol in simulation | P2 | #35 |
+| LS-24 | Agent tags and recalls spatial memory locations | P2 | #36 |
+| LS-25 | Developer adds perception adapter | P2 | #37 |
+| LS-26 | Vendor adds hardware adapter via plugin boundary | P2 | #38 |
+| LS-27 | Developer enables MAVLink drone adapter | P2 | #39 |
+| LS-28 | Developer enables manipulator adapter + teleop | P2 | #40 |
+| LS-29 | Integrator consumes cross-language message schemas | P2 | #41 |
+| LS-30 | Release manager verifies feature tier matrix | P2 | #42 |
+| LS-31 | Release gate: full no-hardware smoke suite passes | P1 | #43 |
