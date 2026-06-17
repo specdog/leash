@@ -16,7 +16,7 @@ pub mod module;
 pub mod runtime;
 pub mod types;
 
-pub use accelerator::AcceleratorStatus;
+pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
