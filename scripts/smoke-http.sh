@@ -4,6 +4,7 @@ set -euo pipefail
 port="${LEASH_SMOKE_PORT:-18080}"
 base="http://127.0.0.1:$port"
 log_file="$(mktemp -t leash-http-smoke.XXXXXX.log)"
+policy_response="$(mktemp -t leash-http-policy.XXXXXX.json)"
 timeout_secs="${LEASH_SMOKE_TIMEOUT_SECS:-60}"
 
 cleanup() {
@@ -11,11 +12,11 @@ cleanup() {
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
-  rm -f "$log_file"
+  rm -f "$log_file" "$policy_response"
 }
 trap cleanup EXIT
 
-cargo run --quiet -- serve http --profile sim --listen "127.0.0.1:$port" >"$log_file" 2>&1 &
+cargo run --quiet -- serve http --profile sim --no-untokened-drive --listen "127.0.0.1:$port" >"$log_file" 2>&1 &
 server_pid=$!
 
 ready=false
@@ -49,10 +50,43 @@ if (!Array.isArray(payload.modules) || payload.modules.length < 3) throw new Err
 if (!payload.modules.every((module) => module.state === "running")) throw new Error("not all modules were running");'
 }
 
+assert_policy_denial() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== false) throw new Error("policy denial did not return ok=false");
+if (!String(payload.error || "").includes("missing pilot token")) throw new Error(`unexpected policy error: ${payload.error}`);'
+}
+
+assert_drive_outcome() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("drive outcome ok was not true");
+if (payload.left <= 0 || payload.right <= 0) throw new Error("drive outcome did not move in simulation");
+if (payload.speed_mode !== "low") throw new Error(`unexpected speed mode: ${payload.speed_mode}`);'
+}
+
 curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | parse_json
+curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | parse_json
 curl -fsS "$base/sensors" | parse_json
+curl -fsS -X POST "$base/capture" | parse_json
+
+policy_status="$(curl -sS -o "$policy_response" -w "%{http_code}" \
+  -X POST "$base/drive" \
+  -H "content-type: application/json" \
+  --data '{"left":0.2,"right":0.2}')"
+if [[ "$policy_status" != "400" ]]; then
+  echo "expected drive without a pilot token to return HTTP 400, got $policy_status" >&2
+  cat "$policy_response" >&2
+  exit 1
+fi
+assert_policy_denial <"$policy_response"
+
+curl -fsS -X POST "$base/pilot/authorize" \
+  -H "content-type: application/json" \
+  --data '{"token":"smoke-token","ttl_secs":30,"speed_mode":"low"}' | parse_json
+curl -fsS -X POST "$base/drive" \
+  -H "content-type: application/json" \
+  --data '{"token":"smoke-token","left":0.2,"right":0.2}' | assert_drive_outcome
 curl -fsS -X POST "$base/motors/stop" | parse_json
 
 echo "http smoke ok: $base"
