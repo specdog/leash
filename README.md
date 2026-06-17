@@ -1,6 +1,6 @@
 # Leash
 
-Leash turns a hackathon robot harness into a downloadable local-LLM tool.
+Leash is a Rust harness runtime for robot control and local-LLM tools.
 It ships as the `leash-harness` Rust crate and installs a `leash` binary.
 
 The default runtime is simulation-safe. Physical robot adapters are optional
@@ -109,3 +109,4 @@ Leash is extracted from the `robot-harness` in
 `https://github.com/0xSoftBoi/onchain-rover`, originally built for the Clanker
 500 / Onchain Rover hackathon project. The sidecar, x402, race UI, and chain
 flows stay in that project and are treated here as examples or integrations.
+

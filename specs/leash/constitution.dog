@@ -1,0 +1,10 @@
+# Leash Constitution
+
+## Core Rules
+
+1. Safety gates are non-negotiable. Every motor command passes through motor-limit, estop, and watchdog before reaching hardware.
+2. Feature-gating is mandatory for hardware-specific adapters. The UGV adapter must not compile unless explicitly enabled (`--features ugv`).
+3. The harness runtime is a library first. CLI and MCP server are thin shells around it.
+4. External bridge clients depend on stable interfaces. Existing robot bridge APIs must not break without a compatibility shim.
+5. Smoke tests gate every release. MCP, HTTP, and safety gate smoke tests must pass before any publish.
+6. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands.

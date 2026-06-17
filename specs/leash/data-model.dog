@@ -1,0 +1,258 @@
+# Leash — Data Model
+
+## Entities
+
+### Entity: Harness
+
+The core Rust runtime library. Reads hardware config, manages safety gates, routes commands to adapters.
+
+```yaml
+entity: Harness
+type: entity
+properties:
+  name:
+    type: string
+    required: true
+  adapters:
+    type: string
+    required: true
+    description: Feature-gated adapter list
+  safety_gates:
+    type: string
+    required: true
+    description: Active safety gate stack
+states: [planned, mapped, extracted, stabilized, released]
+lifecycle: planned → mapped → extracted → stabilized → released
+```
+
+### Entity: CLI
+
+Command-line interface and localhost HTTP compatibility server. Thin shell around the harness.
+
+```yaml
+entity: CLI
+type: entity
+properties:
+  http_port:
+    type: number
+    required: true
+    default: 9000
+  commands:
+    type: string
+    required: true
+    description: Subcommands (serve, status, estop)
+states: [planned, implemented, tested, released]
+lifecycle: planned → implemented → tested → released
+```
+
+### Entity: MCPServer
+
+MCP stdio server exposing robot tools to local LLM clients. Tool set: motor, sensor, estop, status.
+
+```yaml
+entity: MCPServer
+type: entity
+properties:
+  tools:
+    type: string
+    required: true
+    description: Exposed MCP tool list
+  transport:
+    type: enum
+    required: true
+    values: [stdio]
+states: [planned, implemented, tested, released]
+lifecycle: planned → implemented → tested → released
+```
+
+### Entity: UGVAdapter
+
+Feature-gated Waveshare Ubuntu UGV hardware adapter. Only compiles when `--features ugv` is set.
+
+```yaml
+entity: UGVAdapter
+type: entity
+properties:
+  target:
+    type: string
+    required: true
+    default: "Waveshare Ubuntu UGV"
+  feature_flag:
+    type: string
+    required: true
+    default: "ugv"
+  motor_channels:
+    type: number
+    required: true
+    default: 4
+states: [planned, implemented, feature_gated, documented]
+lifecycle: planned → implemented → feature_gated → documented
+```
+
+### Entity: Bridge
+
+Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime.
+
+```yaml
+entity: Bridge
+type: entity
+properties:
+  clients:
+    type: string
+    required: true
+    description: Supported bridge client list
+  shim_layer:
+    type: string
+    required: true
+    description: Compatibility shim path
+states: [planned, mapped, documented, tested]
+lifecycle: planned → mapped → documented → tested
+```
+
+### Entity: Safety
+
+Smoke-test scripts for MCP, HTTP, and safety gate verification. Gates every release.
+
+```yaml
+entity: Safety
+type: entity
+properties:
+  test_targets:
+    type: string
+    required: true
+    description: MCP, HTTP, safety-gates
+  feature_flag:
+    type: string
+    required: true
+    default: "smoke"
+states: [planned, implemented, verified]
+lifecycle: planned → implemented → verified
+```
+
+### Entity: ReleasePipeline
+
+Packages the harness for crates.io and GitHub binary releases.
+
+```yaml
+entity: ReleasePipeline
+type: entity
+properties:
+  targets:
+    type: string
+    required: true
+    description: crates.io, GitHub binaries
+  platforms:
+    type: string
+    required: true
+    description: linux-x86_64, macos-arm64
+states: [planned, configured, publishing]
+lifecycle: planned → configured → publishing
+```
+
+### Entity: Bootstrap
+
+Crate skeleton, license (MIT+trademark), CI pipeline, repo provenance.
+
+```yaml
+entity: Bootstrap
+type: entity
+properties:
+  license:
+    type: string
+    required: true
+    default: "MIT+trademark"
+  ci_platform:
+    type: string
+    required: true
+    default: "GitHub Actions"
+  crate_name:
+    type: string
+    required: true
+    default: "leash"
+states: [planned, bootstrapped, ci_green]
+lifecycle: planned → bootstrapped → ci_green
+```
+
+## Relationships
+
+### Relationship: Bootstrap → Harness
+
+```yaml
+relationship: Bootstrap → Harness
+verb: provisions
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Harness → CLI
+
+```yaml
+relationship: Harness → CLI
+verb: powers
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Harness → MCPServer
+
+```yaml
+relationship: Harness → MCPServer
+verb: powers
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Harness → Bridge
+
+```yaml
+relationship: Harness → Bridge
+verb: exposes_through
+cardinality: 1:many
+required: true
+```
+
+### Relationship: UGVAdapter → Harness
+
+```yaml
+relationship: UGVAdapter → Harness
+verb: adapts
+cardinality: 1:1
+required: false
+description: Only when --features ugv is enabled
+```
+
+### Relationship: Safety → Harness
+
+```yaml
+relationship: Safety → Harness
+verb: gates
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Safety → UGVAdapter
+
+```yaml
+relationship: Safety → UGVAdapter
+verb: gates
+cardinality: 1:1
+required: false
+```
+
+### Relationship: ReleasePipeline → Harness
+
+```yaml
+relationship: ReleasePipeline → Harness
+verb: packages
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Bridge → CLI
+
+```yaml
+relationship: Bridge → CLI
+verb: documents_for
+cardinality: many:1
+required: true
+```
