@@ -19,3 +19,4 @@ jobs:
       - run: scripts/smoke-http.sh
       - run: scripts/smoke-mcp.sh
       - run: scripts/smoke-physical-gate.sh
+      - run: scripts/smoke-daemon.sh

@@ -56,6 +56,33 @@ curl -s http://127.0.0.1:8000/telemetry
 curl -s -X POST http://127.0.0.1:8000/motors/stop
 ```
 
+## Daemon Runs
+
+Start a simulation HTTP run in the background:
+
+```bash
+leash run --daemon --profile sim --listen 127.0.0.1:8000
+```
+
+Inspect and manage it:
+
+```bash
+leash status
+leash log
+leash restart
+leash stop
+```
+
+Run records and logs are stored under `LEASH_STATE_DIR`, or the XDG state
+directory when `LEASH_STATE_DIR` is unset. Use a run name when multiple local
+runtimes are active:
+
+```bash
+leash run bench --daemon --profile sim --listen 127.0.0.1:8010
+leash status bench
+leash stop bench
+```
+
 ## Inspect Configuration
 
 Check the resolved runtime config before starting a service:
@@ -115,6 +142,7 @@ See [docs/BOT_INSTALL.md](docs/BOT_INSTALL.md).
 scripts/smoke-http.sh
 scripts/smoke-mcp.sh
 scripts/smoke-physical-gate.sh
+scripts/smoke-daemon.sh
 ```
 
 ## Provenance
