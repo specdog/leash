@@ -104,6 +104,10 @@ needs deterministic in-process delivery.
 transport-backed envelope: latest telemetry, health/module state, command state,
 and safety state.
 
+`leash_harness::stream_processing` provides generic helpers for high-rate
+streams: latest-value backpressure, per-key rate limiting, quality filtering,
+and timestamp pairing within a tolerance window.
+
 Run narrower checks when you need to isolate one surface:
 
 ```bash
@@ -121,6 +125,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Stack catalog: `leash list` + `leash run`
 - [ ] Replay engine: deterministic sensor record + playback
 - [x] Transport abstraction: memory + local async pubsub
+- [x] Stream processing helpers: latest-value backpressure, quality filters, timestamp pairing
 - [ ] Cross-process and network transports
 - [ ] MAVLink drone + manipulator adapters
 - [ ] Localhost command center dashboard

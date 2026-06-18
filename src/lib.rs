@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod module;
 pub mod runtime;
 pub mod stack;
+pub mod stream_processing;
 pub mod transport;
 pub mod types;
 
@@ -25,6 +26,10 @@ pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
 pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
+pub use stream_processing::{
+    pair_by_timestamp, select_best_frame, FrameQuality, LatestValue, QualityDecision,
+    QualityFilter, RateLimiter, TimestampPair, Timestamped,
+};
 pub use transport::{
     new_stream_transport, StreamMessage, StreamRecvError, StreamSubscriber, StreamTransport,
     StreamTransportBackend,
