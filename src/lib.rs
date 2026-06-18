@@ -40,5 +40,6 @@ pub use transport::{
     StreamTransportBackend,
 };
 pub use types::{
-    Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+    Capabilities, CaptureResult, Health, ResourceSample, RunLogEntry, SpeedMode, TelemetryFrame,
+    TelemetryStreamFrame,
 };

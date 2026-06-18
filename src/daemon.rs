@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    fs::File,
     fs::OpenOptions,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -11,6 +12,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub const DEFAULT_RUN_NAME: &str = "default";
 
@@ -146,24 +148,34 @@ pub fn state_dir_from_env(env: &BTreeMap<String, String>) -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".local/state/leash"))
 }
 
-pub fn spawn_daemon(executable: &Path, args: &[String], log_path: &Path) -> Result<u32> {
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .with_context(|| format!("open log {}", log_path.display()))?;
+pub fn spawn_daemon(
+    executable: &Path,
+    args: &[String],
+    log_path: &Path,
+    run_id: &str,
+) -> Result<u32> {
+    let stdout = open_log_append(log_path)?;
     let stderr = stdout.try_clone()?;
     let child = Command::new(executable)
         .args(args)
+        .env("LEASH_RUN_ID", run_id)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
         .with_context(|| format!("spawn {}", executable.display()))?;
     Ok(child.id())
+}
+
+fn open_log_append(log_path: &Path) -> Result<File> {
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .with_context(|| format!("open log {}", log_path.display()))
 }
 
 pub fn stop_process(pid: u32, graceful_timeout: Duration) -> Result<StopOutcome> {
@@ -209,6 +221,36 @@ pub fn tail_file(path: &Path, lines: usize) -> Result<String> {
     let mut selected = text.lines().rev().take(lines).collect::<Vec<_>>();
     selected.reverse();
     Ok(selected.join("\n"))
+}
+
+pub fn tail_jsonl_file(path: &Path, lines: usize, module_filter: Option<&str>) -> Result<String> {
+    if lines == 0 || !path.exists() {
+        return Ok(String::new());
+    }
+    let text = fs::read_to_string(path)?;
+    let mut selected = text
+        .lines()
+        .filter_map(|line| parse_log_line(line, module_filter))
+        .collect::<Vec<_>>();
+    if selected.len() > lines {
+        selected = selected.split_off(selected.len() - lines);
+    }
+    Ok(selected.join("\n"))
+}
+
+fn parse_log_line(line: &str, module_filter: Option<&str>) -> Option<String> {
+    let value = serde_json::from_str::<Value>(line).ok()?;
+    if let Some(module_filter) = module_filter {
+        let module = value.get("module")?.as_str()?;
+        if !module_matches(module, module_filter) {
+            return None;
+        }
+    }
+    serde_json::to_string(&value).ok()
+}
+
+fn module_matches(module: &str, filter: &str) -> bool {
+    module == filter || module.rsplit("::").next() == Some(filter)
 }
 
 pub fn now_ms() -> u128 {
@@ -299,6 +341,43 @@ mod tests {
         let path = dir.join("run.log");
         fs::write(&path, "one\ntwo\nthree\n").unwrap();
         assert_eq!(tail_file(&path, 2).unwrap(), "two\nthree");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_log_append_creates_parent_dir() {
+        let dir = temp_dir("log-path");
+        let path = dir.join("nested").join("run.log");
+
+        drop(open_log_append(&path).unwrap());
+
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tail_jsonl_file_filters_by_module_and_line_count() {
+        let dir = temp_dir("jsonl-tail");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("run.log");
+        fs::write(
+            &path,
+            [
+                r#"{"timestamp":1,"run_id":"smoke","module":"leash_harness::http","event":"ready","level":"info","fields":{}}"#,
+                r#"{"timestamp":2,"run_id":"smoke","module":"leash_harness::runtime","event":"tick","level":"debug","fields":{}}"#,
+                r#"{"timestamp":3,"run_id":"smoke","module":"leash_harness::runtime","event":"drive","level":"info","fields":{}}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let text = tail_jsonl_file(&path, 1, Some("runtime")).unwrap();
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1);
+        let value: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(value["event"], "drive");
+        assert_eq!(value["module"], "leash_harness::runtime");
+
         let _ = fs::remove_dir_all(dir);
     }
 

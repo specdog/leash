@@ -20,7 +20,7 @@ leash/
   specs/leash/          dotdog specs
     SPEC.dog            Project overview + user stories
     constitution.dog    Safety + feature-gating rules
-    data-model.dog      8 entities, 9 edges
+    data-model.dog      27 entities, 42 edges
     leash.dag           Compiled (agent reads this)
   crates/               Rust workspace (planned)
 ```

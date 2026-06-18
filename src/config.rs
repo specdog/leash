@@ -71,6 +71,7 @@ pub struct HarnessConfig {
     pub drive_swap: bool,
     pub accelerator: AcceleratorBackend,
     pub require_accelerator: bool,
+    pub resource_sampling: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -109,6 +110,8 @@ pub struct PartialHarnessConfig {
     pub accelerator: Option<AcceleratorBackend>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_accelerator: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_sampling: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +190,7 @@ struct ConfigBuilder {
     drive_swap: Resolved<bool>,
     accelerator: Resolved<AcceleratorBackend>,
     require_accelerator: Resolved<bool>,
+    resource_sampling: Resolved<bool>,
     config_file: Option<String>,
 }
 
@@ -209,6 +213,7 @@ impl Default for HarnessConfig {
             drive_swap: false,
             accelerator: AcceleratorBackend::None,
             require_accelerator: false,
+            resource_sampling: false,
         }
     }
 }
@@ -302,6 +307,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         drive_swap: parse_env(env, "LEASH_DRIVE_SWAP", parse_bool)?,
         accelerator: parse_env(env, "LEASH_ACCELERATOR", parse_accelerator)?,
         require_accelerator: parse_env(env, "LEASH_REQUIRE_ACCELERATOR", parse_bool)?,
+        resource_sampling: parse_env(env, "LEASH_RESOURCE_SAMPLING", parse_bool)?,
     })
 }
 
@@ -387,6 +393,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "drive_swap" => "LEASH_DRIVE_SWAP",
         "accelerator" => "LEASH_ACCELERATOR",
         "require_accelerator" => "LEASH_REQUIRE_ACCELERATOR",
+        "resource_sampling" => "LEASH_RESOURCE_SAMPLING",
         _ => "LEASH_UNKNOWN",
     }
 }
@@ -411,6 +418,7 @@ impl Default for ConfigBuilder {
             drive_swap: Resolved::defaulted(config.drive_swap),
             accelerator: Resolved::defaulted(config.accelerator),
             require_accelerator: Resolved::defaulted(config.require_accelerator),
+            resource_sampling: Resolved::defaulted(config.resource_sampling),
             config_file: None,
         }
     }
@@ -488,6 +496,10 @@ impl ConfigBuilder {
             self.require_accelerator
                 .set(value, source("require_accelerator"));
         }
+        if let Some(value) = partial.resource_sampling {
+            self.resource_sampling
+                .set(value, source("resource_sampling"));
+        }
     }
 
     fn apply_profile_defaults(&mut self) {
@@ -521,6 +533,7 @@ impl ConfigBuilder {
             drive_swap: self.drive_swap.value,
             accelerator: self.accelerator.value,
             require_accelerator: self.require_accelerator.value,
+            resource_sampling: self.resource_sampling.value,
         };
         let physical = config.profile.is_physical();
         let physical_actuation_enabled = config.allow_physical_actuation;
@@ -619,6 +632,12 @@ impl ConfigBuilder {
                 json!(config.require_accelerator),
                 self.require_accelerator.source,
                 config.require_accelerator.then_some("accelerator-required"),
+            ),
+            field(
+                "resource_sampling",
+                json!(config.resource_sampling),
+                self.resource_sampling.source,
+                config.resource_sampling.then_some("resource-monitor"),
             ),
         ];
 
@@ -775,6 +794,26 @@ mod config_tests {
             source_for(&resolved, "stream_transport"),
             "env:LEASH_STREAM_TRANSPORT"
         );
+    }
+
+    #[test]
+    fn resolves_resource_sampling_from_env_and_cli() {
+        let env = BTreeMap::from([("LEASH_RESOURCE_SAMPLING".to_string(), "true".to_string())]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig {
+                resource_sampling: Some(false),
+                ..PartialHarnessConfig::default()
+            },
+        })
+        .unwrap();
+
+        assert!(!resolved.config.resource_sampling);
+        assert_eq!(source_for(&resolved, "resource_sampling"), "cli");
+        assert_eq!(attention_for(&resolved, "resource_sampling"), None);
     }
 
     #[test]
