@@ -187,7 +187,7 @@ lifecycle: implemented → verified → active
 ```
 
 ### Entity: CLI
-CLI + HTTP server. Subcommands: serve (mcp|http), record, replay, health, stop. 16 REST + WS endpoints.
+CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), mcp list-tools/call/status/modules, record, replay, health, stop. 16 REST + WS endpoints plus MCP HTTP JSON endpoints.
 
 ```yaml
 entity: CLI
@@ -200,17 +200,17 @@ properties:
   commands:
     type: string
     required: true
-    description: serve (mcp|http), record, replay, health, stop
+    description: serve (mcp|mcp-http|http), mcp list-tools/call/status/modules, record, replay, health, stop
   http_endpoints:
     type: string
     required: true
-    description: health, capabilities, telemetry, drive, estop, ws/telemetry, ...
+    description: health, capabilities, telemetry, drive, estop, ws/telemetry, mcp/tools, mcp/call, ...
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: MCPServer
-MCP stdio server (rmcp). 7 tools.
+MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.
 
 ```yaml
 entity: MCPServer
@@ -219,11 +219,11 @@ properties:
   tools:
     type: string
     required: true
-    description: health, capabilities, observe, invoke_capability, stop, estop, capture
+    description: health, capabilities, modules, observe, invoke_capability, stop, estop, capture
   transport:
     type: enum
     required: true
-    values: [stdio]
+    values: [stdio, mcp-http]
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
@@ -294,7 +294,7 @@ properties:
   smoke_scripts:
     type: string
     required: true
-    description: smoke-http.sh, smoke-mcp.py, smoke-physical-gate.sh
+    description: smoke-http.sh, smoke-mcp.sh, smoke-mcp-http.sh, smoke-physical-gate.sh
   policy:
     type: boolean
     required: true

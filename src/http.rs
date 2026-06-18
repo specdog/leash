@@ -51,6 +51,15 @@ pub async fn serve_http(harness: Harness, listen: SocketAddr) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "mcp")]
+pub async fn serve_mcp_http(harness: Harness, listen: SocketAddr) -> Result<()> {
+    let app = mcp_router(harness);
+    let listener = tokio::net::TcpListener::bind(listen).await?;
+    tracing::info!(addr = %listener.local_addr()?, "leash mcp http listening");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
 pub fn router(harness: Harness) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -76,6 +85,24 @@ pub fn router(harness: Harness) -> Router {
         .layer(CorsLayer::permissive())
 }
 
+#[cfg(feature = "mcp")]
+pub fn mcp_router(harness: Harness) -> Router {
+    Router::new()
+        .route("/", get(mcp_status))
+        .route("/status", get(mcp_status))
+        .route("/tools", get(mcp_tools))
+        .route("/list-tools", get(mcp_tools))
+        .route("/modules", get(mcp_modules))
+        .route("/call", post(mcp_call))
+        .route("/mcp/status", get(mcp_status))
+        .route("/mcp/tools", get(mcp_tools))
+        .route("/mcp/list-tools", get(mcp_tools))
+        .route("/mcp/modules", get(mcp_modules))
+        .route("/mcp/call", post(mcp_call))
+        .with_state(harness)
+        .layer(CorsLayer::permissive())
+}
+
 async fn health(State(harness): State<Harness>) -> Json<crate::types::Health> {
     Json(harness.health())
 }
@@ -86,6 +113,33 @@ async fn capabilities(State(harness): State<Harness>) -> Json<crate::types::Capa
 
 async fn modules(State(harness): State<Harness>) -> Json<crate::module::ModuleGraph> {
     Json(harness.module_graph())
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_status(State(harness): State<Harness>) -> Json<crate::mcp::McpStatus> {
+    Json(crate::mcp::status(&harness, "mcp-http"))
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_tools() -> Json<crate::mcp::McpToolList> {
+    Json(crate::mcp::tool_list())
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_modules(State(harness): State<Harness>) -> Json<crate::mcp::McpModuleToolMap> {
+    Json(crate::mcp::module_tool_map(&harness))
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_call(
+    State(harness): State<Harness>,
+    Json(req): Json<McpCallReq>,
+) -> Result<Json<crate::mcp::McpCallResponse>, HttpError> {
+    Ok(Json(crate::mcp::call_tool(
+        &harness,
+        &req.tool,
+        req.args.unwrap_or_else(|| json!({})),
+    )?))
 }
 
 async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::TelemetryFrame> {
@@ -291,6 +345,13 @@ fn stream_error_text(kind: &str, message: &str) -> String {
 
 #[derive(Debug)]
 struct HttpError(anyhow::Error);
+
+#[cfg(feature = "mcp")]
+#[derive(Debug, Deserialize)]
+struct McpCallReq {
+    tool: String,
+    args: Option<Value>,
+}
 
 impl<E> From<E> for HttpError
 where

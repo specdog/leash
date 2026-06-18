@@ -9,12 +9,13 @@ cargo install leash-harness
 leash list               # built-in stacks
 leash run sim-mcp        # MCP stdio for LLM agents
 leash run sim-http       # localhost HTTP + WebSocket
+leash serve mcp-http     # localhost MCP JSON control surface
 ```
 
 ## Why Leash
 
 - **Simulation-safe by default.** CI, demos, and smoke tests require zero hardware. Physical actuation is an explicit opt-in gate.
-- **MCP-native.** Agents get 7 typed tools (health, capabilities, observe, invoke_capability, stop, estop, capture) over stdio.
+- **MCP-native.** Agents get 8 typed tools (health, capabilities, modules, observe, invoke_capability, stop, estop, capture) over stdio or localhost MCP HTTP.
 - **Safety gates at every layer.** Deadman switch, estop, soft odometry limits, physical actuation gate. Policy-gated capability invocation.
 - **Feature-gated hardware.** Waveshare UGV today, MAVLink drone + manipulator planned. No hardware compiles without explicit `--features`.
 - **Stack catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <stack>`.
@@ -41,6 +42,9 @@ leash run sim-http
 leash run sim-http --daemon
 leash log sim-http --json --module http --lines 20
 
+# Run MCP HTTP for agent or CLI tooling
+leash serve mcp-http --listen 127.0.0.1:9990
+
 # Check health
 leash health --url http://127.0.0.1:8000
 
@@ -54,11 +58,28 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 |------|-------------|
 | `health` | Harness health and safety state |
 | `capabilities` | Endpoints, MCP tools, speed modes |
+| `modules` | Module graph and stream metadata |
 | `observe` | Latest telemetry frame (odometry, battery, sensors) |
 | `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode |
 | `stop` | Non-latching zero-speed motor stop |
 | `estop` | Latch emergency stop until reset |
 | `capture` | Deterministic frame capture |
+
+## MCP HTTP And CLI
+
+```bash
+leash serve mcp-http --listen 127.0.0.1:9990
+leash mcp list-tools
+leash mcp status --url http://127.0.0.1:9990
+leash mcp modules
+leash mcp call health
+leash mcp call invoke_capability capability=authorize token=demo ttl_secs=30
+leash mcp call invoke_capability --json '{"capability":"speed_mode","speed_mode":"low"}'
+```
+
+`/mcp/tools`, `/mcp/status`, `/mcp/modules`, and `/mcp/call` return JSON for
+local agents and automation. Module/tool mapping exposes tool names by module
+without returning pilot session tokens.
 
 ## HTTP Endpoints
 
@@ -92,8 +113,8 @@ scripts/smoke-all.sh
 
 `scripts/smoke-all.sh` runs the no-hardware release proof and prints a JSON
 summary covering HTTP routes and policy denial, stdio MCP, physical-gate
-refusal, daemon lifecycle, graph export, replay HTTP/MCP observe paths, and
-config preflight checks.
+refusal, daemon lifecycle, graph export, MCP HTTP + CLI calls, replay HTTP/MCP
+observe paths, and config preflight checks.
 
 ## Stream Transport
 
@@ -161,6 +182,7 @@ Run narrower checks when you need to isolate one surface:
 ```bash
 scripts/smoke-http.sh
 scripts/smoke-mcp.sh
+scripts/smoke-mcp-http.sh
 scripts/smoke-replay-http.sh
 scripts/smoke-replay-mcp.sh
 scripts/smoke-physical-gate.sh
