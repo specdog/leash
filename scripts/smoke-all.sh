@@ -37,6 +37,11 @@ const checks = [
     proof: "stdio MCP initialization, tool list, and health call passed",
   },
   {
+    name: "mcp-http-cli",
+    argv: ["bash", "scripts/smoke-mcp-http.sh"],
+    proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, and key=value/JSON direct calls passed",
+  },
+  {
     name: "replay-http-observe",
     argv: ["bash", "scripts/smoke-replay-http.sh"],
     proof: "HTTP replay health, capabilities, and telemetry observe paths passed",
