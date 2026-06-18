@@ -363,6 +363,7 @@ mod tests {
                     last_ms: Some(ts_ms),
                 },
             },
+            resource: None,
             source: "replay".to_string(),
         };
         TelemetryStreamFrame {

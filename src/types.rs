@@ -1,4 +1,7 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo};
 
@@ -76,7 +79,28 @@ pub struct TelemetryFrame {
     pub speed_mode: SpeedMode,
     pub max_speed: f64,
     pub sensors: SensorSnapshot,
+    pub resource: Option<ResourceSample>,
     pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ResourceSample {
+    pub sampled_at_ms: u128,
+    pub process_id: u32,
+    pub cpu_time_ticks: Option<u64>,
+    pub memory_rss_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct RunLogEntry {
+    pub timestamp: u128,
+    pub run_id: String,
+    pub module: String,
+    pub event: String,
+    pub level: String,
+    pub fields: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -26,8 +26,8 @@ use crate::{
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState, DriveOutcome,
-        Health, OdometryStatus, RawFrameStatus, SafetyStreamState, SensorSnapshot, SpeedMode,
-        TelemetryFrame, TelemetryStreamFrame,
+        Health, OdometryStatus, RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot,
+        SpeedMode, TelemetryFrame, TelemetryStreamFrame,
     },
 };
 
@@ -337,6 +337,7 @@ impl Harness {
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
+        let resource = self.config.resource_sampling.then(current_resource_sample);
         TelemetryFrame {
             ts_ms: now,
             robot: self.config.role.clone(),
@@ -355,6 +356,7 @@ impl Harness {
             speed_mode: command.speed_mode,
             max_speed: command.speed_mode.cap(),
             sensors,
+            resource,
             source: raw.source,
         }
     }
@@ -681,6 +683,45 @@ fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
+fn current_resource_sample() -> ResourceSample {
+    ResourceSample {
+        sampled_at_ms: now_ms(),
+        process_id: std::process::id(),
+        cpu_time_ticks: process_cpu_time_ticks(),
+        memory_rss_bytes: process_memory_rss_bytes(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_cpu_time_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let (_, fields) = stat.rsplit_once(") ")?;
+    let fields = fields.split_whitespace().collect::<Vec<_>>();
+    let utime = fields.get(11)?.parse::<u64>().ok()?;
+    let stime = fields.get(12)?.parse::<u64>().ok()?;
+    Some(utime + stime)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_cpu_time_ticks() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn process_memory_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let rss_line = status
+        .lines()
+        .find(|line| line.strip_prefix("VmRSS:").is_some())?;
+    let kb = rss_line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_memory_rss_bytes() -> Option<u64> {
+    None
+}
+
 pub fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -725,6 +766,25 @@ mod tests {
     async fn capture_is_deterministic_for_role() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         assert_eq!(harness.capture().sha256, harness.capture().sha256);
+    }
+
+    #[tokio::test]
+    async fn resource_samples_are_disabled_by_default() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        assert!(harness.telemetry().resource.is_none());
+    }
+
+    #[tokio::test]
+    async fn resource_samples_can_be_enabled() {
+        let harness = Harness::new(HarnessConfig {
+            resource_sampling: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let sample = harness.telemetry().resource.unwrap();
+        assert_eq!(sample.process_id, std::process::id());
     }
 
     #[tokio::test]

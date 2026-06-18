@@ -37,6 +37,10 @@ leash run sim-mcp
 # Run with HTTP + WebSocket
 leash run sim-http
 
+# Run as a daemon and inspect JSONL logs
+leash run sim-http --daemon
+leash log sim-http --json --module http --lines 20
+
 # Check health
 leash health --url http://127.0.0.1:8000
 
@@ -108,6 +112,22 @@ needs deterministic in-process delivery.
 `/ws/telemetry`, `/events/telemetry`, and `/sse/telemetry` emit the same
 transport-backed envelope: latest telemetry, health/module state, command state,
 and safety state.
+
+## Run Logs and Resource Samples
+
+Daemon runs write structured JSONL logs under the Leash state directory. Each
+entry includes `timestamp`, `run_id`, `module`, `event`, `level`, and any
+structured fields emitted with the tracing event:
+
+```bash
+leash run sim-http --daemon
+leash log sim-http --json --module http --lines 20
+```
+
+Runtime telemetry keeps process resource sampling off by default. Enable it for
+development or field debugging with `--resource-sampling` or
+`LEASH_RESOURCE_SAMPLING=1`; use `--no-resource-sampling` to force it off when
+an environment or config file enables it.
 
 `leash_harness::stream_processing` provides generic helpers for high-rate
 streams: latest-value backpressure, per-key rate limiting, quality filtering,

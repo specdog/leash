@@ -994,6 +994,10 @@
         "format",
         "e!",
         "resource_monitor",
+        "b!",
+        "cli_json",
+        "b!",
+        "module_filter",
         "b!"
       ],
       [
@@ -1098,11 +1102,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 6809,
-    "ct": 6809,
-    "dt": 1899,
+    "st": 6983,
+    "ct": 6983,
+    "dt": 1946,
     "sv": 72.1,
     "cs": 72.1,
-    "saved": 4910
+    "saved": 5037
   }
 }

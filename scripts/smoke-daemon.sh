@@ -41,7 +41,19 @@ if (payload.runs.length !== 0) throw new Error(`expected no runs, got ${payload.
 LEASH_STATE_DIR="$state_dir" cargo run --quiet -- run sim-http --name "$name" --daemon --listen "127.0.0.1:$port" >/dev/null
 wait_ready
 LEASH_STATE_DIR="$state_dir" cargo run --quiet -- status "$name" | assert_running_status
-LEASH_STATE_DIR="$state_dir" cargo run --quiet -- log "$name" --lines 40 | grep -q "leash http listening"
+LEASH_STATE_DIR="$state_dir" cargo run --quiet -- log "$name" --json --lines 40 | node -e 'const lines = require("node:fs").readFileSync(0, "utf8").trim().split(/\n+/).filter(Boolean);
+if (!lines.length) throw new Error("expected structured log lines");
+const entries = lines.map((line) => JSON.parse(line));
+if (!entries.some((entry) => entry.event === "leash http listening")) throw new Error("missing http listening event");
+for (const entry of entries) {
+  for (const field of ["timestamp", "run_id", "module", "event", "level"]) {
+    if (entry[field] === undefined) throw new Error(`missing ${field}`);
+  }
+}'
+LEASH_STATE_DIR="$state_dir" cargo run --quiet -- log "$name" --json --module http --lines 1 | node -e 'const line = require("node:fs").readFileSync(0, "utf8").trim();
+if (!line) throw new Error("expected a module-filtered log line");
+const entry = JSON.parse(line);
+if (!entry.module.endsWith("::http")) throw new Error(`unexpected module ${entry.module}`);'
 
 LEASH_STATE_DIR="$state_dir" cargo run --quiet -- restart "$name" >/dev/null
 wait_ready
