@@ -41,7 +41,25 @@ const checks = [
   {
     name: "daemon-lifecycle",
     argv: ["bash", "scripts/smoke-daemon.sh"],
-    proof: "daemon start, status, log, restart, and stop passed",
+    proof: "pawprint daemon start, status, log, restart, and stop passed",
+  },
+  {
+    name: "pawprint-catalog",
+    argv: ["cargo", "run", "--quiet", "--", "list", "--format", "json"],
+    validate: (stdout) => {
+      const pawprints = JSON.parse(stdout);
+      const names = pawprints.map((pawprint) => pawprint.name);
+      for (const required of ["sim-http", "sim-mcp", "bridge-compat-http", "waveshare-ugv-http"]) {
+        if (!names.includes(required)) {
+          throw new Error(`missing pawprint ${required}`);
+        }
+      }
+      const physical = pawprints.find((pawprint) => pawprint.name === "waveshare-ugv-http");
+      if (!physical.hardware_required) {
+        throw new Error("waveshare pawprint did not declare hardware_required");
+      }
+      return `listed ${pawprints.length} built-in pawprints`;
+    },
   },
   {
     name: "graph-sim-json",
@@ -65,6 +83,21 @@ const checks = [
         throw new Error("physical graph DOT output did not mark physical modules");
       }
       return "physical graph exported DOT";
+    },
+  },
+  {
+    name: "config-pawprint-sim-http",
+    argv: ["cargo", "run", "--quiet", "--", "show-config", "sim-http"],
+    validate: (stdout) => {
+      const config = JSON.parse(stdout);
+      if (config.profile !== "sim" || config.network_bind !== "127.0.0.1:8000") {
+        throw new Error("sim-http pawprint did not resolve expected profile and bind");
+      }
+      const listen = config.fields.find((field) => field.name === "listen");
+      if (!listen || listen.source !== "pawprint-default") {
+        throw new Error("sim-http listen source was not pawprint-default");
+      }
+      return "sim-http pawprint config resolved";
     },
   },
   {

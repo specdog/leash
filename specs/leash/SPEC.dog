@@ -74,7 +74,7 @@ WS   /ws/telemetry         → streaming TelemetryFrame JSON
 | LS-07 | Package published to crates.io | P2 | `cargo install leash-harness` works |
 | LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
 | LS-09 | Developer defines a module with typed inputs/outputs | P1 | Module appears in module graph with correct streams |
-| LS-10 | Operator runs a blueprint in sim mode | P1 | Full nav pipeline executes without hardware |
+| LS-10 | Operator runs a pawprint in sim mode | P1 | Full nav pipeline executes without hardware |
 | LS-11 | Developer replays a recorded session | P2 | Replay reproduces exact telemetry stream |
 | LS-12 | Operator views live telemetry via WebSocket | P0 | `ws://127.0.0.1:8000/ws/telemetry` streams frames |
 | LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |
