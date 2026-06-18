@@ -343,9 +343,9 @@
         "b!"
       ],
       [
-        "planned",
         "implemented",
-        "verified"
+        "verified",
+        "active"
       ],
       [
         [
@@ -372,7 +372,7 @@
       6,
       "CLI",
       "entity",
-      "CLI + HTTP server. Subcommands: serve (mcp|http), health, stop. 16 REST + WS endpoints.",
+      "CLI + HTTP server. Subcommands: serve (mcp|http), record, replay, health, stop. 16 REST + WS endpoints.",
       [
         "listen",
         "s!",

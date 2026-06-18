@@ -26,6 +26,8 @@ impl SpeedMode {
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Health {
     pub ok: bool,
+    pub mode: String,
+    pub replay: bool,
     pub role: String,
     pub profile: String,
     pub uptime_ms: u128,
@@ -40,6 +42,8 @@ pub struct Health {
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Capabilities {
     pub ok: bool,
+    pub mode: String,
+    pub replay: bool,
     pub role: String,
     pub profile: String,
     pub physical: bool,

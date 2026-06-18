@@ -206,6 +206,7 @@ fn waveshare_ugv_http_stack() -> Stack {
 fn module_refs(profile: Profile) -> Vec<StackModule> {
     let driver = match profile {
         Profile::Sim => ("sim-driver", false),
+        Profile::Replay => ("replay-driver", false),
         Profile::WaveshareUgv => ("waveshare-ugv-driver", true),
     };
     vec![

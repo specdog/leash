@@ -10,9 +10,10 @@ use leash_harness::{
         DEFAULT_RUN_NAME,
     },
     module::default_module_graph,
+    replay::{scaled_delay, ReplayEvent, ReplayEventKind, ReplayRecording, REPLAY_FORMAT_VERSION},
     stack::{built_in_stacks, find_stack, Stack, StackTransport},
     transport::StreamTransportBackend,
-    Harness, HarnessConfig, Profile,
+    Harness, HarnessConfig, Profile, TelemetryStreamFrame,
 };
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
@@ -35,6 +36,8 @@ struct Cli {
 enum Command {
     List(ListArgs),
     Serve(Serve),
+    Record(RecordArgs),
+    Replay(ReplayArgs),
     #[cfg(any(feature = "http", feature = "mcp"))]
     Run(RunArgs),
     Status(StatusArgs),
@@ -83,6 +86,12 @@ struct RuntimeArgs {
     #[arg(long, value_enum)]
     stream_transport: Option<StreamTransportBackend>,
 
+    #[arg(long)]
+    replay_source: Option<PathBuf>,
+
+    #[arg(long)]
+    replay_speed: Option<f64>,
+
     #[arg(long, action = ArgAction::SetTrue)]
     allow_untokened_drive: bool,
 
@@ -130,6 +139,29 @@ struct HttpServeArgs {
 struct HttpTarget {
     #[arg(long, env = "LEASH_URL", default_value = "http://127.0.0.1:8000")]
     url: String,
+}
+
+#[derive(Debug, Args)]
+struct RecordArgs {
+    #[arg(short, long)]
+    output: PathBuf,
+
+    #[arg(long, default_value_t = 5)]
+    samples: usize,
+
+    #[arg(long, default_value_t = 50)]
+    interval_ms: u64,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Args)]
+struct ReplayArgs {
+    input: PathBuf,
+
+    #[arg(long, default_value_t = 1.0)]
+    speed: f64,
 }
 
 #[derive(Debug, Args)]
@@ -240,6 +272,13 @@ async fn main() -> Result<()> {
                 leash_harness::http::serve_http(harness, listen).await?;
             }
         },
+        Command::Record(args) => {
+            let output = record_stream(args, cli.config.clone()).await?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        Command::Replay(args) => {
+            replay_file(args).await?;
+        }
         #[cfg(any(feature = "http", feature = "mcp"))]
         Command::Run(args) => {
             run_stack(args, cli.config.clone()).await?;
@@ -448,6 +487,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
 
     let profile = match name {
         "sim" => Profile::Sim,
+        "replay" => Profile::Replay,
         "waveshare-ugv" => Profile::WaveshareUgv,
         other => {
             let stacks = built_in_stacks()
@@ -456,7 +496,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!(
-                "unknown stack or profile '{other}'; expected sim, waveshare-ugv, or one of: {stacks}"
+                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, or one of: {stacks}"
             );
         }
     };
@@ -471,10 +511,17 @@ impl RuntimeArgs {
         if self.allow_untokened_drive && self.no_untokened_drive {
             bail!("use either --allow-untokened-drive or --no-untokened-drive, not both");
         }
+        let profile = if self.replay_source.is_some() && self.profile.is_none() {
+            Some(Profile::Replay)
+        } else {
+            self.profile
+        };
         Ok(PartialHarnessConfig {
             role: self.role,
-            profile: self.profile,
+            profile,
             stream_transport: self.stream_transport,
+            replay_source: self.replay_source,
+            replay_speed: self.replay_speed,
             allow_untokened_drive: if self.allow_untokened_drive {
                 Some(true)
             } else if self.no_untokened_drive {
@@ -522,6 +569,102 @@ struct StopOutput {
     name: String,
     pid: u32,
     outcome: StopOutcome,
+}
+
+#[derive(Debug, Serialize)]
+struct RecordOutput {
+    ok: bool,
+    format: &'static str,
+    path: String,
+    samples: usize,
+    events: usize,
+    profile: String,
+}
+
+async fn record_stream(args: RecordArgs, config_path: Option<PathBuf>) -> Result<RecordOutput> {
+    if args.samples == 0 {
+        bail!("record --samples must be at least 1");
+    }
+    let interval = Duration::from_millis(args.interval_ms);
+    let config = config_from_args(args.runtime, None, config_path, None)?;
+    let profile = config.profile.as_str().to_string();
+    let harness = Harness::new(config)?;
+    let mut events = Vec::with_capacity(args.samples * 4);
+
+    for sample in 0..args.samples {
+        let mut frame = harness.telemetry_stream_frame();
+        let ts_ms = sample as u128 * args.interval_ms as u128;
+        normalize_replay_frame_timestamps(&mut frame, ts_ms);
+        let seq = sample as u64 * 4;
+
+        events.push(ReplayEvent::new(
+            ts_ms,
+            seq,
+            ReplayEventKind::Telemetry,
+            serde_json::to_value(&frame)?,
+        ));
+        events.push(ReplayEvent::new(
+            ts_ms,
+            seq + 1,
+            ReplayEventKind::Sensors,
+            serde_json::to_value(&frame.telemetry.sensors)?,
+        ));
+        events.push(ReplayEvent::new(
+            ts_ms,
+            seq + 2,
+            ReplayEventKind::Camera,
+            serde_json::to_value(&frame.telemetry.sensors.camera)?,
+        ));
+        events.push(ReplayEvent::new(
+            ts_ms,
+            seq + 3,
+            ReplayEventKind::Command,
+            serde_json::to_value(&frame.command)?,
+        ));
+
+        if sample + 1 < args.samples {
+            tokio::time::sleep(interval).await;
+        }
+    }
+
+    let recording = ReplayRecording::new(events);
+    recording.write_path(&args.output)?;
+    Ok(RecordOutput {
+        ok: true,
+        format: REPLAY_FORMAT_VERSION,
+        path: args.output.display().to_string(),
+        samples: args.samples,
+        events: recording.events().len(),
+        profile,
+    })
+}
+
+async fn replay_file(args: ReplayArgs) -> Result<()> {
+    let recording = ReplayRecording::read_path(&args.input)?;
+    let mut previous_ts_ms = None;
+    for event in recording.events() {
+        if let Some(previous_ts_ms) = previous_ts_ms {
+            tokio::time::sleep(scaled_delay(previous_ts_ms, event.ts_ms, args.speed)?).await;
+        }
+        println!("{}", serde_json::to_string(event)?);
+        previous_ts_ms = Some(event.ts_ms);
+    }
+    Ok(())
+}
+
+fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u128) {
+    frame.ts_ms = ts_ms;
+    frame.telemetry.ts_ms = ts_ms;
+    frame.telemetry.profile = "replay".to_string();
+    frame.telemetry.source = "replay".to_string();
+    frame.telemetry.sensors.raw_frame.source = "replay".to_string();
+    frame.telemetry.sensors.raw_frame.last_ms = Some(ts_ms);
+    frame.health.mode = "replay".to_string();
+    frame.health.replay = true;
+    frame.health.profile = "replay".to_string();
+    frame.health.uptime_ms = ts_ms;
+    frame.health.physical_actuation_enabled = false;
+    frame.safety.physical_actuation_enabled = false;
 }
 
 #[cfg(feature = "http")]
@@ -660,6 +803,12 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     }
     if config.allow_physical_actuation {
         args.push("--allow-physical-actuation".to_string());
+    }
+    if let Some(path) = &config.replay_source {
+        args.push("--replay-source".to_string());
+        args.push(path.display().to_string());
+        args.push("--replay-speed".to_string());
+        args.push(config.replay_speed.to_string());
     }
     if config.drive_invert {
         args.push("--drive-invert".to_string());

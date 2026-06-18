@@ -315,6 +315,7 @@ impl ModuleCoordinator {
 pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -> ModuleGraph {
     let driver_name = match config.profile {
         Profile::Sim => "sim-driver",
+        Profile::Replay => "replay-driver",
         Profile::WaveshareUgv => "waveshare-ugv-driver",
     };
     let transport = config.stream_transport;
