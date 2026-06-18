@@ -5,6 +5,8 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::transport::StreamTransportBackend;
+
 const DEFAULT_LISTEN: &str = "127.0.0.1:8000";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
@@ -53,6 +55,7 @@ impl AcceleratorBackend {
 pub struct HarnessConfig {
     pub role: String,
     pub profile: Profile,
+    pub stream_transport: StreamTransportBackend,
     pub listen: SocketAddr,
     pub allow_untokened_drive: bool,
     pub allow_physical_actuation: bool,
@@ -74,6 +77,8 @@ pub struct PartialHarnessConfig {
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<Profile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_transport: Option<StreamTransportBackend>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listen: Option<SocketAddr>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -160,6 +165,7 @@ struct Resolved<T> {
 struct ConfigBuilder {
     role: Resolved<String>,
     profile: Resolved<Profile>,
+    stream_transport: Resolved<StreamTransportBackend>,
     listen: Resolved<SocketAddr>,
     allow_untokened_drive: Resolved<bool>,
     allow_physical_actuation: Resolved<bool>,
@@ -179,6 +185,7 @@ impl Default for HarnessConfig {
         Self {
             role: "robot".to_string(),
             profile: Profile::Sim,
+            stream_transport: StreamTransportBackend::LocalPubsub,
             listen: SocketAddr::from_str(DEFAULT_LISTEN).expect("valid default listen address"),
             allow_untokened_drive: true,
             allow_physical_actuation: false,
@@ -260,6 +267,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
     Ok(PartialHarnessConfig {
         role: env.get("LEASH_ROLE").cloned(),
         profile: parse_env(env, "LEASH_PROFILE", parse_profile)?,
+        stream_transport: parse_env(env, "LEASH_STREAM_TRANSPORT", parse_stream_transport)?,
         listen: parse_env(env, "LEASH_LISTEN", parse_socket_addr)?,
         allow_untokened_drive: parse_env(env, "LEASH_ALLOW_UNTOKENED_DRIVE", parse_bool)?,
         allow_physical_actuation: parse_env(env, "LEASH_ALLOW_PHYSICAL_ACTUATION", parse_bool)?,
@@ -301,6 +309,14 @@ fn parse_accelerator(value: &str) -> anyhow::Result<AcceleratorBackend> {
     }
 }
 
+fn parse_stream_transport(value: &str) -> anyhow::Result<StreamTransportBackend> {
+    match value {
+        "memory" => Ok(StreamTransportBackend::Memory),
+        "local-pubsub" => Ok(StreamTransportBackend::LocalPubsub),
+        _ => anyhow::bail!("expected memory or local-pubsub"),
+    }
+}
+
 fn parse_socket_addr(value: &str) -> anyhow::Result<SocketAddr> {
     Ok(SocketAddr::from_str(value)?)
 }
@@ -333,6 +349,7 @@ fn env_var_for_field(field: &str) -> &'static str {
     match field {
         "role" => "LEASH_ROLE",
         "profile" => "LEASH_PROFILE",
+        "stream_transport" => "LEASH_STREAM_TRANSPORT",
         "listen" => "LEASH_LISTEN",
         "allow_untokened_drive" => "LEASH_ALLOW_UNTOKENED_DRIVE",
         "allow_physical_actuation" => "LEASH_ALLOW_PHYSICAL_ACTUATION",
@@ -354,6 +371,7 @@ impl Default for ConfigBuilder {
         Self {
             role: Resolved::defaulted(config.role),
             profile: Resolved::defaulted(config.profile),
+            stream_transport: Resolved::defaulted(config.stream_transport),
             listen: Resolved::defaulted(config.listen),
             allow_untokened_drive: Resolved::defaulted(config.allow_untokened_drive),
             allow_physical_actuation: Resolved::defaulted(config.allow_physical_actuation),
@@ -395,6 +413,9 @@ impl ConfigBuilder {
         }
         if let Some(value) = partial.profile {
             self.profile.set(value, source("profile"));
+        }
+        if let Some(value) = partial.stream_transport {
+            self.stream_transport.set(value, source("stream_transport"));
         }
         if let Some(value) = partial.listen {
             self.listen.set(value, source("listen"));
@@ -448,6 +469,7 @@ impl ConfigBuilder {
         let config = HarnessConfig {
             role: self.role.value,
             profile: self.profile.value,
+            stream_transport: self.stream_transport.value,
             listen: self.listen.value,
             allow_untokened_drive: self.allow_untokened_drive.value,
             allow_physical_actuation: self.allow_physical_actuation.value,
@@ -470,6 +492,12 @@ impl ConfigBuilder {
                 json!(config.profile.as_str()),
                 self.profile.source,
                 physical.then_some("physical-profile"),
+            ),
+            field(
+                "stream_transport",
+                json!(config.stream_transport.as_str()),
+                self.stream_transport.source,
+                Some("module-streams"),
             ),
             field(
                 "listen",
@@ -670,6 +698,28 @@ mod config_tests {
         assert!(source_for(&resolved, "require_accelerator").starts_with("config-file:"));
         assert_eq!(attention_for(&resolved, "accelerator"), Some("accelerator"));
         let _ = fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn resolves_stream_transport_from_env() {
+        let env = BTreeMap::from([("LEASH_STREAM_TRANSPORT".to_string(), "memory".to_string())]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            resolved.config.stream_transport,
+            StreamTransportBackend::Memory
+        );
+        assert_eq!(
+            source_for(&resolved, "stream_transport"),
+            "env:LEASH_STREAM_TRANSPORT"
+        );
     }
 
     #[test]

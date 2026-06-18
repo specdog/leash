@@ -102,7 +102,7 @@ lifecycle: planned → cataloged → implemented → tested
 ```
 
 ### Entity: Transport
-Pub/sub abstraction. In-memory + local async backends. Stream backpressure, quality filtering.
+Pub/sub abstraction. Memory + local async backends. Local pubsub uses bounded broadcast channels and reports receiver lag.
 
 ```yaml
 entity: Transport
@@ -111,11 +111,12 @@ properties:
   backends:
     type: string
     required: true
-    description: in-memory, local-async-pubsub
+    description: memory, local-pubsub
   backpressure:
     type: boolean
     required: true
-    default: false
+    default: true
+    description: local-pubsub drops oldest messages under receiver lag and reports skipped count
   quality_filtering:
     type: boolean
     required: true
@@ -123,10 +124,10 @@ properties:
   default_backend:
     type: enum
     required: true
-    values: [in_memory, local_async]
-    default: in_memory
-states: [planned, designed, implemented, tested]
-lifecycle: planned → designed → implemented → tested
+    values: [memory, local-pubsub]
+    default: local-pubsub
+states: [planned, designed, implemented, tested, active]
+lifecycle: planned → designed → implemented → tested → active
 ```
 
 ### Entity: Telemetry
