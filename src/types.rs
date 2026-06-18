@@ -43,6 +43,7 @@ pub struct Capabilities {
     pub role: String,
     pub profile: String,
     pub physical: bool,
+    pub stream_transport: String,
     pub endpoints: Vec<String>,
     pub mcp_tools: Vec<String>,
     pub speed_modes: Vec<SpeedMode>,

@@ -18,7 +18,8 @@ leash run sim-http       # localhost HTTP + WebSocket
 - **Safety gates at every layer.** Deadman switch, estop, soft odometry limits, physical actuation gate. Policy-gated capability invocation.
 - **Feature-gated hardware.** Waveshare UGV today, MAVLink drone + manipulator planned. No hardware compiles without explicit `--features`.
 - **Stack catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <stack>`.
-- **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, and health. Coordinator manages startup/shutdown order.
+- **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, health, and selected stream transport. Coordinator manages startup/shutdown order.
+- **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
 
 ## Quick Start
 
@@ -55,7 +56,7 @@ leash health --url http://127.0.0.1:8000
 
 ```
 GET  /health              Harness health
-GET  /capabilities         Endpoints + tools
+GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
 POST /drive               { token, left, right, speed_mode }
 POST /estop                Latch emergency stop
@@ -83,6 +84,20 @@ scripts/smoke-all.sh
 summary covering HTTP routes and policy denial, stdio MCP, physical-gate
 refusal, daemon lifecycle, graph export, and config preflight checks.
 
+## Stream Transport
+
+`stream_transport` selects the module-stream backend shown in graph and
+capability output:
+
+- `local-pubsub` is the default runtime backend. It uses bounded async broadcast
+  channels, supports fan-out across local tasks, drops oldest messages under
+  receiver lag, and reports lag to subscribers.
+- `memory` is an unbounded in-process backend for deterministic tests and local
+  harness checks. Dropped subscribers are pruned on publish.
+
+Use `--stream-transport memory` or `LEASH_STREAM_TRANSPORT=memory` when a run
+needs deterministic in-process delivery.
+
 Run narrower checks when you need to isolate one surface:
 
 ```bash
@@ -96,10 +111,11 @@ scripts/smoke-daemon.sh
 
 See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlights:
 
-- [ ] Module graph with typed streams, lifecycle, and health aggregation
-- [ ] Stack catalog: `leash list` + `leash run`
+- [x] Module graph with typed streams, lifecycle, and health aggregation
+- [x] Stack catalog: `leash list` + `leash run`
 - [ ] Replay engine: deterministic sensor record + playback
-- [ ] Transport abstraction: in-process, cross-process, network
+- [x] Transport abstraction: memory + local async pubsub
+- [ ] Cross-process and network transports
 - [ ] MAVLink drone + manipulator adapters
 - [ ] Localhost command center dashboard
 - [ ] Spatial memory and perception primitives

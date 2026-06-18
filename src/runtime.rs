@@ -22,6 +22,7 @@ use crate::{
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
+    transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, DriveOutcome, Health,
         OdometryStatus, RawFrameStatus, SensorSnapshot, SpeedMode, TelemetryFrame,
@@ -170,6 +171,7 @@ pub struct Harness {
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
+    stream_transport: Arc<dyn StreamTransport>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
 }
@@ -197,6 +199,7 @@ impl Harness {
         coordinator.start()?;
 
         let (telemetry_tx, _) = broadcast::channel(128);
+        let stream_transport = new_stream_transport(config.stream_transport);
         let harness = Self {
             config,
             started_at: Instant::now(),
@@ -205,6 +208,7 @@ impl Harness {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
+            stream_transport,
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
         };
@@ -219,6 +223,10 @@ impl Harness {
 
     pub fn subscribe_telemetry(&self) -> broadcast::Receiver<TelemetryFrame> {
         self.telemetry_tx.subscribe()
+    }
+
+    pub fn subscribe_stream(&self, stream: &str) -> Result<StreamSubscriber> {
+        self.stream_transport.subscribe(stream)
     }
 
     pub fn capability_registry(&self) -> CapabilityRegistry {
@@ -255,6 +263,7 @@ impl Harness {
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             physical: self.config.profile.is_physical(),
+            stream_transport: self.config.stream_transport.as_str().to_string(),
             endpoints: vec![
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
@@ -509,7 +518,11 @@ impl Harness {
             let mut interval = time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
-                let _ = harness.telemetry_tx.send(harness.telemetry());
+                let telemetry = harness.telemetry();
+                let _ = harness.telemetry_tx.send(telemetry.clone());
+                if let Ok(payload) = serde_json::to_value(&telemetry) {
+                    let _ = harness.stream_transport.publish("telemetry", payload);
+                }
             }
         });
     }
@@ -679,6 +692,7 @@ mod tests {
         .unwrap();
 
         let capabilities = harness.capabilities();
+        assert_eq!(capabilities.stream_transport, "local-pubsub");
         assert_eq!(
             capabilities.accelerator.requested,
             crate::config::AcceleratorBackend::Cuda
@@ -695,5 +709,20 @@ mod tests {
                 |probe| probe.backend == crate::config::AcceleratorBackend::Cuda
                     && !probe.available
             ));
+    }
+
+    #[tokio::test]
+    async fn telemetry_is_published_to_selected_stream_transport() {
+        let harness = Harness::new(HarnessConfig {
+            stream_transport: crate::transport::StreamTransportBackend::Memory,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let mut receiver = harness.subscribe_stream("telemetry").unwrap();
+
+        let message = receiver.recv().await.unwrap();
+
+        assert_eq!(message.stream, "telemetry");
+        assert_eq!(message.payload["profile"], "sim");
     }
 }

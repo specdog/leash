@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod module;
 pub mod runtime;
 pub mod stack;
+pub mod transport;
 pub mod types;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
@@ -24,4 +25,8 @@ pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
 pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
+pub use transport::{
+    new_stream_transport, StreamMessage, StreamRecvError, StreamSubscriber, StreamTransport,
+    StreamTransportBackend,
+};
 pub use types::{Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame};
