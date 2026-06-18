@@ -290,7 +290,7 @@
       4,
       "Telemetry",
       "entity",
-      "Live telemetry streaming. Broadcast channel, WebSocket, SSE. TelemetryFrame with full sensor snapshot.",
+      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.",
       [
         "outputs",
         "s!",
