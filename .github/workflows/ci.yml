@@ -16,12 +16,7 @@ jobs:
       - run: cargo test --all-targets --all-features
       - run: cargo test --no-default-features --features sim,mcp
       - run: cargo package --locked
-      - run: cargo run --quiet -- show-config waveshare-ugv --listen 0.0.0.0:8000 --allow-physical-actuation | node -e 'const fs=require("node:fs"); const config=JSON.parse(fs.readFileSync(0,"utf8")); if (!config.physical || !config.physical_actuation_enabled || config.network_bind !== "0.0.0.0:8000") process.exit(1);'
-      - run: cargo run --quiet -- show-config --accelerator cpu --require-accelerator | node -e 'const fs=require("node:fs"); const config=JSON.parse(fs.readFileSync(0,"utf8")); if (config.accelerator !== "cpu" || config.require_accelerator !== true) process.exit(1);'
-      - run: scripts/smoke-http.sh
-      - run: scripts/smoke-mcp.sh
-      - run: scripts/smoke-physical-gate.sh
-      - run: scripts/smoke-daemon.sh
+      - run: scripts/smoke-all.sh
 
   feature-matrix:
     name: feature-matrix (${{ matrix.name }})
