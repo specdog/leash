@@ -94,9 +94,9 @@ GET  /sse/telemetry        Alias for /events/telemetry
 GET  /agent                Local web input form
 GET  /agent/messages       Recent agent input messages
 POST /agent/messages       { source, text }
-POST /drive               { token, left, right, speed_mode }
+POST /drive               { token, left, right, speed_mode, approval }
 POST /estop                Latch emergency stop
-POST /estop/reset          Clear estop
+POST /estop/reset          { token, approval } Clear estop
 WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
 
@@ -139,6 +139,27 @@ Provider settings are available as `--agent-provider`, `--agent-model`,
 `--agent-base-url`, `--agent-api-key`, and `--agent-timeout-ms`, or via matching
 `LEASH_AGENT_*` environment variables. `agent_api_key` is redacted from
 `show-config` fields and omitted from top-level serialized config output.
+
+## Safety Policy
+
+Capability invocations carry safety classes: `observe-only`, `sim-control`,
+`physical-stop`, `physical-motion`, and `physical-high-risk`. `drive` is
+`physical-motion`; `stop` and `estop` are `physical-stop`; `estop_reset` is
+`physical-high-risk`.
+
+`--policy-mode` and `LEASH_POLICY_MODE` support:
+
+- `require-token` (default): physical motion and high-risk calls need a token.
+- `require-approval`: physical motion and high-risk calls need `approval=true`.
+- `dry-run`: physical motion and high-risk calls return a dry-run result without
+  changing command state.
+- `deny`: physical motion and high-risk calls are blocked.
+
+`stop` and `estop` remain available under restrictive policy modes. Approved and
+denied physical actions are emitted as structured log events. Agent-origin
+physical motion always requires `approval=true`; physical profiles still require
+`--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` before the
+harness starts.
 
 ## Features
 

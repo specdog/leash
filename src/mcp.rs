@@ -8,7 +8,12 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{capability::SafetyClass, module::ModuleState, runtime::Harness, types::SpeedMode};
+use crate::{
+    capability::{InvocationOrigin, SafetyClass},
+    module::ModuleState,
+    runtime::Harness,
+    types::SpeedMode,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolDescriptor {
@@ -128,7 +133,7 @@ impl LeashMcp {
         let value = self
             .harness
             .capability_registry()
-            .invoke_value(&capability, args)
+            .invoke_value_with_origin(&capability, args, InvocationOrigin::Mcp)
             .map_err(|err| err.to_string())?;
         serde_json::to_string_pretty(&value).map_err(|err| err.to_string())
     }
@@ -141,7 +146,7 @@ impl LeashMcp {
         let value = self
             .harness
             .capability_registry()
-            .invoke_value("stop", serde_json::json!({}))
+            .invoke_value_with_origin("stop", serde_json::json!({}), InvocationOrigin::Mcp)
             .map_err(|err| err.to_string())?;
         serde_json::from_value(value)
             .map(Json)
@@ -155,7 +160,7 @@ impl LeashMcp {
     pub async fn estop(&self) -> Result<String, String> {
         self.harness
             .capability_registry()
-            .invoke_value("estop", serde_json::json!({}))
+            .invoke_value_with_origin("estop", serde_json::json!({}), InvocationOrigin::Mcp)
             .map_err(|err| err.to_string())?;
         Ok("estop latched".to_string())
     }
@@ -168,7 +173,7 @@ impl LeashMcp {
         let value = self
             .harness
             .capability_registry()
-            .invoke_value("capture", serde_json::json!({}))
+            .invoke_value_with_origin("capture", serde_json::json!({}), InvocationOrigin::Mcp)
             .map_err(|err| err.to_string())?;
         serde_json::from_value(value)
             .map(Json)
@@ -189,6 +194,8 @@ pub struct InvokeCapabilityParams {
     pub right: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval: Option<bool>,
 }
 
 pub async fn serve_stdio(harness: Harness) -> Result<()> {
@@ -250,6 +257,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("left", "number", false),
                 ("right", "number", false),
                 ("speed_mode", "SpeedMode", false),
+                ("approval", "boolean", false),
             ]),
             "json",
         ),
@@ -322,14 +330,32 @@ pub fn module_tool_map(harness: &Harness) -> McpModuleToolMap {
 }
 
 pub fn call_tool(harness: &Harness, name: &str, args: Value) -> Result<McpCallResponse> {
+    call_tool_with_origin(harness, name, args, InvocationOrigin::Mcp)
+}
+
+pub fn call_tool_with_origin(
+    harness: &Harness,
+    name: &str,
+    args: Value,
+    origin: InvocationOrigin,
+) -> Result<McpCallResponse> {
     Ok(McpCallResponse {
         ok: true,
         tool: canonical_tool_name(name).to_string(),
-        result: call_tool_value(harness, name, args)?,
+        result: call_tool_value_with_origin(harness, name, args, origin)?,
     })
 }
 
 pub fn call_tool_value(harness: &Harness, name: &str, args: Value) -> Result<Value> {
+    call_tool_value_with_origin(harness, name, args, InvocationOrigin::Mcp)
+}
+
+pub fn call_tool_value_with_origin(
+    harness: &Harness,
+    name: &str,
+    args: Value,
+    origin: InvocationOrigin,
+) -> Result<Value> {
     match canonical_tool_name(name) {
         "health" => {
             ensure_no_args(args)?;
@@ -347,30 +373,34 @@ pub fn call_tool_value(harness: &Harness, name: &str, args: Value) -> Result<Val
             ensure_no_args(args)?;
             serde_json::to_value(harness.telemetry()).map_err(Into::into)
         }
-        "invoke_capability" => invoke_capability_value(harness, args),
+        "invoke_capability" => invoke_capability_value_with_origin(harness, args, origin),
         "stop" => {
             ensure_no_args(args)?;
             harness
                 .capability_registry()
-                .invoke_value("stop", json!({}))
+                .invoke_value_with_origin("stop", json!({}), origin)
         }
         "estop" => {
             ensure_no_args(args)?;
             harness
                 .capability_registry()
-                .invoke_value("estop", json!({}))
+                .invoke_value_with_origin("estop", json!({}), origin)
         }
         "capture" => {
             ensure_no_args(args)?;
             harness
                 .capability_registry()
-                .invoke_value("capture", json!({}))
+                .invoke_value_with_origin("capture", json!({}), origin)
         }
         other => Err(anyhow!("unknown MCP tool '{other}'")),
     }
 }
 
-fn invoke_capability_value(harness: &Harness, args: Value) -> Result<Value> {
+fn invoke_capability_value_with_origin(
+    harness: &Harness,
+    args: Value,
+    origin: InvocationOrigin,
+) -> Result<Value> {
     let mut args = args_object(args)?;
     let capability = args
         .remove("capability")
@@ -378,7 +408,7 @@ fn invoke_capability_value(harness: &Harness, args: Value) -> Result<Value> {
         .ok_or_else(|| anyhow!("capability is required"))?;
     harness
         .capability_registry()
-        .invoke_value(&capability, Value::Object(args))
+        .invoke_value_with_origin(&capability, Value::Object(args), origin)
 }
 
 fn ensure_no_args(args: Value) -> Result<()> {
@@ -499,6 +529,26 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("capability is required"));
+    }
+
+    #[tokio::test]
+    async fn invoke_capability_policy_uses_call_origin() {
+        let harness = Harness::new(HarnessConfig {
+            allow_untokened_drive: false,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let err = call_tool_value_with_origin(
+            &harness,
+            "invoke_capability",
+            json!({ "capability": "drive", "left": 0.2, "right": 0.2 }),
+            InvocationOrigin::Cli,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("require-token"));
     }
 
     #[tokio::test]
