@@ -12,6 +12,11 @@ const startedAt = new Date().toISOString();
 const baseEnv = { ...process.env, LEASH_ALLOW_PHYSICAL_ACTUATION: "0" };
 for (const key of [
   "LEASH_ACCELERATOR",
+  "LEASH_AGENT_API_KEY",
+  "LEASH_AGENT_BASE_URL",
+  "LEASH_AGENT_MODEL",
+  "LEASH_AGENT_PROVIDER",
+  "LEASH_AGENT_TIMEOUT_MS",
   "LEASH_ALLOW_UNTOKENED_DRIVE",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
@@ -201,6 +206,38 @@ const checks = [
     },
   },
   {
+    name: "config-agent-hosted-redaction",
+    env: { LEASH_AGENT_API_KEY: "super-secret" },
+    argv: [
+      "cargo",
+      "run",
+      "--quiet",
+      "--",
+      "show-config",
+      "--agent-provider",
+      "openai-compatible-http",
+      "--agent-base-url",
+      "https://example.test/v1",
+    ],
+    validate: (stdout) => {
+      if (stdout.includes("super-secret")) {
+        throw new Error("agent API key leaked into show-config output");
+      }
+      const config = JSON.parse(stdout);
+      if (config.agent_provider !== "openai-compatible-http") {
+        throw new Error("hosted agent provider did not resolve");
+      }
+      if (Object.prototype.hasOwnProperty.call(config, "agent_api_key")) {
+        throw new Error("agent_api_key should not be serialized at the top level");
+      }
+      const key = config.fields.find((field) => field.name === "agent_api_key");
+      if (!key || key.value !== "<redacted>" || key.source !== "env:LEASH_AGENT_API_KEY") {
+        throw new Error("agent API key field was not redacted with env source");
+      }
+      return "hosted agent config resolved with redacted API key";
+    },
+  },
+  {
     name: "replay-fixture",
     argv: [
       "cargo",
@@ -265,7 +302,7 @@ function runCheck(check) {
   const start = Date.now();
   const proc = spawnSync(check.argv[0], check.argv.slice(1), {
     cwd: repoRoot,
-    env: baseEnv,
+    env: { ...baseEnv, ...(check.env || {}) },
     encoding: "utf8",
     timeout: 180000,
   });

@@ -52,6 +52,28 @@ impl AcceleratorBackend {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentProvider {
+    #[default]
+    DeterministicTest,
+    #[serde(rename = "openai-compatible-http")]
+    #[value(name = "openai-compatible-http")]
+    OpenAiCompatibleHttp,
+    LocalHttp,
+}
+
+impl AgentProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DeterministicTest => "deterministic-test",
+            Self::OpenAiCompatibleHttp => "openai-compatible-http",
+            Self::LocalHttp => "local-http",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct HarnessConfig {
@@ -72,6 +94,12 @@ pub struct HarnessConfig {
     pub accelerator: AcceleratorBackend,
     pub require_accelerator: bool,
     pub resource_sampling: bool,
+    pub agent_provider: AgentProvider,
+    pub agent_model: String,
+    pub agent_base_url: Option<String>,
+    #[serde(skip_serializing)]
+    pub agent_api_key: Option<String>,
+    pub agent_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -112,6 +140,16 @@ pub struct PartialHarnessConfig {
     pub require_accelerator: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_sampling: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_provider: Option<AgentProvider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +229,11 @@ struct ConfigBuilder {
     accelerator: Resolved<AcceleratorBackend>,
     require_accelerator: Resolved<bool>,
     resource_sampling: Resolved<bool>,
+    agent_provider: Resolved<AgentProvider>,
+    agent_model: Resolved<String>,
+    agent_base_url: Resolved<Option<String>>,
+    agent_api_key: Resolved<Option<String>>,
+    agent_timeout_ms: Resolved<u64>,
     config_file: Option<String>,
 }
 
@@ -214,6 +257,11 @@ impl Default for HarnessConfig {
             accelerator: AcceleratorBackend::None,
             require_accelerator: false,
             resource_sampling: false,
+            agent_provider: AgentProvider::DeterministicTest,
+            agent_model: "deterministic-test".to_string(),
+            agent_base_url: None,
+            agent_api_key: None,
+            agent_timeout_ms: 10_000,
         }
     }
 }
@@ -240,6 +288,28 @@ impl HarnessConfig {
         }
         if !self.replay_speed.is_finite() || self.replay_speed <= 0.0 {
             anyhow::bail!("replay_speed must be a finite positive number");
+        }
+        if self.agent_timeout_ms == 0 {
+            anyhow::bail!("agent_timeout_ms must be at least 1");
+        }
+        match self.agent_provider {
+            AgentProvider::DeterministicTest => {}
+            AgentProvider::OpenAiCompatibleHttp => {
+                require_non_empty(
+                    self.agent_base_url.as_deref(),
+                    "agent provider openai-compatible-http requires LEASH_AGENT_BASE_URL or agent_base_url",
+                )?;
+                require_non_empty(
+                    self.agent_api_key.as_deref(),
+                    "agent provider openai-compatible-http requires LEASH_AGENT_API_KEY or agent_api_key",
+                )?;
+            }
+            AgentProvider::LocalHttp => {
+                require_non_empty(
+                    self.agent_base_url.as_deref(),
+                    "agent provider local-http requires LEASH_AGENT_BASE_URL or agent_base_url",
+                )?;
+            }
         }
         crate::accelerator::resolve_accelerator(self.accelerator, self.require_accelerator)?;
         Ok(())
@@ -308,6 +378,11 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         accelerator: parse_env(env, "LEASH_ACCELERATOR", parse_accelerator)?,
         require_accelerator: parse_env(env, "LEASH_REQUIRE_ACCELERATOR", parse_bool)?,
         resource_sampling: parse_env(env, "LEASH_RESOURCE_SAMPLING", parse_bool)?,
+        agent_provider: parse_env(env, "LEASH_AGENT_PROVIDER", parse_agent_provider)?,
+        agent_model: env.get("LEASH_AGENT_MODEL").cloned(),
+        agent_base_url: env.get("LEASH_AGENT_BASE_URL").cloned(),
+        agent_api_key: env.get("LEASH_AGENT_API_KEY").cloned(),
+        agent_timeout_ms: parse_env(env, "LEASH_AGENT_TIMEOUT_MS", parse_u64)?,
     })
 }
 
@@ -336,6 +411,15 @@ fn parse_accelerator(value: &str) -> anyhow::Result<AcceleratorBackend> {
         "cpu" => Ok(AcceleratorBackend::Cpu),
         "cuda" => Ok(AcceleratorBackend::Cuda),
         _ => anyhow::bail!("expected none, cpu, or cuda"),
+    }
+}
+
+fn parse_agent_provider(value: &str) -> anyhow::Result<AgentProvider> {
+    match value {
+        "deterministic-test" => Ok(AgentProvider::DeterministicTest),
+        "openai-compatible-http" => Ok(AgentProvider::OpenAiCompatibleHttp),
+        "local-http" => Ok(AgentProvider::LocalHttp),
+        _ => anyhow::bail!("expected deterministic-test, openai-compatible-http, or local-http"),
     }
 }
 
@@ -394,6 +478,11 @@ fn env_var_for_field(field: &str) -> &'static str {
         "accelerator" => "LEASH_ACCELERATOR",
         "require_accelerator" => "LEASH_REQUIRE_ACCELERATOR",
         "resource_sampling" => "LEASH_RESOURCE_SAMPLING",
+        "agent_provider" => "LEASH_AGENT_PROVIDER",
+        "agent_model" => "LEASH_AGENT_MODEL",
+        "agent_base_url" => "LEASH_AGENT_BASE_URL",
+        "agent_api_key" => "LEASH_AGENT_API_KEY",
+        "agent_timeout_ms" => "LEASH_AGENT_TIMEOUT_MS",
         _ => "LEASH_UNKNOWN",
     }
 }
@@ -419,6 +508,11 @@ impl Default for ConfigBuilder {
             accelerator: Resolved::defaulted(config.accelerator),
             require_accelerator: Resolved::defaulted(config.require_accelerator),
             resource_sampling: Resolved::defaulted(config.resource_sampling),
+            agent_provider: Resolved::defaulted(config.agent_provider),
+            agent_model: Resolved::defaulted(config.agent_model),
+            agent_base_url: Resolved::defaulted(config.agent_base_url),
+            agent_api_key: Resolved::defaulted(config.agent_api_key),
+            agent_timeout_ms: Resolved::defaulted(config.agent_timeout_ms),
             config_file: None,
         }
     }
@@ -500,6 +594,22 @@ impl ConfigBuilder {
             self.resource_sampling
                 .set(value, source("resource_sampling"));
         }
+        if let Some(value) = partial.agent_provider {
+            self.agent_provider.set(value, source("agent_provider"));
+        }
+        if let Some(value) = partial.agent_model {
+            self.agent_model.set(value, source("agent_model"));
+        }
+        if let Some(value) = partial.agent_base_url {
+            self.agent_base_url
+                .set(Some(value), source("agent_base_url"));
+        }
+        if let Some(value) = partial.agent_api_key {
+            self.agent_api_key.set(Some(value), source("agent_api_key"));
+        }
+        if let Some(value) = partial.agent_timeout_ms {
+            self.agent_timeout_ms.set(value, source("agent_timeout_ms"));
+        }
     }
 
     fn apply_profile_defaults(&mut self) {
@@ -534,6 +644,11 @@ impl ConfigBuilder {
             accelerator: self.accelerator.value,
             require_accelerator: self.require_accelerator.value,
             resource_sampling: self.resource_sampling.value,
+            agent_provider: self.agent_provider.value,
+            agent_model: self.agent_model.value,
+            agent_base_url: self.agent_base_url.value,
+            agent_api_key: self.agent_api_key.value,
+            agent_timeout_ms: self.agent_timeout_ms.value,
         };
         let physical = config.profile.is_physical();
         let physical_actuation_enabled = config.allow_physical_actuation;
@@ -639,6 +754,40 @@ impl ConfigBuilder {
                 self.resource_sampling.source,
                 config.resource_sampling.then_some("resource-monitor"),
             ),
+            field(
+                "agent_provider",
+                json!(config.agent_provider.as_str()),
+                self.agent_provider.source,
+                Some("agent-model"),
+            ),
+            field(
+                "agent_model",
+                json!(config.agent_model),
+                self.agent_model.source,
+                Some("agent-model"),
+            ),
+            field(
+                "agent_base_url",
+                json!(config.agent_base_url),
+                self.agent_base_url.source,
+                matches!(
+                    config.agent_provider,
+                    AgentProvider::OpenAiCompatibleHttp | AgentProvider::LocalHttp
+                )
+                .then_some("agent-endpoint"),
+            ),
+            field(
+                "agent_api_key",
+                json!(config.agent_api_key),
+                self.agent_api_key.source,
+                (config.agent_provider == AgentProvider::OpenAiCompatibleHttp).then_some("secret"),
+            ),
+            field(
+                "agent_timeout_ms",
+                json!(config.agent_timeout_ms),
+                self.agent_timeout_ms.source,
+                Some("agent-model"),
+            ),
         ];
 
         ResolvedHarnessConfig {
@@ -685,6 +834,14 @@ fn redact_value(name: &str, value: Value) -> Value {
         json!("<redacted>")
     } else {
         value
+    }
+}
+
+fn require_non_empty(value: Option<&str>, message: &'static str) -> anyhow::Result<()> {
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        Ok(())
+    } else {
+        anyhow::bail!(message)
     }
 }
 
@@ -817,6 +974,109 @@ mod config_tests {
     }
 
     #[test]
+    fn deterministic_agent_provider_is_default_and_no_network() {
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env: BTreeMap::new(),
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            resolved.config.agent_provider,
+            AgentProvider::DeterministicTest
+        );
+        assert_eq!(resolved.config.agent_model, "deterministic-test");
+        assert!(resolved.config.agent_base_url.is_none());
+        assert!(resolved.config.agent_api_key.is_none());
+        resolved.config.validate().unwrap();
+    }
+
+    #[test]
+    fn hosted_agent_provider_redacts_secret_in_resolved_output() {
+        let env = BTreeMap::from([
+            (
+                "LEASH_AGENT_PROVIDER".to_string(),
+                "openai-compatible-http".to_string(),
+            ),
+            (
+                "LEASH_AGENT_BASE_URL".to_string(),
+                "https://example.test/v1".to_string(),
+            ),
+            (
+                "LEASH_AGENT_API_KEY".to_string(),
+                "super-secret".to_string(),
+            ),
+        ]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        resolved.config.validate().unwrap();
+        assert_eq!(
+            resolved.config.agent_provider,
+            AgentProvider::OpenAiCompatibleHttp
+        );
+        assert_eq!(value_for(&resolved, "agent_api_key"), json!("<redacted>"));
+        assert_eq!(
+            source_for(&resolved, "agent_api_key"),
+            "env:LEASH_AGENT_API_KEY"
+        );
+        assert_eq!(attention_for(&resolved, "agent_api_key"), Some("secret"));
+        let output = serde_json::to_string(&resolved).unwrap();
+        assert!(!output.contains("super-secret"));
+    }
+
+    #[test]
+    fn hosted_agent_provider_requires_api_key() {
+        let env = BTreeMap::from([
+            (
+                "LEASH_AGENT_PROVIDER".to_string(),
+                "openai-compatible-http".to_string(),
+            ),
+            (
+                "LEASH_AGENT_BASE_URL".to_string(),
+                "https://example.test/v1".to_string(),
+            ),
+        ]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        let err = resolved.config.validate().unwrap_err().to_string();
+
+        assert!(err.contains("LEASH_AGENT_API_KEY"));
+    }
+
+    #[test]
+    fn local_agent_provider_requires_base_url() {
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env: BTreeMap::from([("LEASH_AGENT_PROVIDER".to_string(), "local-http".to_string())]),
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        let err = resolved.config.validate().unwrap_err().to_string();
+
+        assert!(err.contains("LEASH_AGENT_BASE_URL"));
+    }
+
+    #[test]
     fn replay_source_defaults_profile_to_replay() {
         let env = BTreeMap::from([(
             "LEASH_REPLAY_SOURCE".to_string(),
@@ -885,6 +1145,16 @@ mod config_tests {
             .find(|field| field.name == name)
             .unwrap()
             .attention
+    }
+
+    fn value_for(resolved: &ResolvedHarnessConfig, name: &str) -> Value {
+        resolved
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .unwrap()
+            .value
+            .clone()
     }
 
     fn write_temp_config(name: &str, body: &str) -> PathBuf {

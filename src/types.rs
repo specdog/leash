@@ -117,6 +117,7 @@ pub struct AgentMessage {
 pub struct AgentMessageAck {
     pub ok: bool,
     pub message: AgentMessage,
+    pub response: Option<AgentModelResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +125,16 @@ pub struct AgentMessageAck {
 pub struct AgentMessageList {
     pub ok: bool,
     pub messages: Vec<AgentMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentModelResponse {
+    pub ok: bool,
+    pub provider: String,
+    pub model: String,
+    pub prompt: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

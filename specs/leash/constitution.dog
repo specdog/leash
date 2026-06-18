@@ -8,7 +8,7 @@
 4. Pilot token authorization. Drive commands require a valid pilot token with TTL. Tokens expire. Untokened drive is configurable but defaults on for sim.
 5. Deadman switch. If no drive command arrives within `deadman_ms` (default 400ms), motors are automatically stopped. This is a runtime safety gate, not config-level.
 6. Smoke tests gate every release. MCP, HTTP, and physical-gate smoke tests must pass before any publish.
-7. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands — MCP is the agent interface.
+7. Agent control is mediated. MCP and localhost agent input may accept natural-language text, but physical actions must route through the capability registry and its safety policy.
 8. Sim-safe by default. The harness must run without hardware present. CI, demos, and smoke tests require zero physical robots. Sim profile logs commands instead of actuating.
 9. Explicit physical actuation gate. Physical profiles (waveshare-ugv) require `allow_physical_actuation: true` in config or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` env var.
 10. Module graph with typed streams. Every module declares inputs, outputs, lifecycle, health, and selected stream transport. Streams are typed and validated at graph construction time.

@@ -183,9 +183,12 @@ async fn agent_message(
     Json(req): Json<AgentMessageReq>,
 ) -> Result<Json<AgentMessageAck>, HttpError> {
     let source = req.source.unwrap_or_else(|| "http".to_string());
+    let message = harness.submit_agent_message(source, req.text)?;
+    let response = harness.agent_model_response(&message.text)?;
     Ok(Json(AgentMessageAck {
         ok: true,
-        message: harness.submit_agent_message(source, req.text)?,
+        message,
+        response,
     }))
 }
 

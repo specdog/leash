@@ -5,6 +5,7 @@
 //! allowed to reach hardware.
 
 pub mod accelerator;
+pub mod agent;
 pub mod capability;
 pub mod config;
 pub mod daemon;
@@ -21,8 +22,9 @@ pub mod transport;
 pub mod types;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
+pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
-pub use config::{AcceleratorBackend, HarnessConfig, Profile};
+pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use replay::{
@@ -40,6 +42,6 @@ pub use transport::{
     StreamTransportBackend,
 };
 pub use types::{
-    Capabilities, CaptureResult, Health, ResourceSample, RunLogEntry, SpeedMode, TelemetryFrame,
-    TelemetryStreamFrame,
+    AgentModelResponse, Capabilities, CaptureResult, Health, ResourceSample, RunLogEntry,
+    SpeedMode, TelemetryFrame, TelemetryStreamFrame,
 };
