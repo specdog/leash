@@ -187,7 +187,7 @@ lifecycle: implemented → verified → active
 ```
 
 ### Entity: CLI
-CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), mcp list-tools/call/status/modules, record, replay, health, stop. 16 REST + WS endpoints plus MCP HTTP JSON endpoints.
+CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.
 
 ```yaml
 entity: CLI
@@ -200,11 +200,11 @@ properties:
   commands:
     type: string
     required: true
-    description: serve (mcp|mcp-http|http), mcp list-tools/call/status/modules, record, replay, health, stop
+    description: serve, agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop
   http_endpoints:
     type: string
     required: true
-    description: health, capabilities, telemetry, drive, estop, ws/telemetry, mcp/tools, mcp/call, ...
+    description: health, capabilities, telemetry, agent/messages, drive, estop, ws/telemetry, mcp/tools, mcp/call, ...
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
@@ -351,7 +351,7 @@ lifecycle: planned → bootstrapped → ci_green
 ```
 
 ### Entity: Agent
-Model-provider config + input channels. One-shot, interactive, web commands.
+Model-provider config remains planned. Input channels are implemented and tested: one-shot CLI, interactive CLI, and localhost web commands.
 
 ```yaml
 entity: Agent
@@ -360,17 +360,21 @@ properties:
   providers:
     type: string
     required: true
-    description: deterministic-test, openai-compatible-http, local-http
+    description: planned deterministic-test, openai-compatible-http, local-http
   channels:
     type: string
     required: true
-    description: one-shot, interactive, web
+    description: implemented one-shot CLI, interactive CLI, HTTP POST /agent/messages, web form /agent
+  message_stream:
+    type: string
+    required: true
+    description: bounded runtime inbox plus agent stream publication
   ci_model:
     type: boolean
     required: true
     default: false
-states: [planned, configured, active]
-lifecycle: planned → configured → active
+states: [planned, input_channels_implemented, input_channels_tested, provider_configured, active]
+lifecycle: planned → input_channels_implemented → input_channels_tested → provider_configured → active
 ```
 
 ### Entity: CapabilityRegistry
