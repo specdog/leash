@@ -21,9 +21,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo test --no-default-features --features sim,mcp
 cargo package --locked
-scripts/smoke-http.sh
-scripts/smoke-mcp.sh
-scripts/smoke-physical-gate.sh
+scripts/smoke-all.sh
 ```
 
 Verify the feature matrix before tagging:

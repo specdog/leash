@@ -69,6 +69,25 @@ WS   /ws/telemetry         Streaming telemetry frames
 | `waveshare-ugv` | Waveshare UGV physical adapter | opt-in |
 | `bridge-compat` | Legacy robot bridge compatibility | opt-in |
 
+## Smoke Tests
+
+```bash
+scripts/smoke-all.sh
+```
+
+`scripts/smoke-all.sh` runs the no-hardware release proof and prints a JSON
+summary covering HTTP routes and policy denial, stdio MCP, physical-gate
+refusal, daemon lifecycle, graph export, and config preflight checks.
+
+Run narrower checks when you need to isolate one surface:
+
+```bash
+scripts/smoke-http.sh
+scripts/smoke-mcp.sh
+scripts/smoke-physical-gate.sh
+scripts/smoke-daemon.sh
+```
+
 ## Roadmap
 
 See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlights:
@@ -81,7 +100,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [ ] Localhost command center dashboard
 - [ ] Spatial memory and perception primitives
 - [ ] Patrol and exploration in simulation
-- [ ] Full no-hardware smoke suite
+- [x] Full no-hardware smoke suite
 
 ## License
 
