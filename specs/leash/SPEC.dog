@@ -34,7 +34,10 @@ $ leash health --url http://127.0.0.1:8000
 { "ok": true, "role": "robot", "profile": "sim", "uptime_ms": 12043, "estop": false, ... }
 
 $ leash agent-send "inspect the battery"
-{ "ok": true, "message": { "id": 1, "source": "cli", "text": "inspect the battery", ... } }
+{ "ok": true, "message": { "id": 1, "source": "cli", "text": "inspect the battery", ... }, "response": { "provider": "deterministic-test", ... } }
+
+$ LEASH_AGENT_API_KEY=... leash show-config --agent-provider openai-compatible-http --agent-base-url https://example.test/v1
+{ "agent_provider": "openai-compatible-http", "fields": [{ "name": "agent_api_key", "value": "<redacted>", ... }] }
 
 $ leash stop --url http://127.0.0.1:8000
 { "ok": true, "left": 0.0, "right": 0.0, ... }
@@ -98,3 +101,4 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-12 | Operator views live telemetry via WebSocket | P0 | `ws://127.0.0.1:8000/ws/telemetry` streams frames |
 | LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |
 | LS-14 | Human sends natural-language input into a local runtime | P1 | `agent-send`, `agent-interactive`, and `/agent` route messages without an LLM provider |
+| LS-15 | Developer configures a model provider without leaking secrets | P1 | deterministic provider works in CI; hosted/local config validates; API key is redacted |

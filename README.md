@@ -116,6 +116,30 @@ on the `agent` stream for local subscribers. The web form at `/agent` is only
 available when the `http` feature is built, and Leash binds HTTP to
 `127.0.0.1:8000` by default.
 
+## Agent Model Providers
+
+Leash defaults to `deterministic-test`, a no-network provider for CI and demos.
+It returns a stable synthetic response with each agent input acknowledgement.
+Hosted and local HTTP providers can be configured and validated without printing
+secrets:
+
+```bash
+LEASH_AGENT_API_KEY=... \
+  leash show-config \
+  --agent-provider openai-compatible-http \
+  --agent-base-url https://example.test/v1 \
+  --agent-model demo-model
+
+leash show-config \
+  --agent-provider local-http \
+  --agent-base-url http://127.0.0.1:11434/v1
+```
+
+Provider settings are available as `--agent-provider`, `--agent-model`,
+`--agent-base-url`, `--agent-api-key`, and `--agent-timeout-ms`, or via matching
+`LEASH_AGENT_*` environment variables. `agent_api_key` is redacted from
+`show-config` fields and omitted from top-level serialized config output.
+
 ## Features
 
 | Feature | Description | Default |
