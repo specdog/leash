@@ -20,6 +20,7 @@ leash run sim-http       # localhost HTTP + WebSocket
 - **Stack catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <stack>`.
 - **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, health, and selected stream transport. Coordinator manages startup/shutdown order.
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
+- **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
 
 ## Quick Start
 
@@ -38,6 +39,9 @@ leash run sim-http
 
 # Check health
 leash health --url http://127.0.0.1:8000
+
+# Replay a deterministic fixture
+leash replay examples/replay/sim-basic.jsonl --speed 10
 ```
 
 ## MCP Tools
@@ -84,7 +88,8 @@ scripts/smoke-all.sh
 
 `scripts/smoke-all.sh` runs the no-hardware release proof and prints a JSON
 summary covering HTTP routes and policy denial, stdio MCP, physical-gate
-refusal, daemon lifecycle, graph export, and config preflight checks.
+refusal, daemon lifecycle, graph export, replay HTTP/MCP observe paths, and
+config preflight checks.
 
 ## Stream Transport
 
@@ -108,11 +113,36 @@ and safety state.
 streams: latest-value backpressure, per-key rate limiting, quality filtering,
 and timestamp pairing within a tolerance window.
 
+## Replay
+
+`leash record` writes compact `leash-replay-v1` JSONL events for telemetry,
+sensors, camera status, and command state. `leash replay` emits those events
+with original timing, scaled by `--speed`:
+
+```bash
+leash record --output /tmp/leash-demo.jsonl --samples 10 --interval-ms 50
+leash replay /tmp/leash-demo.jsonl --speed 20
+```
+
+Use a replay source to serve deterministic observations through the normal HTTP
+and MCP surfaces without hardware:
+
+```bash
+leash serve http --replay-source examples/replay/sim-basic.jsonl
+leash serve mcp --replay-source examples/replay/sim-basic.jsonl
+```
+
+Replay mode resolves to `profile: replay`, `mode: replay`, `replay: true`, and
+`physical: false` / `physical_actuation_enabled: false` in config, health, and
+capability output.
+
 Run narrower checks when you need to isolate one surface:
 
 ```bash
 scripts/smoke-http.sh
 scripts/smoke-mcp.sh
+scripts/smoke-replay-http.sh
+scripts/smoke-replay-mcp.sh
 scripts/smoke-physical-gate.sh
 scripts/smoke-daemon.sh
 ```
@@ -123,7 +153,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 
 - [x] Module graph with typed streams, lifecycle, and health aggregation
 - [x] Stack catalog: `leash list` + `leash run`
-- [ ] Replay engine: deterministic sensor record + playback
+- [x] Replay engine: deterministic sensor record + playback
 - [x] Transport abstraction: memory + local async pubsub
 - [x] Stream processing helpers: latest-value backpressure, quality filters, timestamp pairing
 - [ ] Cross-process and network transports

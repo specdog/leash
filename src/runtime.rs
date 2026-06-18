@@ -22,6 +22,7 @@ use crate::{
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
+    replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState, DriveOutcome,
@@ -44,6 +45,16 @@ struct SimDriver;
 impl RobotDriver for SimDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "sim drive");
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ReplayDriver;
+
+impl RobotDriver for ReplayDriver {
+    fn drive(&self, left: f64, right: f64) -> Result<()> {
+        debug!(left, right, "replay drive ignored");
         Ok(())
     }
 }
@@ -161,6 +172,16 @@ impl RawTelemetry {
             last_raw_frame_ms: None,
         }
     }
+
+    fn replay() -> Self {
+        Self {
+            battery_v: None,
+            odometry_left: None,
+            odometry_right: None,
+            source: "replay".to_string(),
+            last_raw_frame_ms: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -173,6 +194,7 @@ pub struct Harness {
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
     stream_transport: Arc<dyn StreamTransport>,
+    replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
 }
@@ -184,13 +206,21 @@ impl Harness {
 
         let driver: Arc<dyn RobotDriver> = match config.profile {
             Profile::Sim => Arc::new(SimDriver),
+            Profile::Replay => Arc::new(ReplayDriver),
             Profile::WaveshareUgv => open_physical_driver(&config)?,
         };
 
         let raw = match config.profile {
             Profile::Sim => RawTelemetry::sim(),
+            Profile::Replay => RawTelemetry::replay(),
             Profile::WaveshareUgv => RawTelemetry::physical(),
         };
+
+        let replay = config
+            .replay_source
+            .as_ref()
+            .map(|path| ReplayPlayback::from_path(path, config.replay_speed))
+            .transpose()?;
 
         let capabilities = default_capability_descriptors()
             .into_iter()
@@ -210,6 +240,7 @@ impl Harness {
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
             stream_transport,
+            replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
         };
@@ -243,16 +274,14 @@ impl Harness {
         let coordinator = self.coordinator.read();
         Health {
             ok: coordinator.is_healthy(),
+            mode: self.runtime_mode().to_string(),
+            replay: self.replay.is_some(),
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             uptime_ms: self.started_at.elapsed().as_millis(),
             estop: command.estop,
             deadman_ok: !command.stopped_by_deadman,
-            physical_actuation_enabled: self.config.allow_physical_actuation
-                || std::env::var("LEASH_ALLOW_PHYSICAL_ACTUATION")
-                    .ok()
-                    .as_deref()
-                    == Some("1"),
+            physical_actuation_enabled: self.physical_actuation_enabled(),
             accelerator: self.accelerator.clone(),
             modules: coordinator.graph().modules,
         }
@@ -261,6 +290,8 @@ impl Harness {
     pub fn capabilities(&self) -> Capabilities {
         Capabilities {
             ok: true,
+            mode: self.runtime_mode().to_string(),
+            replay: self.replay.is_some(),
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             physical: self.config.profile.is_physical(),
@@ -298,6 +329,10 @@ impl Harness {
     }
 
     pub fn telemetry(&self) -> TelemetryFrame {
+        if let Some(frame) = self.replay.as_ref().and_then(ReplayPlayback::telemetry_now) {
+            return replay_telemetry_source(frame.telemetry);
+        }
+
         let now = now_ms();
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
@@ -326,6 +361,10 @@ impl Harness {
 
     pub fn telemetry_stream_frame(&self) -> TelemetryStreamFrame {
         let telemetry = self.telemetry();
+        self.stream_frame_from_telemetry(telemetry)
+    }
+
+    fn stream_frame_from_telemetry(&self, telemetry: TelemetryFrame) -> TelemetryStreamFrame {
         let health = self.health();
         TelemetryStreamFrame {
             kind: "telemetry".to_string(),
@@ -343,11 +382,28 @@ impl Harness {
                 stopped_by_deadman: telemetry.stopped_by_deadman,
                 soft_odometry_limited: telemetry.soft_odometry_limited,
                 soft_odometry_limit_m: telemetry.soft_odometry_limit_m,
-                physical_actuation_enabled: health.physical_actuation_enabled,
+                physical_actuation_enabled: self.physical_actuation_enabled(),
             },
             telemetry,
             health,
         }
+    }
+
+    fn runtime_mode(&self) -> &'static str {
+        if self.replay.is_some() {
+            "replay"
+        } else {
+            "live"
+        }
+    }
+
+    fn physical_actuation_enabled(&self) -> bool {
+        self.config.profile.is_physical()
+            && (self.config.allow_physical_actuation
+                || std::env::var("LEASH_ALLOW_PHYSICAL_ACTUATION")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
     }
 
     pub fn authorize(&self, token: String, ttl_secs: u64, speed_mode: SpeedMode) -> Result<()> {
@@ -560,6 +616,7 @@ impl Harness {
 fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> {
     match config.profile {
         Profile::Sim => Ok(Arc::new(SimDriver)),
+        Profile::Replay => Ok(Arc::new(ReplayDriver)),
         Profile::WaveshareUgv => {
             #[cfg(feature = "waveshare-ugv")]
             {
@@ -756,5 +813,30 @@ mod tests {
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
         assert!(message.payload["health"]["modules"].is_array());
         assert_eq!(message.payload["safety"]["deadman_ok"], true);
+    }
+
+    #[tokio::test]
+    async fn replay_profile_observes_fixture_as_non_physical() {
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::Replay,
+            replay_source: Some(std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let health = harness.health();
+        assert_eq!(health.mode, "replay");
+        assert!(health.replay);
+        assert_eq!(health.profile, "replay");
+        assert!(!health.physical_actuation_enabled);
+
+        let capabilities = harness.capabilities();
+        assert_eq!(capabilities.mode, "replay");
+        assert!(capabilities.replay);
+        assert!(!capabilities.physical);
+
+        let telemetry = harness.telemetry();
+        assert_eq!(telemetry.profile, "replay");
+        assert_eq!(telemetry.source, "replay");
     }
 }

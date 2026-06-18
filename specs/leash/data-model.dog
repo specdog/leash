@@ -181,13 +181,13 @@ properties:
   sensor_record:
     type: boolean
     required: true
-    default: false
-states: [planned, implemented, verified]
-lifecycle: planned → implemented → verified
+    default: true
+states: [implemented, verified, active]
+lifecycle: implemented → verified → active
 ```
 
 ### Entity: CLI
-CLI + HTTP server. Subcommands: serve (mcp|http), health, stop. 16 REST + WS endpoints.
+CLI + HTTP server. Subcommands: serve (mcp|http), record, replay, health, stop. 16 REST + WS endpoints.
 
 ```yaml
 entity: CLI
@@ -200,7 +200,7 @@ properties:
   commands:
     type: string
     required: true
-    description: serve (mcp|http), health, stop
+    description: serve (mcp|http), record, replay, health, stop
   http_endpoints:
     type: string
     required: true

@@ -16,6 +16,8 @@ for (const key of [
   "LEASH_CONFIG",
   "LEASH_LISTEN",
   "LEASH_PROFILE",
+  "LEASH_REPLAY_SOURCE",
+  "LEASH_REPLAY_SPEED",
   "LEASH_REQUIRE_ACCELERATOR",
   "LEASH_ROLE",
   "LEASH_STREAM_TRANSPORT",
@@ -33,6 +35,16 @@ const checks = [
     name: "mcp-stdio",
     argv: ["bash", "scripts/smoke-mcp.sh"],
     proof: "stdio MCP initialization, tool list, and health call passed",
+  },
+  {
+    name: "replay-http-observe",
+    argv: ["bash", "scripts/smoke-replay-http.sh"],
+    proof: "HTTP replay health, capabilities, and telemetry observe paths passed",
+  },
+  {
+    name: "replay-mcp-observe",
+    argv: ["bash", "scripts/smoke-replay-mcp.sh"],
+    proof: "MCP replay health and observe paths passed",
   },
   {
     name: "physical-gate",
@@ -181,6 +193,59 @@ const checks = [
         throw new Error("accelerator fallback config was not preserved");
       }
       return "accelerator fallback config resolved without hardware";
+    },
+  },
+  {
+    name: "replay-fixture",
+    argv: [
+      "cargo",
+      "run",
+      "--quiet",
+      "--",
+      "replay",
+      "examples/replay/sim-basic.jsonl",
+      "--speed",
+      "100",
+    ],
+    validate: (stdout) => {
+      const events = stdout
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      if (events.length !== 8) {
+        throw new Error(`expected 8 replay events, got ${events.length}`);
+      }
+      if (!events.every((event) => event.format === "leash-replay-v1")) {
+        throw new Error("replay fixture emitted an unexpected format");
+      }
+      if (!events.some((event) => event.kind === "telemetry")) {
+        throw new Error("replay fixture did not emit telemetry");
+      }
+      return "deterministic replay fixture emitted telemetry, sensors, camera, and command events";
+    },
+  },
+  {
+    name: "config-replay-source",
+    argv: [
+      "cargo",
+      "run",
+      "--quiet",
+      "--",
+      "show-config",
+      "--replay-source",
+      "examples/replay/sim-basic.jsonl",
+    ],
+    validate: (stdout) => {
+      const config = JSON.parse(stdout);
+      if (config.profile !== "replay" || config.physical !== false) {
+        throw new Error("replay source did not resolve to non-physical replay profile");
+      }
+      const replaySource = config.fields.find((field) => field.name === "replay_source");
+      if (!replaySource || replaySource.attention !== "replay") {
+        throw new Error("replay_source field was not marked as replay");
+      }
+      return "replay source config resolved as non-physical";
     },
   },
 ];
