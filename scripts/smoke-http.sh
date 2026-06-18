@@ -95,6 +95,12 @@ if (payload.message.text !== process.env.EXPECT_TEXT) {
 }
 if (!Number.isInteger(payload.message.id) || payload.message.id < 1) {
   throw new Error("agent message id was missing");
+}
+if (!payload.response || payload.response.provider !== "deterministic-test") {
+  throw new Error("deterministic agent response was missing");
+}
+if (!String(payload.response.text || "").includes(process.env.EXPECT_TEXT)) {
+  throw new Error(`unexpected deterministic agent response: ${payload.response.text}`);
 }'
 }
 

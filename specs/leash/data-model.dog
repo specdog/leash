@@ -351,7 +351,7 @@ lifecycle: planned → bootstrapped → ci_green
 ```
 
 ### Entity: Agent
-Model-provider config remains planned. Input channels are implemented and tested: one-shot CLI, interactive CLI, and localhost web commands.
+Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.
 
 ```yaml
 entity: Agent
@@ -360,7 +360,7 @@ properties:
   providers:
     type: string
     required: true
-    description: planned deterministic-test, openai-compatible-http, local-http
+    description: deterministic-test, openai-compatible-http, local-http
   channels:
     type: string
     required: true
@@ -369,12 +369,16 @@ properties:
     type: string
     required: true
     description: bounded runtime inbox plus agent stream publication
+  config:
+    type: string
+    required: true
+    description: agent_provider, agent_model, agent_base_url, agent_api_key redacted, agent_timeout_ms
   ci_model:
     type: boolean
     required: true
-    default: false
-states: [planned, input_channels_implemented, input_channels_tested, provider_configured, active]
-lifecycle: planned → input_channels_implemented → input_channels_tested → provider_configured → active
+    default: true
+states: [planned, input_channels_implemented, provider_configured, provider_tested, active]
+lifecycle: planned → input_channels_implemented → provider_configured → provider_tested → active
 ```
 
 ### Entity: CapabilityRegistry
@@ -582,6 +586,14 @@ properties:
     required: true
     description: flags > env > config-file > defaults
   show_config:
+    type: boolean
+    required: true
+    default: true
+  agent_provider:
+    type: string
+    required: true
+    description: deterministic-test, openai-compatible-http, local-http
+  secret_redaction:
     type: boolean
     required: true
     default: true

@@ -6,7 +6,9 @@ use anyhow::{bail, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use leash_harness::{
     capability::default_capability_descriptors,
-    config::{resolve_config, AcceleratorBackend, ConfigRequest, PartialHarnessConfig},
+    config::{
+        resolve_config, AcceleratorBackend, AgentProvider, ConfigRequest, PartialHarnessConfig,
+    },
     daemon::{
         spawn_daemon, stop_process, tail_file, tail_jsonl_file, RunRecord, RunRegistry,
         StopOutcome, DEFAULT_RUN_NAME,
@@ -152,6 +154,21 @@ struct RuntimeArgs {
 
     #[arg(long, action = ArgAction::SetTrue)]
     no_resource_sampling: bool,
+
+    #[arg(long, value_enum)]
+    agent_provider: Option<AgentProvider>,
+
+    #[arg(long)]
+    agent_model: Option<String>,
+
+    #[arg(long)]
+    agent_base_url: Option<String>,
+
+    #[arg(long)]
+    agent_api_key: Option<String>,
+
+    #[arg(long)]
+    agent_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -462,6 +479,7 @@ async fn main() -> Result<()> {
                         .unwrap_or_default(),
                 ),
             )?;
+            resolved.config.validate()?;
             println!("{}", serde_json::to_string_pretty(&resolved)?);
         }
         Command::Health(target) => {
@@ -803,6 +821,11 @@ impl RuntimeArgs {
             } else {
                 None
             },
+            agent_provider: self.agent_provider,
+            agent_model: self.agent_model,
+            agent_base_url: self.agent_base_url,
+            agent_api_key: self.agent_api_key,
+            agent_timeout_ms: self.agent_timeout_ms,
             ..PartialHarnessConfig::default()
         })
     }
@@ -1094,6 +1117,16 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     } else {
         args.push("--no-resource-sampling".to_string());
     }
+    args.push("--agent-provider".to_string());
+    args.push(config.agent_provider.as_str().to_string());
+    args.push("--agent-model".to_string());
+    args.push(config.agent_model.clone());
+    if let Some(base_url) = &config.agent_base_url {
+        args.push("--agent-base-url".to_string());
+        args.push(base_url.clone());
+    }
+    args.push("--agent-timeout-ms".to_string());
+    args.push(config.agent_timeout_ms.to_string());
     args
 }
 

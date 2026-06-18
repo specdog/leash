@@ -28,9 +28,9 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        AgentMessage, BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState,
-        DriveOutcome, Health, OdometryStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
-        SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
+        CommandStreamState, DriveOutcome, Health, OdometryStatus, RawFrameStatus, ResourceSample,
+        SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
     },
 };
 
@@ -317,6 +317,10 @@ impl Harness {
 
     pub fn agent_messages(&self) -> Vec<AgentMessage> {
         self.agent_messages.lock().iter().cloned().collect()
+    }
+
+    pub fn agent_model_response(&self, text: &str) -> Result<Option<AgentModelResponse>> {
+        crate::agent::complete(&self.config, text)
     }
 
     pub fn module_graph(&self) -> ModuleGraph {
@@ -952,6 +956,19 @@ mod tests {
         assert_eq!(harness.agent_messages(), vec![message]);
         assert_eq!(received.stream, "agent");
         assert_eq!(received.payload["text"], "inspect the battery");
+    }
+
+    #[tokio::test]
+    async fn sim_runtime_uses_deterministic_agent_provider_without_network() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let response = harness
+            .agent_model_response(" inspect   the battery ")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.provider, "deterministic-test");
+        assert_eq!(response.text, "deterministic-agent: inspect the battery");
     }
 
     #[tokio::test]

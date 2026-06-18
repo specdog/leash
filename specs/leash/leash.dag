@@ -654,7 +654,7 @@
       13,
       "Agent",
       "entity",
-      "Model-provider config remains planned. Input channels are implemented and tested: one-shot CLI, interactive CLI, and localhost web commands.",
+      "Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.",
       [
         "providers",
         "s!",
@@ -662,14 +662,16 @@
         "s!",
         "message_stream",
         "s!",
+        "config",
+        "s!",
         "ci_model",
         "b!"
       ],
       [
         "planned",
         "input_channels_implemented",
-        "input_channels_tested",
         "provider_configured",
+        "provider_tested",
         "active"
       ],
       [
@@ -973,6 +975,10 @@
         "precedence",
         "s!",
         "show_config",
+        "b!",
+        "agent_provider",
+        "s!",
+        "secret_redaction",
         "b!"
       ],
       [
@@ -1106,11 +1112,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 7441,
-    "ct": 7441,
-    "dt": 2026,
-    "sv": 72.8,
-    "cs": 72.8,
-    "saved": 5415
+    "st": 7651,
+    "ct": 7651,
+    "dt": 2037,
+    "sv": 73.4,
+    "cs": 73.4,
+    "saved": 5614
   }
 }
