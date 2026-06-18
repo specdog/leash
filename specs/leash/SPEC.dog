@@ -33,6 +33,9 @@ $ leash mcp call invoke_capability capability=authorize token=demo ttl_secs=30
 $ leash health --url http://127.0.0.1:8000
 { "ok": true, "role": "robot", "profile": "sim", "uptime_ms": 12043, "estop": false, ... }
 
+$ leash agent-send "inspect the battery"
+{ "ok": true, "message": { "id": 1, "source": "cli", "text": "inspect the battery", ... } }
+
 $ leash stop --url http://127.0.0.1:8000
 { "ok": true, "left": 0.0, "right": 0.0, ... }
 ```
@@ -60,6 +63,9 @@ GET  /events/telemetry     → SSE TelemetryStreamFrame
 GET  /sse/telemetry        → alias for /events/telemetry
 GET  /sensors              → sensor snapshot
 GET  /camera/status        → camera health + stream URLs
+GET  /agent                → localhost web input form
+GET  /agent/messages       → recent AgentMessage list
+POST /agent/messages       → { source, text } → AgentMessageAck
 POST /capture              → CaptureResult (SVG frame + sha256)
 POST /pilot/authorize      → { token, ttl_secs, speed_mode } → PilotTokenResp
 POST /pilot/speed-mode     → { token, speed_mode }
@@ -83,7 +89,7 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-03 | Operator hits estop via CLI/MCP | P0 | All motors halt, estop latched until reset |
 | LS-04 | Operator runs sim profile with zero hardware | P0 | Telemetry streams, drive commands log only |
 | LS-05 | Hardware vendor enables Waveshare UGV | P1 | `--features waveshare-ugv` + `--allow-physical-actuation` |
-| LS-06 | CI smoke-tests MCP, HTTP, MCP HTTP, CLI calls, and physical gate | P1 | `smoke-http.sh`, `smoke-mcp.sh`, `smoke-mcp-http.sh`, `smoke-physical-gate.sh` |
+| LS-06 | CI smoke-tests MCP, HTTP, MCP HTTP, agent input, CLI calls, and physical gate | P1 | `smoke-http.sh`, `smoke-mcp.sh`, `smoke-mcp-http.sh`, `smoke-physical-gate.sh` |
 | LS-07 | Package published to crates.io | P2 | `cargo install leash-harness` works |
 | LS-08 | Binary release on GitHub | P2 | Download + run, no Rust toolchain needed |
 | LS-09 | Developer defines a module with typed inputs/outputs | P1 | Module appears in module graph with correct streams |
@@ -91,3 +97,4 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-11 | Developer replays a recorded session | P2 | Replay reproduces exact telemetry stream |
 | LS-12 | Operator views live telemetry via WebSocket | P0 | `ws://127.0.0.1:8000/ws/telemetry` streams frames |
 | LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |
+| LS-14 | Human sends natural-language input into a local runtime | P1 | `agent-send`, `agent-interactive`, and `/agent` route messages without an LLM provider |

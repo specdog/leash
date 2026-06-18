@@ -47,6 +47,9 @@ assert_capabilities_streams() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 for (const endpoint of ["WS /ws/telemetry", "GET /events/telemetry", "GET /sse/telemetry"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing endpoint: ${endpoint}`);
+}
+for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages"]) {
+  if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
 }'
 }
 
@@ -77,6 +80,32 @@ if (!payload.telemetry || payload.telemetry.profile !== "sim") throw new Error("
 if (!payload.health || !Array.isArray(payload.health.modules)) throw new Error("stream health modules were missing");
 if (!payload.command || typeof payload.command.left_cmd !== "number") throw new Error("stream command state was missing");
 if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");'
+}
+
+assert_agent_message() {
+  local expected_source="$1"
+  local expected_text="$2"
+  EXPECT_SOURCE="$expected_source" EXPECT_TEXT="$expected_text" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("agent message ok was not true");
+if (!payload.message || payload.message.source !== process.env.EXPECT_SOURCE) {
+  throw new Error(`unexpected agent source: ${payload.message && payload.message.source}`);
+}
+if (payload.message.text !== process.env.EXPECT_TEXT) {
+  throw new Error(`unexpected agent text: ${payload.message.text}`);
+}
+if (!Number.isInteger(payload.message.id) || payload.message.id < 1) {
+  throw new Error("agent message id was missing");
+}'
+}
+
+assert_agent_messages_include() {
+  local expected_text="$1"
+  EXPECT_TEXT="$expected_text" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("agent message list ok was not true");
+if (!Array.isArray(payload.messages)) throw new Error("agent messages was not an array");
+if (!payload.messages.some((message) => message.text === process.env.EXPECT_TEXT)) {
+  throw new Error(`agent message list did not include: ${process.env.EXPECT_TEXT}`);
+}'
 }
 
 assert_ws_telemetry() {
@@ -147,6 +176,13 @@ curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | parse_json
 curl -fsS "$base/sensors" | parse_json
 curl -fsS -X POST "$base/capture" | parse_json
+curl -fsS "$base/agent" | grep -q "Leash Agent Input"
+curl -fsS -X POST "$base/agent/messages" \
+  -H "content-type: application/json" \
+  --data '{"source":"web","text":"web smoke message"}' | assert_agent_message web "web smoke message"
+cargo run --quiet -- agent-send "one shot smoke message" --url "$base" | assert_agent_message cli "one shot smoke message"
+printf 'interactive smoke message\n/quit\n' | cargo run --quiet -- agent-interactive --url "$base" >/dev/null
+curl -fsS "$base/agent/messages" | assert_agent_messages_include "interactive smoke message"
 assert_ws_telemetry
 assert_sse_telemetry
 

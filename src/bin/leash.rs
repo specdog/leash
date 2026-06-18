@@ -1,3 +1,5 @@
+#[cfg(feature = "http")]
+use std::io::{self, Write};
 use std::{collections::BTreeMap, fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Result};
@@ -51,6 +53,11 @@ enum Command {
     Replay(ReplayArgs),
     #[cfg(any(feature = "http", feature = "mcp"))]
     Run(RunArgs),
+    #[cfg(feature = "http")]
+    AgentSend(AgentSendArgs),
+    #[cfg(feature = "http")]
+    #[command(alias = "agent-chat")]
+    AgentInteractive(AgentInteractiveArgs),
     #[cfg(feature = "mcp")]
     Mcp(McpArgs),
     Status(StatusArgs),
@@ -251,6 +258,28 @@ struct McpCallArgs {
     runtime: RuntimeArgs,
 }
 
+#[cfg(feature = "http")]
+#[derive(Debug, Args)]
+struct AgentSendArgs {
+    text: String,
+
+    #[arg(long, env = "LEASH_URL", default_value = "http://127.0.0.1:8000")]
+    url: String,
+
+    #[arg(long, default_value = "cli")]
+    source: String,
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Args)]
+struct AgentInteractiveArgs {
+    #[arg(long, env = "LEASH_URL", default_value = "http://127.0.0.1:8000")]
+    url: String,
+
+    #[arg(long, default_value = "interactive")]
+    source: String,
+}
+
 #[derive(Debug, Args)]
 struct StatusArgs {
     name: Option<String>,
@@ -366,6 +395,15 @@ async fn main() -> Result<()> {
         #[cfg(any(feature = "http", feature = "mcp"))]
         Command::Run(args) => {
             run_stack(args, cli.config.clone()).await?;
+        }
+        #[cfg(feature = "http")]
+        Command::AgentSend(args) => {
+            let output = send_agent_message_http(&args.url, &args.source, &args.text).await?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        #[cfg(feature = "http")]
+        Command::AgentInteractive(args) => {
+            run_agent_interactive(args).await?;
         }
         #[cfg(feature = "mcp")]
         Command::Mcp(args) => {
@@ -1070,6 +1108,51 @@ async fn stop_http_target(url: &str) -> Result<serde_json::Value> {
         .await?)
 }
 
+#[cfg(feature = "http")]
+async fn run_agent_interactive(args: AgentInteractiveArgs) -> Result<()> {
+    let mut line = String::new();
+    loop {
+        print!("agent> ");
+        io::stdout().flush()?;
+
+        line.clear();
+        if io::stdin().read_line(&mut line)? == 0 {
+            break;
+        }
+        let text = line.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if matches!(text, "/quit" | "/exit") {
+            break;
+        }
+        let output = send_agent_message_http(&args.url, &args.source, text).await?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "http")]
+async fn send_agent_message_http(url: &str, source: &str, text: &str) -> Result<serde_json::Value> {
+    let client = reqwest::Client::new();
+    Ok(client
+        .post(agent_messages_endpoint(url))
+        .json(&serde_json::json!({
+            "source": source,
+            "text": text,
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+#[cfg(feature = "http")]
+fn agent_messages_endpoint(base_url: &str) -> String {
+    format!("{}/agent/messages", base_url.trim_end_matches('/'))
+}
+
 fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
     let config_stack = resolve_config_stack(&args.stack)?;
     let capabilities = default_capability_descriptors()
@@ -1254,6 +1337,23 @@ mod tests {
         assert_eq!(
             mcp_endpoint("http://127.0.0.1:9990/mcp", "tools"),
             "http://127.0.0.1:9990/mcp/tools"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod http_tests {
+    use super::*;
+
+    #[test]
+    fn builds_agent_message_urls_without_trailing_slash_duplication() {
+        assert_eq!(
+            agent_messages_endpoint("http://127.0.0.1:8000"),
+            "http://127.0.0.1:8000/agent/messages"
+        );
+        assert_eq!(
+            agent_messages_endpoint("http://127.0.0.1:8000/"),
+            "http://127.0.0.1:8000/agent/messages"
         );
     }
 }

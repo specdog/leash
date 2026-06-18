@@ -24,8 +24,9 @@ cargo package --locked
 scripts/smoke-all.sh
 ```
 
-Use `scripts/smoke-mcp-http.sh` when isolating the localhost MCP HTTP and
-`leash mcp ...` CLI tool-call surface.
+Use `scripts/smoke-http.sh` when isolating HTTP telemetry, policy denial, and
+agent input channels. Use `scripts/smoke-mcp-http.sh` when isolating the
+localhost MCP HTTP and `leash mcp ...` CLI tool-call surface.
 
 Verify the feature matrix before tagging:
 

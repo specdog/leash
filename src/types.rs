@@ -103,6 +103,29 @@ pub struct RunLogEntry {
     pub fields: BTreeMap<String, Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentMessage {
+    pub id: u64,
+    pub ts_ms: u128,
+    pub source: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentMessageAck {
+    pub ok: bool,
+    pub message: AgentMessage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentMessageList {
+    pub ok: bool,
+    pub messages: Vec<AgentMessage>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct TelemetryStreamFrame {
