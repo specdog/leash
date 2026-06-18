@@ -14,6 +14,7 @@ const DEFAULT_LISTEN: &str = "127.0.0.1:8000";
 #[serde(rename_all = "kebab-case")]
 pub enum Profile {
     Sim,
+    Replay,
     WaveshareUgv,
 }
 
@@ -21,6 +22,7 @@ impl Profile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sim => "sim",
+            Self::Replay => "replay",
             Self::WaveshareUgv => "waveshare-ugv",
         }
     }
@@ -56,6 +58,8 @@ pub struct HarnessConfig {
     pub role: String,
     pub profile: Profile,
     pub stream_transport: StreamTransportBackend,
+    pub replay_source: Option<PathBuf>,
+    pub replay_speed: f64,
     pub listen: SocketAddr,
     pub allow_untokened_drive: bool,
     pub allow_physical_actuation: bool,
@@ -79,6 +83,10 @@ pub struct PartialHarnessConfig {
     pub profile: Option<Profile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_transport: Option<StreamTransportBackend>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_source: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_speed: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listen: Option<SocketAddr>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -166,6 +174,8 @@ struct ConfigBuilder {
     role: Resolved<String>,
     profile: Resolved<Profile>,
     stream_transport: Resolved<StreamTransportBackend>,
+    replay_source: Resolved<Option<PathBuf>>,
+    replay_speed: Resolved<f64>,
     listen: Resolved<SocketAddr>,
     allow_untokened_drive: Resolved<bool>,
     allow_physical_actuation: Resolved<bool>,
@@ -186,6 +196,8 @@ impl Default for HarnessConfig {
             role: "robot".to_string(),
             profile: Profile::Sim,
             stream_transport: StreamTransportBackend::LocalPubsub,
+            replay_source: None,
+            replay_speed: 1.0,
             listen: SocketAddr::from_str(DEFAULT_LISTEN).expect("valid default listen address"),
             allow_untokened_drive: true,
             allow_physical_actuation: false,
@@ -214,6 +226,15 @@ impl HarnessConfig {
                 "physical profile '{}' refuses to start without LEASH_ALLOW_PHYSICAL_ACTUATION=1 or --allow-physical-actuation",
                 self.profile.as_str()
             );
+        }
+        if self.profile == Profile::Replay && self.replay_source.is_none() {
+            anyhow::bail!("profile 'replay' requires --replay-source or LEASH_REPLAY_SOURCE");
+        }
+        if self.replay_source.is_some() && self.profile != Profile::Replay {
+            anyhow::bail!("replay_source requires profile 'replay'");
+        }
+        if !self.replay_speed.is_finite() || self.replay_speed <= 0.0 {
+            anyhow::bail!("replay_speed must be a finite positive number");
         }
         crate::accelerator::resolve_accelerator(self.accelerator, self.require_accelerator)?;
         Ok(())
@@ -268,6 +289,8 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         role: env.get("LEASH_ROLE").cloned(),
         profile: parse_env(env, "LEASH_PROFILE", parse_profile)?,
         stream_transport: parse_env(env, "LEASH_STREAM_TRANSPORT", parse_stream_transport)?,
+        replay_source: env.get("LEASH_REPLAY_SOURCE").map(PathBuf::from),
+        replay_speed: parse_env(env, "LEASH_REPLAY_SPEED", parse_f64)?,
         listen: parse_env(env, "LEASH_LISTEN", parse_socket_addr)?,
         allow_untokened_drive: parse_env(env, "LEASH_ALLOW_UNTOKENED_DRIVE", parse_bool)?,
         allow_physical_actuation: parse_env(env, "LEASH_ALLOW_PHYSICAL_ACTUATION", parse_bool)?,
@@ -295,8 +318,9 @@ fn parse_env<T>(
 fn parse_profile(value: &str) -> anyhow::Result<Profile> {
     match value {
         "sim" => Ok(Profile::Sim),
+        "replay" => Ok(Profile::Replay),
         "waveshare-ugv" => Ok(Profile::WaveshareUgv),
-        _ => anyhow::bail!("expected sim or waveshare-ugv"),
+        _ => anyhow::bail!("expected sim, replay, or waveshare-ugv"),
     }
 }
 
@@ -350,6 +374,8 @@ fn env_var_for_field(field: &str) -> &'static str {
         "role" => "LEASH_ROLE",
         "profile" => "LEASH_PROFILE",
         "stream_transport" => "LEASH_STREAM_TRANSPORT",
+        "replay_source" => "LEASH_REPLAY_SOURCE",
+        "replay_speed" => "LEASH_REPLAY_SPEED",
         "listen" => "LEASH_LISTEN",
         "allow_untokened_drive" => "LEASH_ALLOW_UNTOKENED_DRIVE",
         "allow_physical_actuation" => "LEASH_ALLOW_PHYSICAL_ACTUATION",
@@ -372,6 +398,8 @@ impl Default for ConfigBuilder {
             role: Resolved::defaulted(config.role),
             profile: Resolved::defaulted(config.profile),
             stream_transport: Resolved::defaulted(config.stream_transport),
+            replay_source: Resolved::defaulted(config.replay_source),
+            replay_speed: Resolved::defaulted(config.replay_speed),
             listen: Resolved::defaulted(config.listen),
             allow_untokened_drive: Resolved::defaulted(config.allow_untokened_drive),
             allow_physical_actuation: Resolved::defaulted(config.allow_physical_actuation),
@@ -417,6 +445,12 @@ impl ConfigBuilder {
         if let Some(value) = partial.stream_transport {
             self.stream_transport.set(value, source("stream_transport"));
         }
+        if let Some(value) = partial.replay_source {
+            self.replay_source.set(Some(value), source("replay_source"));
+        }
+        if let Some(value) = partial.replay_speed {
+            self.replay_speed.set(value, source("replay_speed"));
+        }
         if let Some(value) = partial.listen {
             self.listen.set(value, source("listen"));
         }
@@ -457,6 +491,10 @@ impl ConfigBuilder {
     }
 
     fn apply_profile_defaults(&mut self) {
+        if self.replay_source.value.is_some() && self.profile.source == "default" {
+            self.profile
+                .set(Profile::Replay, "replay-source".to_string());
+        }
         if self.profile.value == Profile::WaveshareUgv
             && self.allow_untokened_drive.source == "default"
         {
@@ -470,6 +508,8 @@ impl ConfigBuilder {
             role: self.role.value,
             profile: self.profile.value,
             stream_transport: self.stream_transport.value,
+            replay_source: self.replay_source.value,
+            replay_speed: self.replay_speed.value,
             listen: self.listen.value,
             allow_untokened_drive: self.allow_untokened_drive.value,
             allow_physical_actuation: self.allow_physical_actuation.value,
@@ -498,6 +538,21 @@ impl ConfigBuilder {
                 json!(config.stream_transport.as_str()),
                 self.stream_transport.source,
                 Some("module-streams"),
+            ),
+            field(
+                "replay_source",
+                json!(config
+                    .replay_source
+                    .as_ref()
+                    .map(|path| path.display().to_string())),
+                self.replay_source.source,
+                config.replay_source.is_some().then_some("replay"),
+            ),
+            field(
+                "replay_speed",
+                json!(config.replay_speed),
+                self.replay_speed.source,
+                (config.profile == Profile::Replay).then_some("replay"),
             ),
             field(
                 "listen",
@@ -720,6 +775,34 @@ mod config_tests {
             source_for(&resolved, "stream_transport"),
             "env:LEASH_STREAM_TRANSPORT"
         );
+    }
+
+    #[test]
+    fn replay_source_defaults_profile_to_replay() {
+        let env = BTreeMap::from([(
+            "LEASH_REPLAY_SOURCE".to_string(),
+            "examples/replay/sim-basic.jsonl".to_string(),
+        )]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.profile, Profile::Replay);
+        assert_eq!(
+            resolved.config.replay_source,
+            Some(PathBuf::from("examples/replay/sim-basic.jsonl"))
+        );
+        assert_eq!(source_for(&resolved, "profile"), "replay-source");
+        assert_eq!(
+            source_for(&resolved, "replay_source"),
+            "env:LEASH_REPLAY_SOURCE"
+        );
+        assert_eq!(attention_for(&resolved, "replay_source"), Some("replay"));
     }
 
     #[test]

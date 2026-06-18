@@ -13,6 +13,7 @@ pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod module;
+pub mod replay;
 pub mod runtime;
 pub mod stack;
 pub mod stream_processing;
@@ -24,6 +25,10 @@ pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
+pub use replay::{
+    scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,
+    ReplayRecording, REPLAY_FORMAT_VERSION,
+};
 pub use runtime::Harness;
 pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
 pub use stream_processing::{
@@ -34,4 +39,6 @@ pub use transport::{
     new_stream_transport, StreamMessage, StreamRecvError, StreamSubscriber, StreamTransport,
     StreamTransportBackend,
 };
-pub use types::{Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame};
+pub use types::{
+    Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+};
