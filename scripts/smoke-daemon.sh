@@ -38,7 +38,7 @@ if (payload.ok !== true) throw new Error("status ok was not true");
 if (payload.runs.length !== 0) throw new Error(`expected no runs, got ${payload.runs.length}`);'
 }
 
-LEASH_STATE_DIR="$state_dir" cargo run --quiet -- run "$name" --daemon --profile sim --listen "127.0.0.1:$port" >/dev/null
+LEASH_STATE_DIR="$state_dir" cargo run --quiet -- run sim-http --name "$name" --daemon --listen "127.0.0.1:$port" >/dev/null
 wait_ready
 LEASH_STATE_DIR="$state_dir" cargo run --quiet -- status "$name" | assert_running_status
 LEASH_STATE_DIR="$state_dir" cargo run --quiet -- log "$name" --lines 40 | grep -q "leash http listening"

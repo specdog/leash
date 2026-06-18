@@ -14,6 +14,7 @@ pub mod http;
 pub mod mcp;
 pub mod module;
 pub mod runtime;
+pub mod stack;
 pub mod types;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
@@ -22,4 +23,5 @@ pub use config::{AcceleratorBackend, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use runtime::Harness;
+pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
 pub use types::{Capabilities, CaptureResult, Health, SpeedMode, TelemetryFrame};

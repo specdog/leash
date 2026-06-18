@@ -6,8 +6,9 @@ Leash is a Rust harness runtime that lets LLM agents control robots through type
 
 ```bash
 cargo install leash-harness
-leash serve mcp          # MCP stdio for LLM agents
-leash serve http         # localhost HTTP + WebSocket
+leash list               # built-in stacks
+leash run sim-mcp        # MCP stdio for LLM agents
+leash run sim-http       # localhost HTTP + WebSocket
 ```
 
 ## Why Leash
@@ -16,7 +17,7 @@ leash serve http         # localhost HTTP + WebSocket
 - **MCP-native.** Agents get 7 typed tools (health, capabilities, observe, invoke_capability, stop, estop, capture) over stdio.
 - **Safety gates at every layer.** Deadman switch, estop, soft odometry limits, physical actuation gate. Policy-gated capability invocation.
 - **Feature-gated hardware.** Waveshare UGV today, MAVLink drone + manipulator planned. No hardware compiles without explicit `--features`.
-- **Blueprint catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <blueprint>`.
+- **Stack catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <stack>`.
 - **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, and health. Coordinator manages startup/shutdown order.
 
 ## Quick Start
@@ -25,11 +26,14 @@ leash serve http         # localhost HTTP + WebSocket
 # Install
 cargo install leash-harness
 
-# Run in simulation (zero hardware)
-leash serve mcp --profile sim
+# List built-in stacks
+leash list
+
+# Run MCP in simulation (zero hardware)
+leash run sim-mcp
 
 # Run with HTTP + WebSocket
-leash serve http --profile sim --listen 127.0.0.1:8000
+leash run sim-http
 
 # Check health
 leash health --url http://127.0.0.1:8000
@@ -93,7 +97,7 @@ scripts/smoke-daemon.sh
 See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlights:
 
 - [ ] Module graph with typed streams, lifecycle, and health aggregation
-- [ ] Blueprint catalog: `leash list` + `leash run`
+- [ ] Stack catalog: `leash list` + `leash run`
 - [ ] Replay engine: deterministic sensor record + playback
 - [ ] Transport abstraction: in-process, cross-process, network
 - [ ] MAVLink drone + manipulator adapters
