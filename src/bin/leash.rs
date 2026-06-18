@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
@@ -6,17 +6,26 @@ use leash_harness::{
     capability::default_capability_descriptors,
     config::{resolve_config, AcceleratorBackend, ConfigRequest, PartialHarnessConfig},
     daemon::{
-        spawn_daemon, stop_process, tail_file, RunRecord, RunRegistry, StopOutcome,
-        DEFAULT_RUN_NAME,
+        spawn_daemon, stop_process, tail_file, tail_jsonl_file, RunRecord, RunRegistry,
+        StopOutcome, DEFAULT_RUN_NAME,
     },
     module::default_module_graph,
     replay::{scaled_delay, ReplayEvent, ReplayEventKind, ReplayRecording, REPLAY_FORMAT_VERSION},
     stack::{built_in_stacks, find_stack, Stack, StackTransport},
     transport::StreamTransportBackend,
+    types::RunLogEntry,
     Harness, HarnessConfig, Profile, TelemetryStreamFrame,
 };
 use serde::Serialize;
-use tracing_subscriber::EnvFilter;
+use tracing::{
+    field::{Field, Visit},
+    Event, Subscriber,
+};
+use tracing_subscriber::{
+    fmt::{format::Writer, FmtContext, FormatEvent, FormatFields},
+    registry::LookupSpan,
+    EnvFilter,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -124,6 +133,12 @@ struct RuntimeArgs {
 
     #[arg(long, action = ArgAction::SetTrue)]
     require_accelerator: bool,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    resource_sampling: bool,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    no_resource_sampling: bool,
 }
 
 #[derive(Debug, Args)]
@@ -193,6 +208,12 @@ struct LogArgs {
 
     #[arg(long, default_value_t = 80)]
     lines: usize,
+
+    #[arg(long)]
+    module: Option<String>,
+
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -292,7 +313,11 @@ async fn main() -> Result<()> {
             let Some(record) = registry.read(&args.name)? else {
                 bail!("run '{}' was not found", args.name);
             };
-            let text = tail_file(&record.log_path, args.lines)?;
+            let text = if args.json || args.module.is_some() {
+                tail_jsonl_file(&record.log_path, args.lines, args.module.as_deref())?
+            } else {
+                tail_file(&record.log_path, args.lines)?
+            };
             if !text.is_empty() {
                 println!("{text}");
             }
@@ -511,6 +536,9 @@ impl RuntimeArgs {
         if self.allow_untokened_drive && self.no_untokened_drive {
             bail!("use either --allow-untokened-drive or --no-untokened-drive, not both");
         }
+        if self.resource_sampling && self.no_resource_sampling {
+            bail!("use either --resource-sampling or --no-resource-sampling, not both");
+        }
         let profile = if self.replay_source.is_some() && self.profile.is_none() {
             Some(Profile::Replay)
         } else {
@@ -538,6 +566,13 @@ impl RuntimeArgs {
             drive_swap: self.drive_swap.then_some(true),
             accelerator: self.accelerator,
             require_accelerator: self.require_accelerator.then_some(true),
+            resource_sampling: if self.resource_sampling {
+                Some(true)
+            } else if self.no_resource_sampling {
+                Some(false)
+            } else {
+                None
+            },
             ..PartialHarnessConfig::default()
         })
     }
@@ -691,7 +726,12 @@ fn restart_daemon_run(name: &str, graceful_timeout: Duration) -> Result<RunRecor
         stop_process(record.pid, graceful_timeout)?;
     }
     registry.remove(name)?;
-    let pid = spawn_daemon(&std::env::current_exe()?, &record.args, &record.log_path)?;
+    let pid = spawn_daemon(
+        &std::env::current_exe()?,
+        &record.args,
+        &record.log_path,
+        &record.name,
+    )?;
     let now = leash_harness::daemon::now_ms();
     let restarted = RunRecord {
         pid,
@@ -755,7 +795,7 @@ fn daemon_status(name: Option<&str>) -> Result<StatusOutput> {
 fn spawn_run_record(name: &str, config: &HarnessConfig, args: Vec<String>) -> Result<RunRecord> {
     let registry = RunRegistry::from_env()?;
     let log_path = registry.log_path(name)?;
-    let pid = spawn_daemon(&std::env::current_exe()?, &args, &log_path)?;
+    let pid = spawn_daemon(&std::env::current_exe()?, &args, &log_path, name)?;
     let now = leash_harness::daemon::now_ms();
     let record = RunRecord {
         name: name.to_string(),
@@ -819,6 +859,11 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     if config.require_accelerator {
         args.push("--require-accelerator".to_string());
     }
+    if config.resource_sampling {
+        args.push("--resource-sampling".to_string());
+    } else {
+        args.push("--no-resource-sampling".to_string());
+    }
     args
 }
 
@@ -871,8 +916,96 @@ fn config_from_args(
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
+    if let Some(run_id) = std::env::var("LEASH_RUN_ID")
+        .ok()
+        .filter(|run_id| !run_id.trim().is_empty())
+    {
+        tracing_subscriber::fmt()
+            .event_format(JsonlEventFormat { run_id })
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .init();
+    }
+}
+
+struct JsonlEventFormat {
+    run_id: String,
+}
+
+impl<S, N> FormatEvent<S, N> for JsonlEventFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        _ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result {
+        let mut visitor = JsonFieldVisitor::default();
+        event.record(&mut visitor);
+        let metadata = event.metadata();
+        let entry = RunLogEntry {
+            timestamp: leash_harness::daemon::now_ms(),
+            run_id: self.run_id.clone(),
+            module: metadata.target().to_string(),
+            event: visitor
+                .message
+                .unwrap_or_else(|| metadata.name().to_string()),
+            level: metadata.level().as_str().to_ascii_lowercase(),
+            fields: visitor.fields,
+        };
+        let line = serde_json::to_string(&entry).map_err(|_| fmt::Error)?;
+        writeln!(writer, "{line}")
+    }
+}
+
+#[derive(Default)]
+struct JsonFieldVisitor {
+    message: Option<String>,
+    fields: BTreeMap<String, serde_json::Value>,
+}
+
+impl JsonFieldVisitor {
+    fn insert(&mut self, field: &Field, value: serde_json::Value) {
+        if field.name() == "message" {
+            if let Some(message) = value.as_str() {
+                self.message = Some(message.to_string());
+            }
+            return;
+        }
+        self.fields.insert(field.name().to_string(), value);
+    }
+}
+
+impl Visit for JsonFieldVisitor {
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.insert(field, serde_json::json!(value));
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.insert(field, serde_json::json!(value));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.insert(field, serde_json::json!(value));
+    }
+
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.insert(field, serde_json::json!(value));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.insert(field, serde_json::json!(value));
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        self.insert(field, serde_json::json!(format!("{value:?}")));
+    }
 }

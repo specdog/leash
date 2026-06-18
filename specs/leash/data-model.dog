@@ -601,6 +601,14 @@ properties:
     type: boolean
     required: true
     default: false
+  cli_json:
+    type: boolean
+    required: true
+    default: true
+  module_filter:
+    type: boolean
+    required: true
+    default: true
 states: [planned, implemented, tested]
 lifecycle: planned → implemented → tested
 ```
