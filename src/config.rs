@@ -66,28 +66,43 @@ pub struct HarnessConfig {
     pub require_accelerator: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PartialHarnessConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<Profile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub listen: Option<SocketAddr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_untokened_drive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_physical_actuation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deadman_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_odometry_limit_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_baud: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub drive_invert: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub drive_swap: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub accelerator: Option<AcceleratorBackend>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub require_accelerator: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConfigRequest {
     pub config_path: Option<PathBuf>,
-    pub blueprint: Option<Profile>,
+    pub stack: Option<Profile>,
+    pub stack_defaults: PartialHarnessConfig,
     pub env: BTreeMap<String, String>,
     pub cli: PartialHarnessConfig,
 }
@@ -95,17 +110,23 @@ pub struct ConfigRequest {
 impl ConfigRequest {
     pub fn from_process(
         config_path: Option<PathBuf>,
-        blueprint: Option<Profile>,
+        stack: Option<Profile>,
         cli: PartialHarnessConfig,
     ) -> Self {
         Self {
             config_path,
-            blueprint,
+            stack,
+            stack_defaults: PartialHarnessConfig::default(),
             env: env::vars()
                 .filter(|(key, _)| key.starts_with("LEASH_"))
                 .collect(),
             cli,
         }
+    }
+
+    pub fn with_stack_defaults(mut self, defaults: PartialHarnessConfig) -> Self {
+        self.stack_defaults = defaults;
+        self
     }
 }
 
@@ -202,15 +223,16 @@ pub fn resolve_config(request: ConfigRequest) -> anyhow::Result<ResolvedHarnessC
         builder.apply_partial(config, |_| source.clone());
     }
 
-    if let Some(profile) = request.blueprint {
+    if let Some(profile) = request.stack {
         builder.apply_partial(
             PartialHarnessConfig {
                 profile: Some(profile),
                 ..PartialHarnessConfig::default()
             },
-            |_| format!("blueprint:{}", profile.as_str()),
+            |_| format!("stack:{}", profile.as_str()),
         );
     }
+    builder.apply_partial(request.stack_defaults, |_| "stack-default".to_string());
 
     builder.apply_profile_defaults();
     builder.apply_partial(env_overrides(&request.env)?, env_source);
@@ -418,7 +440,7 @@ impl ConfigBuilder {
             && self.allow_untokened_drive.source == "default"
         {
             self.allow_untokened_drive
-                .set(false, "blueprint:waveshare-ugv".to_string());
+                .set(false, "stack:waveshare-ugv".to_string());
         }
     }
 
@@ -526,7 +548,7 @@ impl ConfigBuilder {
             precedence: vec![
                 "default",
                 "config-file",
-                "blueprint-default",
+                "stack-default",
                 "environment",
                 "cli",
             ],
@@ -550,11 +572,14 @@ fn field(
 }
 
 fn redact_value(name: &str, value: Value) -> Value {
+    if !value.is_string() {
+        return value;
+    }
     let name = name.to_ascii_lowercase();
     let sensitive = ["token", "secret", "password", "key"]
         .iter()
         .any(|needle| name.contains(needle));
-    if sensitive && !value.is_null() {
+    if sensitive {
         json!("<redacted>")
     } else {
         value
@@ -577,7 +602,8 @@ mod config_tests {
         ]);
         let resolved = resolve_config(ConfigRequest {
             config_path: Some(config_path.clone()),
-            blueprint: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
             env,
             cli: PartialHarnessConfig {
                 role: Some("cli-bot".to_string()),
@@ -599,7 +625,8 @@ mod config_tests {
     fn physical_profile_defaults_to_tokened_drive_and_disabled_actuation() {
         let resolved = resolve_config(ConfigRequest {
             config_path: None,
-            blueprint: Some(Profile::WaveshareUgv),
+            stack: Some(Profile::WaveshareUgv),
+            stack_defaults: PartialHarnessConfig::default(),
             env: BTreeMap::new(),
             cli: PartialHarnessConfig::default(),
         })
@@ -610,7 +637,7 @@ mod config_tests {
         assert!(!resolved.config.allow_physical_actuation);
         assert_eq!(
             source_for(&resolved, "allow_untokened_drive"),
-            "blueprint:waveshare-ugv"
+            "stack:waveshare-ugv"
         );
         assert_eq!(
             attention_for(&resolved, "allow_physical_actuation"),
@@ -627,7 +654,8 @@ mod config_tests {
         let env = BTreeMap::from([("LEASH_ACCELERATOR".to_string(), "cuda".to_string())]);
         let resolved = resolve_config(ConfigRequest {
             config_path: Some(config_path.clone()),
-            blueprint: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
             env,
             cli: PartialHarnessConfig {
                 accelerator: Some(AcceleratorBackend::Cpu),
@@ -661,6 +689,10 @@ mod config_tests {
             json!("<redacted>")
         );
         assert_eq!(redact_value("api_key", json!("abc")), json!("<redacted>"));
+        assert_eq!(
+            redact_value("allow_untokened_drive", json!(true)),
+            json!(true)
+        );
         assert_eq!(redact_value("role", json!("abc")), json!("abc"));
     }
 

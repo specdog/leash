@@ -209,9 +209,9 @@
     ],
     [
       2,
-      "Blueprints",
+      "Stacks",
       "entity",
-      "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <blueprint>`.",
+      "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.",
       [
         "catalog",
         "s!",
