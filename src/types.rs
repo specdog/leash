@@ -77,6 +77,38 @@ pub struct TelemetryFrame {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct TelemetryStreamFrame {
+    pub kind: String,
+    pub ts_ms: u128,
+    pub telemetry: TelemetryFrame,
+    pub health: Health,
+    pub command: CommandStreamState,
+    pub safety: SafetyStreamState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CommandStreamState {
+    pub left_cmd: f64,
+    pub right_cmd: f64,
+    pub session_id: Option<String>,
+    pub speed_mode: SpeedMode,
+    pub max_speed: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SafetyStreamState {
+    pub estop: bool,
+    pub deadman_ok: bool,
+    pub stopped_by_deadman: bool,
+    pub soft_odometry_limited: bool,
+    pub soft_odometry_limit_m: f64,
+    pub physical_actuation_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct SensorSnapshot {
     pub battery: BatteryStatus,
     pub odometry: OdometryStatus,

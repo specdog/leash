@@ -24,8 +24,9 @@ use crate::{
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        BatteryStatus, CameraStatus, Capabilities, CaptureResult, DriveOutcome, Health,
-        OdometryStatus, RawFrameStatus, SensorSnapshot, SpeedMode, TelemetryFrame,
+        BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState, DriveOutcome,
+        Health, OdometryStatus, RawFrameStatus, SafetyStreamState, SensorSnapshot, SpeedMode,
+        TelemetryFrame, TelemetryStreamFrame,
     },
 };
 
@@ -268,6 +269,8 @@ impl Harness {
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
+                "GET /events/telemetry".to_string(),
+                "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
                 "GET /camera/status".to_string(),
                 "POST /pilot/authorize".to_string(),
@@ -318,6 +321,32 @@ impl Harness {
             max_speed: command.speed_mode.cap(),
             sensors,
             source: raw.source,
+        }
+    }
+
+    pub fn telemetry_stream_frame(&self) -> TelemetryStreamFrame {
+        let telemetry = self.telemetry();
+        let health = self.health();
+        TelemetryStreamFrame {
+            kind: "telemetry".to_string(),
+            ts_ms: telemetry.ts_ms,
+            command: CommandStreamState {
+                left_cmd: telemetry.left_cmd,
+                right_cmd: telemetry.right_cmd,
+                session_id: telemetry.session_id.clone(),
+                speed_mode: telemetry.speed_mode,
+                max_speed: telemetry.max_speed,
+            },
+            safety: SafetyStreamState {
+                estop: telemetry.estop,
+                deadman_ok: telemetry.deadman_ok,
+                stopped_by_deadman: telemetry.stopped_by_deadman,
+                soft_odometry_limited: telemetry.soft_odometry_limited,
+                soft_odometry_limit_m: telemetry.soft_odometry_limit_m,
+                physical_actuation_enabled: health.physical_actuation_enabled,
+            },
+            telemetry,
+            health,
         }
     }
 
@@ -520,7 +549,7 @@ impl Harness {
                 interval.tick().await;
                 let telemetry = harness.telemetry();
                 let _ = harness.telemetry_tx.send(telemetry.clone());
-                if let Ok(payload) = serde_json::to_value(&telemetry) {
+                if let Ok(payload) = serde_json::to_value(harness.telemetry_stream_frame()) {
                     let _ = harness.stream_transport.publish("telemetry", payload);
                 }
             }
@@ -723,6 +752,9 @@ mod tests {
         let message = receiver.recv().await.unwrap();
 
         assert_eq!(message.stream, "telemetry");
-        assert_eq!(message.payload["profile"], "sim");
+        assert_eq!(message.payload["kind"], "telemetry");
+        assert_eq!(message.payload["telemetry"]["profile"], "sim");
+        assert!(message.payload["health"]["modules"].is_array());
+        assert_eq!(message.payload["safety"]["deadman_ok"], true);
     }
 }

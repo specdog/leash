@@ -131,7 +131,7 @@ lifecycle: planned → designed → implemented → tested → active
 ```
 
 ### Entity: Telemetry
-Live telemetry streaming. Broadcast channel, WebSocket, SSE. TelemetryFrame with full sensor snapshot.
+Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.
 
 ```yaml
 entity: Telemetry
@@ -140,7 +140,7 @@ properties:
   outputs:
     type: string
     required: true
-    description: broadcast, ws, sse, json_stream
+    description: transport, ws, sse, json_stream
   websocket:
     type: boolean
     required: true
@@ -148,7 +148,7 @@ properties:
   sse:
     type: boolean
     required: true
-    default: false
+    default: true
   views:
     type: string
     required: true

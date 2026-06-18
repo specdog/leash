@@ -58,10 +58,12 @@ leash health --url http://127.0.0.1:8000
 GET  /health              Harness health
 GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
+GET  /events/telemetry     Server-sent telemetry stream
+GET  /sse/telemetry        Alias for /events/telemetry
 POST /drive               { token, left, right, speed_mode }
 POST /estop                Latch emergency stop
 POST /estop/reset          Clear estop
-WS   /ws/telemetry         Streaming telemetry frames
+WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
 
 ## Features
@@ -86,8 +88,8 @@ refusal, daemon lifecycle, graph export, and config preflight checks.
 
 ## Stream Transport
 
-`stream_transport` selects the module-stream backend shown in graph and
-capability output:
+`stream_transport` selects the module-stream backend used by WebSocket and SSE
+telemetry streams and shown in graph and capability output:
 
 - `local-pubsub` is the default runtime backend. It uses bounded async broadcast
   channels, supports fan-out across local tasks, drops oldest messages under
@@ -97,6 +99,10 @@ capability output:
 
 Use `--stream-transport memory` or `LEASH_STREAM_TRANSPORT=memory` when a run
 needs deterministic in-process delivery.
+
+`/ws/telemetry`, `/events/telemetry`, and `/sse/telemetry` emit the same
+transport-backed envelope: latest telemetry, health/module state, command state,
+and safety state.
 
 Run narrower checks when you need to isolate one surface:
 
