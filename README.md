@@ -1,211 +1,88 @@
-# Leash
+# leash
 
-Leash is a Rust harness runtime for robot control and local-LLM tools.
-It ships as the `leash-harness` Rust crate and installs a `leash` binary.
+> Composable local-LLM and robotics harness. Rust-first, MCP-first, simulation-safe.
 
-The default runtime is simulation-safe. Physical robot adapters are optional
-features and refuse motor actuation unless `LEASH_ALLOW_PHYSICAL_ACTUATION=1`
-or `--allow-physical-actuation` is set.
-
-## Install
-
-From the current repository checkout:
-
-```bash
-cargo install --path .
-```
-
-From GitHub source:
-
-```bash
-cargo install --git https://github.com/specdog/leash leash-harness
-```
-
-After crates.io publish:
+Leash is a Rust harness runtime that lets LLM agents control robots through typed modules, safety gates, and a shared capability registry. Run in simulation with zero hardware, or connect physical robots behind explicit actuation gates.
 
 ```bash
 cargo install leash-harness
+leash serve mcp          # MCP stdio for LLM agents
+leash serve http         # localhost HTTP + WebSocket
 ```
 
-From a GitHub release archive:
+## Why Leash
+
+- **Simulation-safe by default.** CI, demos, and smoke tests require zero hardware. Physical actuation is an explicit opt-in gate.
+- **MCP-native.** Agents get 7 typed tools (health, capabilities, observe, invoke_capability, stop, estop, capture) over stdio.
+- **Safety gates at every layer.** Deadman switch, estop, soft odometry limits, physical actuation gate. Policy-gated capability invocation.
+- **Feature-gated hardware.** Waveshare UGV today, MAVLink drone + manipulator planned. No hardware compiles without explicit `--features`.
+- **Blueprint catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <blueprint>`.
+- **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, and health. Coordinator manages startup/shutdown order.
+
+## Quick Start
 
 ```bash
-version=v0.1.0
-target=x86_64-unknown-linux-gnu
-curl -L -o "leash-$target.tar.gz" \
-  "https://github.com/specdog/leash/releases/download/$version/leash-$target.tar.gz"
-tar -xzf "leash-$target.tar.gz"
-install -m 0755 "leash-$target/leash" "$HOME/.local/bin/leash"
-```
+# Install
+cargo install leash-harness
 
-Release binaries start with common desktop targets: Linux x86_64, macOS
-x86_64, macOS arm64, and Windows x86_64. Ubuntu UGV and Jetson installs should
-use the source install path until Linux aarch64 cross-builds are proven.
-
-## Feature Tiers
-
-Leash keeps the default install simulation-safe. Optional surfaces are grouped
-by feature tier so CI can prove the important build shapes without requiring
-hardware.
-
-| Tier | Cargo features | Surface | Hardware requirement | Release proof |
-| --- | --- | --- | --- | --- |
-| Core library | `--no-default-features --lib` | config resolution, runtime types, capability registry, module graph, accelerator probes | none | `cargo check --no-default-features --lib` |
-| Default runtime | `default` (`sim,http,mcp`) | simulation profile, HTTP server, stdio MCP server, daemon runs | none | `cargo check`; full test and smoke suite |
-| MCP-only | `--no-default-features --features mcp` | stdio MCP tools and JSON schemas | none | `cargo check --no-default-features --features mcp` |
-| HTTP simulation | `--no-default-features --features sim,http` | HTTP routes, WebSocket telemetry, simulation driver | none | `cargo check --no-default-features --features sim,http`; HTTP smoke |
-| Interop bridge | `bridge-compat` | existing bridge/client HTTP compatibility | none unless combined with a physical profile | compile as part of hardware-adapter matrix |
-| Hardware adapter | `waveshare-ugv` with `http,mcp,bridge-compat` for bot installs | Waveshare UGV serial adapter and physical profile | compile-only in CI; live actuation requires `LEASH_ALLOW_PHYSICAL_ACTUATION=1` or `--allow-physical-actuation` | `cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,bridge-compat`; physical-gate smoke |
-| Accelerator placeholder | `cuda` | backend selection and probe inventory | none; no vendor SDK required until a real backend lands | `cargo check --all-features`; accelerator tests |
-
-Reserved roadmap tiers are dashboard, replay, visualization, and perception
-adapters. They are not installable Cargo features yet; each tier should add its
-own feature flag, no-hardware build proof, and smoke coverage when the
-implementation lands.
-
-## Local LLM / MCP
-
-Run a stdio MCP server:
-
-```bash
+# Run in simulation (zero hardware)
 leash serve mcp --profile sim
-```
 
-Use this command in a local LLM client's MCP config. The server exposes:
-
-- `health`
-- `capabilities`
-- `observe`
-- `invoke_capability`
-- `stop`
-- `estop`
-- `capture`
-
-## HTTP Compatibility
-
-Run the HTTP harness:
-
-```bash
+# Run with HTTP + WebSocket
 leash serve http --profile sim --listen 127.0.0.1:8000
+
+# Check health
+leash health --url http://127.0.0.1:8000
 ```
 
-Smoke it:
+## MCP Tools
 
-```bash
-curl -s http://127.0.0.1:8000/health
-curl -s http://127.0.0.1:8000/capabilities
-curl -s http://127.0.0.1:8000/telemetry
-curl -s -X POST http://127.0.0.1:8000/motors/stop
+| Tool | Description |
+|------|-------------|
+| `health` | Harness health and safety state |
+| `capabilities` | Endpoints, MCP tools, speed modes |
+| `observe` | Latest telemetry frame (odometry, battery, sensors) |
+| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode |
+| `stop` | Non-latching zero-speed motor stop |
+| `estop` | Latch emergency stop until reset |
+| `capture` | Deterministic frame capture |
+
+## HTTP Endpoints
+
+```
+GET  /health              Harness health
+GET  /capabilities         Endpoints + tools
+GET  /telemetry            Latest TelemetryFrame
+POST /drive               { token, left, right, speed_mode }
+POST /estop                Latch emergency stop
+POST /estop/reset          Clear estop
+WS   /ws/telemetry         Streaming telemetry frames
 ```
 
-## Daemon Runs
+## Features
 
-Start a simulation HTTP run in the background:
+| Feature | Description | Default |
+|---------|-------------|---------|
+| `sim` | Simulation driver (no hardware) | ✓ |
+| `http` | HTTP server + WebSocket | ✓ |
+| `mcp` | MCP stdio server | ✓ |
+| `waveshare-ugv` | Waveshare UGV physical adapter | opt-in |
+| `bridge-compat` | Legacy robot bridge compatibility | opt-in |
 
-```bash
-leash run --daemon --profile sim --listen 127.0.0.1:8000
-```
+## Roadmap
 
-Inspect and manage it:
+See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlights:
 
-```bash
-leash status
-leash log
-leash restart
-leash stop
-```
+- [ ] Module graph with typed streams, lifecycle, and health aggregation
+- [ ] Blueprint catalog: `leash list` + `leash run`
+- [ ] Replay engine: deterministic sensor record + playback
+- [ ] Transport abstraction: in-process, cross-process, network
+- [ ] MAVLink drone + manipulator adapters
+- [ ] Localhost command center dashboard
+- [ ] Spatial memory and perception primitives
+- [ ] Patrol and exploration in simulation
+- [ ] Full no-hardware smoke suite
 
-Run records and logs are stored under `LEASH_STATE_DIR`, or the XDG state
-directory when `LEASH_STATE_DIR` is unset. Use a run name when multiple local
-runtimes are active:
+## License
 
-```bash
-leash run bench --daemon --profile sim --listen 127.0.0.1:8010
-leash status bench
-leash stop bench
-```
-
-## Accelerator Selection
-
-The runtime defaults to no accelerator and remains CPU-safe in CI:
-
-```bash
-leash show-config --accelerator cpu --require-accelerator
-leash show-config --accelerator cuda
-```
-
-Health and capabilities include an accelerator probe inventory. The CPU backend
-is always available; the `cuda` backend is a feature-gated placeholder that
-reports compile/probe status until a real device backend is attached. Standard
-builds do not require GPU hardware or vendor SDKs.
-
-## Inspect Configuration
-
-Check the resolved runtime config before starting a service:
-
-```bash
-leash show-config
-leash show-config waveshare-ugv --listen 0.0.0.0:8000 --allow-physical-actuation
-```
-
-The output includes each field's source, physical-actuation flags, and network
-bind address. Precedence is default, config file, blueprint default,
-environment, then CLI. If present, `--config` or `LEASH_CONFIG` points at a JSON
-config file.
-
-## Waveshare UGV Example
-
-The Waveshare Ubuntu UGV adapter is not part of the default build:
-
-```bash
-cargo build --features waveshare-ugv,bridge-compat
-LEASH_ALLOW_PHYSICAL_ACTUATION=1 \
-  leash serve http \
-  --profile waveshare-ugv \
-  --listen 0.0.0.0:8000 \
-  --serial-port /dev/ttyTHS1
-```
-
-Only one process can own the UGV serial port. Stop the stock Waveshare app or
-any previous harness before starting the physical profile.
-
-## Install On A Bot
-
-For a source-based bot install with a user systemd service:
-
-```bash
-scripts/install-bot.sh --profile sim --listen 127.0.0.1:8000 --start
-```
-
-Physical installs are explicit:
-
-```bash
-scripts/install-bot.sh \
-  --profile waveshare-ugv \
-  --role courier \
-  --listen 0.0.0.0:8000 \
-  --serial-port /dev/ttyTHS1 \
-  --no-untokened-drive \
-  --allow-physical-actuation \
-  --start
-```
-
-See [docs/BOT_INSTALL.md](docs/BOT_INSTALL.md).
-
-Release steps are tracked in [docs/RELEASE.md](docs/RELEASE.md).
-
-## Smoke Tests
-
-```bash
-scripts/smoke-http.sh
-scripts/smoke-mcp.sh
-scripts/smoke-physical-gate.sh
-scripts/smoke-daemon.sh
-```
-
-## Provenance
-
-Leash is extracted from the `robot-harness` in
-`https://github.com/0xSoftBoi/onchain-rover`, originally built for the Clanker
-500 / Onchain Rover hackathon project. The sidecar, x402, race UI, and chain
-flows stay in that project and are treated here as examples or integrations.
+MIT
