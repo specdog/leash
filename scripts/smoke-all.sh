@@ -18,6 +18,7 @@ for (const key of [
   "LEASH_PROFILE",
   "LEASH_REQUIRE_ACCELERATOR",
   "LEASH_ROLE",
+  "LEASH_STREAM_TRANSPORT",
 ]) {
   delete baseEnv[key];
 }
@@ -86,6 +87,30 @@ const checks = [
     },
   },
   {
+    name: "graph-stream-transport",
+    argv: [
+      "cargo",
+      "run",
+      "--quiet",
+      "--",
+      "graph",
+      "sim",
+      "--stream-transport",
+      "memory",
+    ],
+    validate: (stdout) => {
+      const graph = JSON.parse(stdout);
+      const streams = graph.modules.flatMap((module) => [
+        ...module.inputs,
+        ...module.outputs,
+      ]);
+      if (!streams.length || streams.some((stream) => stream.transport !== "memory")) {
+        throw new Error("graph did not apply selected stream transport");
+      }
+      return "graph stream transport selection applied";
+    },
+  },
+  {
     name: "config-stack-sim-http",
     argv: ["cargo", "run", "--quiet", "--", "show-config", "sim-http"],
     validate: (stdout) => {
@@ -96,6 +121,9 @@ const checks = [
       const listen = config.fields.find((field) => field.name === "listen");
       if (!listen || listen.source !== "stack-default") {
         throw new Error("sim-http listen source was not stack-default");
+      }
+      if (config.stream_transport !== "local-pubsub") {
+        throw new Error("default stream transport was not local-pubsub");
       }
       return "sim-http stack config resolved";
     },

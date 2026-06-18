@@ -11,6 +11,7 @@ use leash_harness::{
     },
     module::default_module_graph,
     stack::{built_in_stacks, find_stack, Stack, StackTransport},
+    transport::StreamTransportBackend,
     Harness, HarnessConfig, Profile,
 };
 use serde::Serialize;
@@ -78,6 +79,9 @@ struct RuntimeArgs {
 
     #[arg(long, value_enum)]
     profile: Option<Profile>,
+
+    #[arg(long, value_enum)]
+    stream_transport: Option<StreamTransportBackend>,
 
     #[arg(long, action = ArgAction::SetTrue)]
     allow_untokened_drive: bool,
@@ -190,6 +194,9 @@ struct GraphArgs {
 
     #[arg(long, env = "LEASH_ROLE", default_value = "robot")]
     role: String,
+
+    #[arg(long, value_enum, default_value_t = StreamTransportBackend::LocalPubsub)]
+    stream_transport: StreamTransportBackend,
 }
 
 #[derive(Debug, Args)]
@@ -467,6 +474,7 @@ impl RuntimeArgs {
         Ok(PartialHarnessConfig {
             role: self.role,
             profile: self.profile,
+            stream_transport: self.stream_transport,
             allow_untokened_drive: if self.allow_untokened_drive {
                 Some(true)
             } else if self.no_untokened_drive {
@@ -630,6 +638,8 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
         config.role.clone(),
         "--profile".to_string(),
         config.profile.as_str().to_string(),
+        "--stream-transport".to_string(),
+        config.stream_transport.as_str().to_string(),
         "--listen".to_string(),
         config.listen.to_string(),
         "--deadman-ms".to_string(),
@@ -683,6 +693,7 @@ fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
     let config = HarnessConfig {
         role: args.role.clone(),
         profile: config_stack.profile,
+        stream_transport: args.stream_transport,
         ..HarnessConfig::default()
     };
     Ok(default_module_graph(&config, capabilities))
