@@ -74,11 +74,11 @@ states: [planned, designed, implemented, tested, active]
 lifecycle: planned → designed → implemented → tested → active
 ```
 
-### Entity: Blueprints
-Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <blueprint>`.
+### Entity: Stacks
+Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.
 
 ```yaml
-entity: Blueprints
+entity: Stacks
 type: entity
 properties:
   catalog:
@@ -650,7 +650,7 @@ properties:
   coverage:
     type: string
     required: true
-    description: blueprint-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
+    description: stack-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
   no_hardware:
     type: boolean
     required: true
@@ -705,17 +705,17 @@ cardinality: 1:many
 required: true
 ```
 
-### Relationship: Blueprints → ModuleGraph
+### Relationship: Stacks → ModuleGraph
 ```yaml
-relationship: Blueprints → ModuleGraph
+relationship: Stacks → ModuleGraph
 verb: instantiates
 cardinality: 1:many
 required: true
 ```
 
-### Relationship: Blueprints → Harness
+### Relationship: Stacks → Harness
 ```yaml
-relationship: Blueprints → Harness
+relationship: Stacks → Harness
 verb: targets
 cardinality: many:1
 required: true
@@ -745,9 +745,9 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: Replay → Blueprints
+### Relationship: Replay → Stacks
 ```yaml
-relationship: Replay → Blueprints
+relationship: Replay → Stacks
 verb: exercises
 cardinality: 1:many
 required: true
@@ -825,9 +825,9 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: MCPServer → Blueprints
+### Relationship: MCPServer → Stacks
 ```yaml
-relationship: MCPServer → Blueprints
+relationship: MCPServer → Stacks
 verb: launches
 cardinality: 1:many
 required: true

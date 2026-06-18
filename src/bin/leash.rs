@@ -10,6 +10,7 @@ use leash_harness::{
         DEFAULT_RUN_NAME,
     },
     module::default_module_graph,
+    stack::{built_in_stacks, find_stack, Stack, StackTransport},
     Harness, HarnessConfig, Profile,
 };
 use serde::Serialize;
@@ -31,8 +32,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    List(ListArgs),
     Serve(Serve),
-    #[cfg(feature = "http")]
+    #[cfg(any(feature = "http", feature = "mcp"))]
     Run(RunArgs),
     Status(StatusArgs),
     Log(LogArgs),
@@ -41,6 +43,18 @@ enum Command {
     ShowConfig(ShowConfigArgs),
     Health(HttpTarget),
     Stop(StopArgs),
+}
+
+#[derive(Debug, Args)]
+struct ListArgs {
+    #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+    format: ListFormat,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ListFormat {
+    Table,
+    Json,
 }
 
 #[derive(Debug, Args)]
@@ -116,8 +130,10 @@ struct HttpTarget {
 
 #[derive(Debug, Args)]
 struct RunArgs {
-    #[arg(default_value = DEFAULT_RUN_NAME)]
-    name: String,
+    stack: Option<String>,
+
+    #[arg(long)]
+    name: Option<String>,
 
     #[arg(long, action = ArgAction::SetTrue)]
     daemon: bool,
@@ -167,7 +183,7 @@ struct RestartArgs {
 #[derive(Debug, Args)]
 struct GraphArgs {
     #[arg(default_value = "sim")]
-    blueprint: String,
+    stack: String,
 
     #[arg(long, value_enum, default_value_t = GraphFormat::Json)]
     format: GraphFormat,
@@ -178,8 +194,7 @@ struct GraphArgs {
 
 #[derive(Debug, Args)]
 struct ShowConfigArgs {
-    #[arg(value_enum)]
-    blueprint: Option<Profile>,
+    stack: Option<String>,
 
     #[command(flatten)]
     runtime: RuntimeArgs,
@@ -200,31 +215,27 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::List(args) => {
+            print_stack_list(args.format)?;
+        }
         Command::Serve(serve) => match serve.transport {
             #[cfg(feature = "mcp")]
             Transport::Mcp(args) => {
-                let harness = Harness::new(config_from_args(args, None, cli.config.clone())?)?;
+                let harness =
+                    Harness::new(config_from_args(args, None, cli.config.clone(), None)?)?;
                 leash_harness::mcp::serve_stdio(harness).await?;
             }
             #[cfg(feature = "http")]
             Transport::Http(args) => {
-                let config = config_from_args(args.runtime, args.listen, cli.config.clone())?;
+                let config = config_from_args(args.runtime, args.listen, cli.config.clone(), None)?;
                 let listen = config.listen;
                 let harness = Harness::new(config)?;
                 leash_harness::http::serve_http(harness, listen).await?;
             }
         },
-        #[cfg(feature = "http")]
+        #[cfg(any(feature = "http", feature = "mcp"))]
         Command::Run(args) => {
-            let config = config_from_args(args.runtime, args.listen, cli.config.clone())?;
-            if args.daemon {
-                let record = start_daemon_run(&args.name, &config)?;
-                println!("{}", serde_json::to_string_pretty(&record)?);
-            } else {
-                let listen = config.listen;
-                let harness = Harness::new(config)?;
-                leash_harness::http::serve_http(harness, listen).await?;
-            }
+            run_stack(args, cli.config.clone()).await?;
         }
         Command::Status(args) => {
             let output = daemon_status(args.name.as_deref())?;
@@ -257,11 +268,24 @@ async fn main() -> Result<()> {
             if let Some(listen) = args.listen {
                 cli_overrides.listen = Some(listen);
             }
-            let resolved = resolve_config(ConfigRequest::from_process(
-                cli.config.clone(),
-                args.blueprint,
-                cli_overrides,
-            ))?;
+            let config_stack = args
+                .stack
+                .as_deref()
+                .map(resolve_config_stack)
+                .transpose()?;
+            let resolved = resolve_config(
+                ConfigRequest::from_process(
+                    cli.config.clone(),
+                    config_stack.as_ref().map(|stack| stack.profile),
+                    cli_overrides,
+                )
+                .with_stack_defaults(
+                    config_stack
+                        .as_ref()
+                        .map(|stack| stack.defaults.clone())
+                        .unwrap_or_default(),
+                ),
+            )?;
             println!("{}", serde_json::to_string_pretty(&resolved)?);
         }
         Command::Health(target) => {
@@ -286,6 +310,153 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_stack_list(format: ListFormat) -> Result<()> {
+    let stacks = built_in_stacks();
+    match format {
+        ListFormat::Json => println!("{}", serde_json::to_string_pretty(&stacks)?),
+        ListFormat::Table => {
+            println!(
+                "{:<22} {:<13} {:<9} {:<8} {:<28} COMMAND",
+                "NAME", "PROFILE", "TRANSPORT", "HARDWARE", "FEATURES"
+            );
+            for stack in stacks {
+                let features = stack.required_features.join(",");
+                println!(
+                    "{:<22} {:<13} {:<9} {:<8} {:<28} {}",
+                    stack.name,
+                    stack.profile.as_str(),
+                    stack.transport.kind.as_str(),
+                    if stack.hardware_required { "yes" } else { "no" },
+                    features,
+                    stack.command
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "http", feature = "mcp"))]
+async fn run_stack(args: RunArgs, config_path: Option<PathBuf>) -> Result<()> {
+    let selection = RunSelection::from_args(&args)?;
+    let config = config_from_args(
+        args.runtime,
+        args.listen,
+        config_path,
+        selection.stack.as_ref(),
+    )?;
+
+    match selection.transport {
+        StackTransport::Http => {
+            #[cfg(feature = "http")]
+            {
+                if args.daemon {
+                    let record = start_daemon_run(&selection.name, &config)?;
+                    println!("{}", serde_json::to_string_pretty(&record)?);
+                } else {
+                    let listen = config.listen;
+                    let harness = Harness::new(config)?;
+                    leash_harness::http::serve_http(harness, listen).await?;
+                }
+            }
+            #[cfg(not(feature = "http"))]
+            {
+                let _ = config;
+                bail!("HTTP stacks require the 'http' feature");
+            }
+        }
+        StackTransport::Mcp => {
+            if args.daemon {
+                bail!("daemon mode is only supported for HTTP stacks");
+            }
+            #[cfg(feature = "mcp")]
+            {
+                let harness = Harness::new(config)?;
+                leash_harness::mcp::serve_stdio(harness).await?;
+            }
+            #[cfg(not(feature = "mcp"))]
+            {
+                let _ = config;
+                bail!("MCP stacks require the 'mcp' feature");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RunSelection {
+    #[cfg_attr(not(feature = "http"), allow(dead_code))]
+    name: String,
+    stack: Option<Stack>,
+    transport: StackTransport,
+}
+
+impl RunSelection {
+    fn from_args(args: &RunArgs) -> Result<Self> {
+        if let Some(name) = args.stack.as_deref() {
+            if let Some(stack) = find_stack(name) {
+                stack.validate()?;
+                return Ok(Self {
+                    name: args.name.clone().unwrap_or_else(|| stack.name.clone()),
+                    transport: stack.transport.kind,
+                    stack: Some(stack),
+                });
+            }
+
+            return Ok(Self {
+                name: args.name.clone().unwrap_or_else(|| name.to_string()),
+                stack: None,
+                transport: StackTransport::Http,
+            });
+        }
+
+        Ok(Self {
+            name: args
+                .name
+                .clone()
+                .unwrap_or_else(|| DEFAULT_RUN_NAME.to_string()),
+            stack: None,
+            transport: StackTransport::Http,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ConfigStack {
+    profile: Profile,
+    defaults: PartialHarnessConfig,
+}
+
+fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
+    if let Some(stack) = find_stack(name) {
+        stack.validate()?;
+        return Ok(ConfigStack {
+            profile: stack.profile,
+            defaults: stack.config_overrides,
+        });
+    }
+
+    let profile = match name {
+        "sim" => Profile::Sim,
+        "waveshare-ugv" => Profile::WaveshareUgv,
+        other => {
+            let stacks = built_in_stacks()
+                .into_iter()
+                .map(|stack| stack.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "unknown stack or profile '{other}'; expected sim, waveshare-ugv, or one of: {stacks}"
+            );
+        }
+    };
+    Ok(ConfigStack {
+        profile,
+        defaults: PartialHarnessConfig::default(),
+    })
 }
 
 impl RuntimeArgs {
@@ -504,18 +675,14 @@ async fn stop_http_target(url: &str) -> Result<serde_json::Value> {
 }
 
 fn graph_from_args(args: &GraphArgs) -> Result<leash_harness::ModuleGraph> {
-    let profile = match args.blueprint.as_str() {
-        "sim" => Profile::Sim,
-        "waveshare-ugv" => Profile::WaveshareUgv,
-        other => bail!("unknown graph target '{other}'; expected sim or waveshare-ugv"),
-    };
+    let config_stack = resolve_config_stack(&args.stack)?;
     let capabilities = default_capability_descriptors()
         .into_iter()
         .map(|descriptor| descriptor.name)
         .collect();
     let config = HarnessConfig {
         role: args.role.clone(),
-        profile,
+        profile: config_stack.profile,
         ..HarnessConfig::default()
     };
     Ok(default_module_graph(&config, capabilities))
@@ -525,12 +692,21 @@ fn config_from_args(
     args: RuntimeArgs,
     listen: Option<SocketAddr>,
     config_path: Option<PathBuf>,
+    stack: Option<&Stack>,
 ) -> Result<HarnessConfig> {
     let mut cli = args.into_partial_config()?;
     if let Some(listen) = listen {
         cli.listen = Some(listen);
     }
-    Ok(resolve_config(ConfigRequest::from_process(config_path, None, cli))?.config)
+    Ok(resolve_config(
+        ConfigRequest::from_process(config_path, stack.map(|stack| stack.profile), cli)
+            .with_stack_defaults(
+                stack
+                    .map(|stack| stack.config_overrides.clone())
+                    .unwrap_or_default(),
+            ),
+    )?
+    .config)
 }
 
 fn init_tracing() {

@@ -14,5 +14,5 @@
 10. Module graph with typed streams (planned). Every module declares inputs, outputs, lifecycle, and health. Streams are typed and validated at graph construction time.
 11. Replay determinism (planned). Recorded sessions must reproduce identical telemetry when replayed against the same inputs. Replay is a safety and debugging primitive.
 12. Transport abstraction (planned). Module communication works identically across in-process, cross-process, and network transports. No module knows its peer's location.
-13. Blueprint catalog (planned). Every demo, robot config, and replay scenario is a versioned, runnable blueprint. No ad-hoc wiring at runtime.
-14. Generic operating surface. Leash targets typed modules, reusable run targets, replay, telemetry, local-first execution, and MCP-native agent integration without binding the roadmap to another project.
+13. Stack catalog (planned). Every demo, robot config, and replay scenario is a versioned, runnable stack. No ad-hoc wiring at runtime.
+14. Generic operating surface. Leash targets typed modules, reusable stacks, replay, telemetry, local-first execution, and MCP-native agent integration without binding the roadmap to another project.
