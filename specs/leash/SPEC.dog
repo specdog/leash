@@ -46,6 +46,8 @@ Tool: capture          → deterministic frame capture (SVG)
 GET  /health              → Health struct
 GET  /capabilities         → Capabilities struct
 GET  /telemetry            → TelemetryFrame (latest)
+GET  /events/telemetry     → SSE TelemetryStreamFrame
+GET  /sse/telemetry        → alias for /events/telemetry
 GET  /sensors              → sensor snapshot
 GET  /camera/status        → camera health + stream URLs
 POST /capture              → CaptureResult (SVG frame + sha256)
@@ -58,7 +60,7 @@ POST /stop                 → alias for /motors/stop
 POST /estop                → { ok: true, estop: true }
 POST /estop/reset          → { ok: true, estop: false }
 GET  /stream               → SVG frame (image/svg+xml)
-WS   /ws/telemetry         → streaming TelemetryFrame JSON
+WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 ```
 
 ## User Stories

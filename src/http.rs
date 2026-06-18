@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{convert::Infallible, net::SocketAddr, time::Duration};
 
 use anyhow::Result;
 use axum::{
@@ -7,17 +7,20 @@ use axum::{
         State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Json, Router,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{stream, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
-use crate::{runtime::Harness, types::SpeedMode};
+use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
 
 #[derive(Debug, Deserialize)]
 struct PilotTokenReq {
@@ -54,6 +57,8 @@ pub fn router(harness: Harness) -> Router {
         .route("/capabilities", get(capabilities))
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
+        .route("/events/telemetry", get(sse_telemetry))
+        .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
         .route("/camera/status", get(camera_status))
         .route("/capture", post(capture))
@@ -192,9 +197,29 @@ async fn ws_telemetry(ws: WebSocketUpgrade, State(harness): State<Harness>) -> R
     ws.on_upgrade(move |socket| handle_telemetry_socket(socket, harness))
 }
 
+async fn sse_telemetry(
+    State(harness): State<Harness>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, HttpError> {
+    let receiver = harness.subscribe_stream("telemetry")?;
+    let stream = telemetry_sse_stream(receiver);
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(5))
+            .text("keepalive"),
+    ))
+}
+
 async fn handle_telemetry_socket(socket: WebSocket, harness: Harness) {
     let (mut sender, mut receiver) = socket.split();
-    let mut telemetry = harness.subscribe_telemetry();
+    let Ok(mut telemetry) = harness.subscribe_stream("telemetry") else {
+        let _ = sender
+            .send(Message::Text(stream_error_text(
+                "error",
+                "telemetry stream unavailable",
+            )))
+            .await;
+        return;
+    };
 
     tokio::spawn(async move { while receiver.next().await.is_some() {} });
 
@@ -206,15 +231,62 @@ async fn handle_telemetry_socket(socket: WebSocket, harness: Harness) {
                     break;
                 }
             }
-            frame = telemetry.recv() => {
-                let Ok(frame) = frame else { break };
-                let Ok(text) = serde_json::to_string(&frame) else { break };
+            message = telemetry.recv() => {
+                let text = match message {
+                    Ok(message) => message.payload.to_string(),
+                    Err(StreamRecvError::Lagged(skipped)) => stream_lagged_text(skipped),
+                    Err(StreamRecvError::Closed) => {
+                        let _ = sender
+                            .send(Message::Text(stream_error_text("closed", "telemetry stream closed")))
+                            .await;
+                        break;
+                    }
+                };
                 if sender.send(Message::Text(text)).await.is_err() {
                     break;
                 }
             }
         }
     }
+}
+
+fn telemetry_sse_stream(
+    receiver: crate::transport::StreamSubscriber,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    stream::unfold((receiver, false), |(mut receiver, done)| async move {
+        if done {
+            return None;
+        }
+        let (event, done) = match receiver.recv().await {
+            Ok(message) => (
+                Event::default()
+                    .event("telemetry")
+                    .data(message.payload.to_string()),
+                false,
+            ),
+            Err(StreamRecvError::Lagged(skipped)) => (
+                Event::default()
+                    .event("lagged")
+                    .data(json!({"kind":"lagged","skipped":skipped}).to_string()),
+                false,
+            ),
+            Err(StreamRecvError::Closed) => (
+                Event::default()
+                    .event("closed")
+                    .data(stream_error_text("closed", "telemetry stream closed")),
+                true,
+            ),
+        };
+        Some((Ok(event), (receiver, done)))
+    })
+}
+
+fn stream_lagged_text(skipped: u64) -> String {
+    json!({"kind":"lagged","skipped":skipped}).to_string()
+}
+
+fn stream_error_text(kind: &str, message: &str) -> String {
+    json!({"kind":kind,"ok":false,"error":message}).to_string()
 }
 
 #[derive(Debug)]
