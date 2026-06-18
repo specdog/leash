@@ -1,6 +1,9 @@
 use std::{
-    collections::HashMap,
-    sync::Arc,
+    collections::{HashMap, VecDeque},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -25,11 +28,13 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState, DriveOutcome,
-        Health, OdometryStatus, RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot,
-        SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        AgentMessage, BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandStreamState,
+        DriveOutcome, Health, OdometryStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
+        SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
     },
 };
+
+const AGENT_MESSAGE_LIMIT: usize = 128;
 
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
@@ -194,6 +199,8 @@ pub struct Harness {
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
     stream_transport: Arc<dyn StreamTransport>,
+    agent_messages: Arc<Mutex<VecDeque<AgentMessage>>>,
+    agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
@@ -240,6 +247,8 @@ impl Harness {
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
             stream_transport,
+            agent_messages: Arc::new(Mutex::new(VecDeque::new())),
+            agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
@@ -263,6 +272,51 @@ impl Harness {
 
     pub fn capability_registry(&self) -> CapabilityRegistry {
         CapabilityRegistry::new(self.clone())
+    }
+
+    pub fn submit_agent_message(
+        &self,
+        source: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<AgentMessage> {
+        let text = text.into();
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(anyhow!("agent message text cannot be empty"));
+        }
+        let source = source.into();
+        let source = match source.trim() {
+            "" => "unknown".to_string(),
+            source => source.to_string(),
+        };
+        let message = AgentMessage {
+            id: self.agent_seq.fetch_add(1, Ordering::Relaxed) + 1,
+            ts_ms: now_ms(),
+            source,
+            text: text.to_string(),
+        };
+
+        {
+            let mut messages = self.agent_messages.lock();
+            if messages.len() == AGENT_MESSAGE_LIMIT {
+                messages.pop_front();
+            }
+            messages.push_back(message.clone());
+        }
+
+        if let Ok(payload) = serde_json::to_value(&message) {
+            let _ = self.stream_transport.publish("agent", payload);
+        }
+        tracing::info!(
+            message_id = message.id,
+            source = %message.source,
+            "agent message queued"
+        );
+        Ok(message)
+    }
+
+    pub fn agent_messages(&self) -> Vec<AgentMessage> {
+        self.agent_messages.lock().iter().cloned().collect()
     }
 
     pub fn module_graph(&self) -> ModuleGraph {
@@ -304,6 +358,9 @@ impl Harness {
                 "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
                 "GET /camera/status".to_string(),
+                "GET /agent".to_string(),
+                "GET /agent/messages".to_string(),
+                "POST /agent/messages".to_string(),
                 "POST /pilot/authorize".to_string(),
                 "POST /drive".to_string(),
                 "POST /motors/stop".to_string(),
@@ -873,6 +930,37 @@ mod tests {
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
         assert!(message.payload["health"]["modules"].is_array());
         assert_eq!(message.payload["safety"]["deadman_ok"], true);
+    }
+
+    #[tokio::test]
+    async fn agent_messages_are_recorded_and_published_without_provider() {
+        let harness = Harness::new(HarnessConfig {
+            stream_transport: crate::transport::StreamTransportBackend::Memory,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let mut receiver = harness.subscribe_stream("agent").unwrap();
+
+        let message = harness
+            .submit_agent_message("test", "inspect the battery")
+            .unwrap();
+        let received = receiver.recv().await.unwrap();
+
+        assert_eq!(message.id, 1);
+        assert_eq!(message.source, "test");
+        assert_eq!(message.text, "inspect the battery");
+        assert_eq!(harness.agent_messages(), vec![message]);
+        assert_eq!(received.stream, "agent");
+        assert_eq!(received.payload["text"], "inspect the battery");
+    }
+
+    #[tokio::test]
+    async fn agent_messages_reject_empty_text() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let err = harness.submit_agent_message("test", "   ").unwrap_err();
+
+        assert!(err.to_string().contains("text cannot be empty"));
     }
 
     #[tokio::test]

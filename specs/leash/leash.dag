@@ -372,7 +372,7 @@
       6,
       "CLI",
       "entity",
-      "CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), mcp list-tools/call/status/modules, record, replay, health, stop. 16 REST + WS endpoints plus MCP HTTP JSON endpoints.",
+      "CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.",
       [
         "listen",
         "s!",
@@ -654,18 +654,22 @@
       13,
       "Agent",
       "entity",
-      "Model-provider config + input channels. One-shot, interactive, web commands.",
+      "Model-provider config remains planned. Input channels are implemented and tested: one-shot CLI, interactive CLI, and localhost web commands.",
       [
         "providers",
         "s!",
         "channels",
+        "s!",
+        "message_stream",
         "s!",
         "ci_model",
         "b!"
       ],
       [
         "planned",
-        "configured",
+        "input_channels_implemented",
+        "input_channels_tested",
+        "provider_configured",
         "active"
       ],
       [
@@ -1102,11 +1106,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 7169,
-    "ct": 7169,
-    "dt": 1966,
-    "sv": 72.6,
-    "cs": 72.6,
-    "saved": 5203
+    "st": 7441,
+    "ct": 7441,
+    "dt": 2026,
+    "sv": 72.8,
+    "cs": 72.8,
+    "saved": 5415
   }
 }

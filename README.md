@@ -37,6 +37,8 @@ leash run sim-mcp
 
 # Run with HTTP + WebSocket
 leash run sim-http
+leash agent-send "inspect the battery"
+leash agent-interactive
 
 # Run as a daemon and inspect JSONL logs
 leash run sim-http --daemon
@@ -89,11 +91,30 @@ GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
 GET  /events/telemetry     Server-sent telemetry stream
 GET  /sse/telemetry        Alias for /events/telemetry
+GET  /agent                Local web input form
+GET  /agent/messages       Recent agent input messages
+POST /agent/messages       { source, text }
 POST /drive               { token, left, right, speed_mode }
 POST /estop                Latch emergency stop
 POST /estop/reset          Clear estop
 WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
+
+## Agent Input
+
+Run a local HTTP stack, then send natural-language text into the runtime without
+requiring a model provider:
+
+```bash
+leash run sim-http
+leash agent-send "inspect the battery"
+printf 'look for obstacles\n/quit\n' | leash agent-interactive
+```
+
+`POST /agent/messages` records a bounded recent inbox and publishes each message
+on the `agent` stream for local subscribers. The web form at `/agent` is only
+available when the `http` feature is built, and Leash binds HTTP to
+`127.0.0.1:8000` by default.
 
 ## Features
 
@@ -198,6 +219,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Replay engine: deterministic sensor record + playback
 - [x] Transport abstraction: memory + local async pubsub
 - [x] Stream processing helpers: latest-value backpressure, quality filters, timestamp pairing
+- [x] Agent input channels: one-shot CLI, interactive CLI, and localhost web input
 - [ ] Cross-process and network transports
 - [ ] MAVLink drone + manipulator adapters
 - [ ] Localhost command center dashboard

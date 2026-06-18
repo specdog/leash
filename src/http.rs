@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
+use crate::types::{AgentMessageAck, AgentMessageList};
 use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +42,12 @@ struct DriveReq {
     left: f64,
     right: f64,
     speed_mode: Option<SpeedMode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentMessageReq {
+    text: String,
+    source: Option<String>,
 }
 
 pub async fn serve_http(harness: Harness, listen: SocketAddr) -> Result<()> {
@@ -70,6 +77,9 @@ pub fn router(harness: Harness) -> Router {
         .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
         .route("/camera/status", get(camera_status))
+        .route("/agent", get(agent_page))
+        .route("/agent/messages", get(agent_messages).post(agent_message))
+        .route("/agent/send", post(agent_message))
         .route("/capture", post(capture))
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
@@ -159,6 +169,77 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "camera": harness.telemetry().sensors.camera
     }))
+}
+
+async fn agent_messages(State(harness): State<Harness>) -> Json<AgentMessageList> {
+    Json(AgentMessageList {
+        ok: true,
+        messages: harness.agent_messages(),
+    })
+}
+
+async fn agent_message(
+    State(harness): State<Harness>,
+    Json(req): Json<AgentMessageReq>,
+) -> Result<Json<AgentMessageAck>, HttpError> {
+    let source = req.source.unwrap_or_else(|| "http".to_string());
+    Ok(Json(AgentMessageAck {
+        ok: true,
+        message: harness.submit_agent_message(source, req.text)?,
+    }))
+}
+
+async fn agent_page() -> Response {
+    let body = r##"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leash Agent Input</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+    main { width: min(560px, calc(100vw - 32px)); display: grid; gap: 12px; }
+    h1 { margin: 0; font-size: 20px; font-weight: 650; }
+    textarea { width: 100%; min-height: 120px; box-sizing: border-box; padding: 12px; font: inherit; }
+    button { justify-self: start; padding: 8px 12px; font: inherit; }
+    pre { margin: 0; min-height: 24px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Leash Agent Input</h1>
+    <form id="agent-form">
+      <textarea id="agent-text" name="text" autofocus required></textarea>
+      <button type="submit">Send</button>
+    </form>
+    <pre id="agent-output"></pre>
+  </main>
+  <script>
+    const form = document.querySelector("#agent-form");
+    const text = document.querySelector("#agent-text");
+    const output = document.querySelector("#agent-output");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const response = await fetch("/agent/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "web", text: text.value })
+      });
+      const payload = await response.json();
+      output.textContent = JSON.stringify(payload, null, 2);
+      if (payload.ok) text.value = "";
+    });
+  </script>
+</body>
+</html>
+"##;
+    let mut response = body.into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
 }
 
 async fn capture(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
