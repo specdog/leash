@@ -17,6 +17,8 @@ use leash_harness::{
     Harness, HarnessConfig, Profile, TelemetryStreamFrame,
 };
 use serde::Serialize;
+#[cfg(feature = "mcp")]
+use serde_json::{json, Map, Value};
 use tracing::{
     field::{Field, Visit},
     Event, Subscriber,
@@ -49,6 +51,8 @@ enum Command {
     Replay(ReplayArgs),
     #[cfg(any(feature = "http", feature = "mcp"))]
     Run(RunArgs),
+    #[cfg(feature = "mcp")]
+    Mcp(McpArgs),
     Status(StatusArgs),
     Log(LogArgs),
     Restart(RestartArgs),
@@ -80,6 +84,8 @@ struct Serve {
 enum Transport {
     #[cfg(feature = "mcp")]
     Mcp(RuntimeArgs),
+    #[cfg(all(feature = "http", feature = "mcp"))]
+    McpHttp(McpHttpServeArgs),
     #[cfg(feature = "http")]
     Http(HttpServeArgs),
 }
@@ -151,6 +157,15 @@ struct HttpServeArgs {
 }
 
 #[derive(Debug, Args)]
+struct McpHttpServeArgs {
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+
+    #[arg(long, default_value = "127.0.0.1:9990")]
+    listen: SocketAddr,
+}
+
+#[derive(Debug, Args)]
 struct HttpTarget {
     #[arg(long, env = "LEASH_URL", default_value = "http://127.0.0.1:8000")]
     url: String,
@@ -194,6 +209,46 @@ struct RunArgs {
 
     #[arg(long)]
     listen: Option<SocketAddr>,
+}
+
+#[derive(Debug, Args)]
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    ListTools(McpTargetArgs),
+    Call(McpCallArgs),
+    Status(McpTargetArgs),
+    Modules(McpTargetArgs),
+}
+
+#[derive(Debug, Args)]
+struct McpTargetArgs {
+    #[arg(long, env = "LEASH_MCP_URL")]
+    url: Option<String>,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Args)]
+struct McpCallArgs {
+    tool: String,
+
+    #[arg(value_name = "KEY=VALUE")]
+    args: Vec<String>,
+
+    #[arg(long, value_name = "JSON")]
+    json: Option<String>,
+
+    #[arg(long, env = "LEASH_MCP_URL")]
+    url: Option<String>,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
 }
 
 #[derive(Debug, Args)]
@@ -285,6 +340,14 @@ async fn main() -> Result<()> {
                     Harness::new(config_from_args(args, None, cli.config.clone(), None)?)?;
                 leash_harness::mcp::serve_stdio(harness).await?;
             }
+            #[cfg(all(feature = "http", feature = "mcp"))]
+            Transport::McpHttp(args) => {
+                let config =
+                    config_from_args(args.runtime, Some(args.listen), cli.config.clone(), None)?;
+                let listen = config.listen;
+                let harness = Harness::new(config)?;
+                leash_harness::http::serve_mcp_http(harness, listen).await?;
+            }
             #[cfg(feature = "http")]
             Transport::Http(args) => {
                 let config = config_from_args(args.runtime, args.listen, cli.config.clone(), None)?;
@@ -303,6 +366,10 @@ async fn main() -> Result<()> {
         #[cfg(any(feature = "http", feature = "mcp"))]
         Command::Run(args) => {
             run_stack(args, cli.config.clone()).await?;
+        }
+        #[cfg(feature = "mcp")]
+        Command::Mcp(args) => {
+            run_mcp_command(args, cli.config.clone()).await?;
         }
         Command::Status(args) => {
             let output = daemon_status(args.name.as_deref())?;
@@ -407,6 +474,131 @@ fn print_stack_list(format: ListFormat) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "mcp")]
+async fn run_mcp_command(args: McpArgs, config_path: Option<PathBuf>) -> Result<()> {
+    match args.command {
+        McpCommand::ListTools(args) => {
+            if let Some(url) = args.url {
+                print_json(&mcp_get(&url, "tools").await?)?;
+            } else {
+                let _ = args.runtime;
+                print_json(&leash_harness::mcp::tool_list())?;
+            }
+        }
+        McpCommand::Call(args) => {
+            let call_args = parse_mcp_call_args(args.json.as_deref(), &args.args)?;
+            if let Some(url) = args.url {
+                print_json(&mcp_post_call(&url, &args.tool, call_args).await?)?;
+            } else {
+                let harness =
+                    Harness::new(config_from_args(args.runtime, None, config_path, None)?)?;
+                print_json(&leash_harness::mcp::call_tool(
+                    &harness, &args.tool, call_args,
+                )?)?;
+            }
+        }
+        McpCommand::Status(args) => {
+            if let Some(url) = args.url {
+                print_json(&mcp_get(&url, "status").await?)?;
+            } else {
+                let harness =
+                    Harness::new(config_from_args(args.runtime, None, config_path, None)?)?;
+                print_json(&leash_harness::mcp::status(&harness, "local"))?;
+            }
+        }
+        McpCommand::Modules(args) => {
+            if let Some(url) = args.url {
+                print_json(&mcp_get(&url, "modules").await?)?;
+            } else {
+                let harness =
+                    Harness::new(config_from_args(args.runtime, None, config_path, None)?)?;
+                print_json(&leash_harness::mcp::module_tool_map(&harness))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mcp")]
+fn print_json(value: &impl Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_get(base_url: &str, path: &str) -> Result<Value> {
+    Ok(reqwest::get(mcp_endpoint(base_url, path))
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_post_call(base_url: &str, tool: &str, args: Value) -> Result<Value> {
+    let client = reqwest::Client::new();
+    Ok(client
+        .post(mcp_endpoint(base_url, "call"))
+        .json(&json!({ "tool": tool, "args": args }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
+}
+
+#[cfg(feature = "mcp")]
+fn mcp_endpoint(base_url: &str, path: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    let path = path.trim_start_matches('/');
+    if base.ends_with("/mcp") {
+        format!("{base}/{path}")
+    } else {
+        format!("{base}/mcp/{path}")
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn parse_mcp_call_args(json_arg: Option<&str>, raw_args: &[String]) -> Result<Value> {
+    let mut map = if let Some(json_arg) = json_arg {
+        parse_json_object(json_arg)?
+    } else if raw_args.len() == 1 && raw_args[0].trim_start().starts_with('{') {
+        parse_json_object(&raw_args[0])?
+    } else {
+        Map::new()
+    };
+
+    let skip_positional_json =
+        json_arg.is_none() && raw_args.len() == 1 && raw_args[0].trim_start().starts_with('{');
+    for (index, arg) in raw_args.iter().enumerate() {
+        if skip_positional_json && index == 0 {
+            continue;
+        }
+        let Some((key, value)) = arg.split_once('=') else {
+            bail!("expected MCP call argument '{arg}' to use key=value or pass --json '{{...}}'");
+        };
+        if key.trim().is_empty() {
+            bail!("MCP call argument key cannot be empty");
+        }
+        map.insert(key.to_string(), parse_mcp_arg_value(value));
+    }
+
+    Ok(Value::Object(map))
+}
+
+#[cfg(feature = "mcp")]
+fn parse_json_object(text: &str) -> Result<Map<String, Value>> {
+    match serde_json::from_str(text)? {
+        Value::Object(map) => Ok(map),
+        _ => bail!("MCP JSON args must be a JSON object"),
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn parse_mcp_arg_value(value: &str) -> Value {
+    serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
 }
 
 #[cfg(any(feature = "http", feature = "mcp"))]
@@ -1007,5 +1199,61 @@ impl Visit for JsonFieldVisitor {
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.insert(field, serde_json::json!(format!("{value:?}")));
+    }
+}
+
+#[cfg(all(test, feature = "mcp"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_key_value_mcp_args_as_json_scalars() {
+        let args = parse_mcp_call_args(
+            None,
+            &[
+                "capability=drive".to_string(),
+                "left=0.2".to_string(),
+                "right=0".to_string(),
+                "speed_mode=low".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            json!({
+                "capability": "drive",
+                "left": 0.2,
+                "right": 0,
+                "speed_mode": "low",
+            })
+        );
+    }
+
+    #[test]
+    fn parses_json_mcp_args_and_allows_key_value_overrides() {
+        let args = parse_mcp_call_args(
+            Some(r#"{"capability":"speed_mode","speed_mode":"medium"}"#),
+            &["speed_mode=low".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            json!({
+                "capability": "speed_mode",
+                "speed_mode": "low",
+            })
+        );
+    }
+
+    #[test]
+    fn builds_mcp_urls_without_duplicate_prefixes() {
+        assert_eq!(
+            mcp_endpoint("http://127.0.0.1:9990", "tools"),
+            "http://127.0.0.1:9990/mcp/tools"
+        );
+        assert_eq!(
+            mcp_endpoint("http://127.0.0.1:9990/mcp", "tools"),
+            "http://127.0.0.1:9990/mcp/tools"
+        );
     }
 }
