@@ -102,7 +102,7 @@ lifecycle: planned → cataloged → implemented → tested
 ```
 
 ### Entity: Transport
-Pub/sub abstraction. Memory + local async backends. Local pubsub uses bounded broadcast channels and reports receiver lag.
+Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.
 
 ```yaml
 entity: Transport
@@ -120,7 +120,13 @@ properties:
   quality_filtering:
     type: boolean
     required: true
-    default: false
+    default: true
+    description: generic hook for camera/replay frame selection
+  timestamp_pairing:
+    type: boolean
+    required: true
+    default: true
+    description: pair stream items within a tolerance window
   default_backend:
     type: enum
     required: true

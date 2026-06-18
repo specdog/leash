@@ -259,13 +259,15 @@
       3,
       "Transport",
       "entity",
-      "Pub/sub abstraction. Memory + local async backends. Local pubsub uses bounded broadcast channels and reports receiver lag.",
+      "Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.",
       [
         "backends",
         "s!",
         "backpressure",
         "b!",
         "quality_filtering",
+        "b!",
+        "timestamp_pairing",
         "b!",
         "default_backend",
         "e!"
