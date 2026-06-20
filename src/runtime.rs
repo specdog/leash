@@ -1,6 +1,9 @@
 use std::{
-    collections::HashMap,
-    sync::Arc,
+    collections::{HashMap, VecDeque},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -18,14 +21,20 @@ use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 use crate::{
-    capability::CapabilityRegistry,
+    accelerator::{resolve_accelerator, AcceleratorStatus},
+    capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
-    module::{default_module_graph, ModuleGraph},
+    module::{default_module_graph, ModuleCoordinator, ModuleGraph},
+    replay::{replay_telemetry_source, ReplayPlayback},
+    transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        BatteryStatus, CameraStatus, Capabilities, CaptureResult, DriveOutcome, Health,
-        OdometryStatus, RawFrameStatus, SensorSnapshot, SpeedMode, TelemetryFrame,
+        AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
+        CommandStreamState, DriveOutcome, Health, OdometryStatus, RawFrameStatus, ResourceSample,
+        SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
     },
 };
+
+const AGENT_MESSAGE_LIMIT: usize = 128;
 
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
@@ -41,6 +50,16 @@ struct SimDriver;
 impl RobotDriver for SimDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "sim drive");
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ReplayDriver;
+
+impl RobotDriver for ReplayDriver {
+    fn drive(&self, left: f64, right: f64) -> Result<()> {
+        debug!(left, right, "replay drive ignored");
         Ok(())
     }
 }
@@ -158,6 +177,16 @@ impl RawTelemetry {
             last_raw_frame_ms: None,
         }
     }
+
+    fn replay() -> Self {
+        Self {
+            battery_v: None,
+            odometry_left: None,
+            odometry_right: None,
+            source: "replay".to_string(),
+            last_raw_frame_ms: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -169,23 +198,46 @@ pub struct Harness {
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
+    stream_transport: Arc<dyn StreamTransport>,
+    agent_messages: Arc<Mutex<VecDeque<AgentMessage>>>,
+    agent_seq: Arc<AtomicU64>,
+    replay: Option<ReplayPlayback>,
+    coordinator: Arc<RwLock<ModuleCoordinator>>,
+    accelerator: AcceleratorStatus,
 }
 
 impl Harness {
     pub fn new(config: HarnessConfig) -> Result<Self> {
         config.validate()?;
+        let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
 
         let driver: Arc<dyn RobotDriver> = match config.profile {
             Profile::Sim => Arc::new(SimDriver),
+            Profile::Replay => Arc::new(ReplayDriver),
             Profile::WaveshareUgv => open_physical_driver(&config)?,
         };
 
         let raw = match config.profile {
             Profile::Sim => RawTelemetry::sim(),
+            Profile::Replay => RawTelemetry::replay(),
             Profile::WaveshareUgv => RawTelemetry::physical(),
         };
 
+        let replay = config
+            .replay_source
+            .as_ref()
+            .map(|path| ReplayPlayback::from_path(path, config.replay_speed))
+            .transpose()?;
+
+        let capabilities = default_capability_descriptors()
+            .into_iter()
+            .map(|descriptor| descriptor.name)
+            .collect();
+        let mut coordinator = ModuleCoordinator::new(default_module_graph(&config, capabilities));
+        coordinator.start()?;
+
         let (telemetry_tx, _) = broadcast::channel(128);
+        let stream_transport = new_stream_transport(config.stream_transport);
         let harness = Self {
             config,
             started_at: Instant::now(),
@@ -194,6 +246,12 @@ impl Harness {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
+            stream_transport,
+            agent_messages: Arc::new(Mutex::new(VecDeque::new())),
+            agent_seq: Arc::new(AtomicU64::new(0)),
+            replay,
+            coordinator: Arc::new(RwLock::new(coordinator)),
+            accelerator,
         };
         harness.spawn_deadman();
         harness.spawn_telemetry_loop();
@@ -208,43 +266,105 @@ impl Harness {
         self.telemetry_tx.subscribe()
     }
 
+    pub fn subscribe_stream(&self, stream: &str) -> Result<StreamSubscriber> {
+        self.stream_transport.subscribe(stream)
+    }
+
     pub fn capability_registry(&self) -> CapabilityRegistry {
         CapabilityRegistry::new(self.clone())
     }
 
+    pub fn submit_agent_message(
+        &self,
+        source: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<AgentMessage> {
+        let text = text.into();
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(anyhow!("agent message text cannot be empty"));
+        }
+        let source = source.into();
+        let source = match source.trim() {
+            "" => "unknown".to_string(),
+            source => source.to_string(),
+        };
+        let message = AgentMessage {
+            id: self.agent_seq.fetch_add(1, Ordering::Relaxed) + 1,
+            ts_ms: now_ms(),
+            source,
+            text: text.to_string(),
+        };
+
+        {
+            let mut messages = self.agent_messages.lock();
+            if messages.len() == AGENT_MESSAGE_LIMIT {
+                messages.pop_front();
+            }
+            messages.push_back(message.clone());
+        }
+
+        if let Ok(payload) = serde_json::to_value(&message) {
+            let _ = self.stream_transport.publish("agent", payload);
+        }
+        tracing::info!(
+            message_id = message.id,
+            source = %message.source,
+            "agent message queued"
+        );
+        Ok(message)
+    }
+
+    pub fn agent_messages(&self) -> Vec<AgentMessage> {
+        self.agent_messages.lock().iter().cloned().collect()
+    }
+
+    pub fn agent_model_response(&self, text: &str) -> Result<Option<AgentModelResponse>> {
+        crate::agent::complete(&self.config, text)
+    }
+
     pub fn module_graph(&self) -> ModuleGraph {
-        default_module_graph(&self.config, self.capability_registry().names())
+        self.coordinator.read().graph()
     }
 
     pub fn health(&self) -> Health {
         let command = self.command.lock().clone();
+        let coordinator = self.coordinator.read();
         Health {
-            ok: true,
+            ok: coordinator.is_healthy(),
+            mode: self.runtime_mode().to_string(),
+            replay: self.replay.is_some(),
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             uptime_ms: self.started_at.elapsed().as_millis(),
             estop: command.estop,
             deadman_ok: !command.stopped_by_deadman,
-            physical_actuation_enabled: self.config.allow_physical_actuation
-                || std::env::var("LEASH_ALLOW_PHYSICAL_ACTUATION")
-                    .ok()
-                    .as_deref()
-                    == Some("1"),
+            physical_actuation_enabled: self.physical_actuation_enabled(),
+            accelerator: self.accelerator.clone(),
+            modules: coordinator.graph().modules,
         }
     }
 
     pub fn capabilities(&self) -> Capabilities {
         Capabilities {
             ok: true,
+            mode: self.runtime_mode().to_string(),
+            replay: self.replay.is_some(),
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             physical: self.config.profile.is_physical(),
+            stream_transport: self.config.stream_transport.as_str().to_string(),
             endpoints: vec![
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
+                "GET /events/telemetry".to_string(),
+                "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
                 "GET /camera/status".to_string(),
+                "GET /agent".to_string(),
+                "GET /agent/messages".to_string(),
+                "POST /agent/messages".to_string(),
                 "POST /pilot/authorize".to_string(),
                 "POST /drive".to_string(),
                 "POST /motors/stop".to_string(),
@@ -263,16 +383,22 @@ impl Harness {
                 "modules".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
-            modules: self.module_graph().modules,
+            accelerator: self.accelerator.clone(),
+            modules: self.coordinator.read().graph().modules,
             capabilities: self.capability_registry().descriptors().to_vec(),
         }
     }
 
     pub fn telemetry(&self) -> TelemetryFrame {
+        if let Some(frame) = self.replay.as_ref().and_then(ReplayPlayback::telemetry_now) {
+            return replay_telemetry_source(frame.telemetry);
+        }
+
         let now = now_ms();
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
+        let resource = self.config.resource_sampling.then(current_resource_sample);
         TelemetryFrame {
             ts_ms: now,
             robot: self.config.role.clone(),
@@ -291,8 +417,56 @@ impl Harness {
             speed_mode: command.speed_mode,
             max_speed: command.speed_mode.cap(),
             sensors,
+            resource,
             source: raw.source,
         }
+    }
+
+    pub fn telemetry_stream_frame(&self) -> TelemetryStreamFrame {
+        let telemetry = self.telemetry();
+        self.stream_frame_from_telemetry(telemetry)
+    }
+
+    fn stream_frame_from_telemetry(&self, telemetry: TelemetryFrame) -> TelemetryStreamFrame {
+        let health = self.health();
+        TelemetryStreamFrame {
+            kind: "telemetry".to_string(),
+            ts_ms: telemetry.ts_ms,
+            command: CommandStreamState {
+                left_cmd: telemetry.left_cmd,
+                right_cmd: telemetry.right_cmd,
+                session_id: telemetry.session_id.clone(),
+                speed_mode: telemetry.speed_mode,
+                max_speed: telemetry.max_speed,
+            },
+            safety: SafetyStreamState {
+                estop: telemetry.estop,
+                deadman_ok: telemetry.deadman_ok,
+                stopped_by_deadman: telemetry.stopped_by_deadman,
+                soft_odometry_limited: telemetry.soft_odometry_limited,
+                soft_odometry_limit_m: telemetry.soft_odometry_limit_m,
+                physical_actuation_enabled: self.physical_actuation_enabled(),
+            },
+            telemetry,
+            health,
+        }
+    }
+
+    fn runtime_mode(&self) -> &'static str {
+        if self.replay.is_some() {
+            "replay"
+        } else {
+            "live"
+        }
+    }
+
+    pub fn physical_actuation_enabled(&self) -> bool {
+        self.config.profile.is_physical()
+            && (self.config.allow_physical_actuation
+                || std::env::var("LEASH_ALLOW_PHYSICAL_ACTUATION")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
     }
 
     pub fn authorize(&self, token: String, ttl_secs: u64, speed_mode: SpeedMode) -> Result<()> {
@@ -392,10 +566,12 @@ impl Harness {
         Ok(())
     }
 
-    pub fn reset_estop(&self) {
+    pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
+        self.validate_session(token)?;
         let mut command = self.command.lock();
         command.estop = false;
         command.stopped_by_deadman = false;
+        Ok(())
     }
 
     pub fn capture(&self) -> CaptureResult {
@@ -492,7 +668,11 @@ impl Harness {
             let mut interval = time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
-                let _ = harness.telemetry_tx.send(harness.telemetry());
+                let telemetry = harness.telemetry();
+                let _ = harness.telemetry_tx.send(telemetry.clone());
+                if let Ok(payload) = serde_json::to_value(harness.telemetry_stream_frame()) {
+                    let _ = harness.stream_transport.publish("telemetry", payload);
+                }
             }
         });
     }
@@ -501,6 +681,7 @@ impl Harness {
 fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> {
     match config.profile {
         Profile::Sim => Ok(Arc::new(SimDriver)),
+        Profile::Replay => Ok(Arc::new(ReplayDriver)),
         Profile::WaveshareUgv => {
             #[cfg(feature = "waveshare-ugv")]
             {
@@ -565,6 +746,45 @@ fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
+fn current_resource_sample() -> ResourceSample {
+    ResourceSample {
+        sampled_at_ms: now_ms(),
+        process_id: std::process::id(),
+        cpu_time_ticks: process_cpu_time_ticks(),
+        memory_rss_bytes: process_memory_rss_bytes(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_cpu_time_ticks() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let (_, fields) = stat.rsplit_once(") ")?;
+    let fields = fields.split_whitespace().collect::<Vec<_>>();
+    let utime = fields.get(11)?.parse::<u64>().ok()?;
+    let stime = fields.get(12)?.parse::<u64>().ok()?;
+    Some(utime + stime)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_cpu_time_ticks() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn process_memory_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let rss_line = status
+        .lines()
+        .find(|line| line.strip_prefix("VmRSS:").is_some())?;
+    let kb = rss_line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_memory_rss_bytes() -> Option<u64> {
+    None
+}
+
 pub fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -609,5 +829,181 @@ mod tests {
     async fn capture_is_deterministic_for_role() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         assert_eq!(harness.capture().sha256, harness.capture().sha256);
+    }
+
+    #[tokio::test]
+    async fn resource_samples_are_disabled_by_default() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        assert!(harness.telemetry().resource.is_none());
+    }
+
+    #[tokio::test]
+    async fn resource_samples_can_be_enabled() {
+        let harness = Harness::new(HarnessConfig {
+            resource_sampling: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let sample = harness.telemetry().resource.unwrap();
+        assert_eq!(sample.process_id, std::process::id());
+    }
+
+    #[tokio::test]
+    async fn health_includes_running_module_state() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let health = harness.health();
+
+        assert!(health.ok);
+        assert_eq!(
+            health.accelerator.active,
+            crate::config::AcceleratorBackend::None
+        );
+        assert!(health.accelerator.probes.iter().any(|probe| probe.backend
+            == crate::config::AcceleratorBackend::Cpu
+            && probe.available));
+        assert_eq!(health.modules.len(), 3);
+        assert!(health
+            .modules
+            .iter()
+            .all(|module| module.state == crate::module::ModuleState::Running));
+    }
+
+    #[tokio::test]
+    async fn cpu_accelerator_is_reported_without_hardware() {
+        let harness = Harness::new(HarnessConfig {
+            accelerator: crate::config::AcceleratorBackend::Cpu,
+            require_accelerator: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let health = harness.health();
+        assert!(health.ok);
+        assert_eq!(
+            health.accelerator.active,
+            crate::config::AcceleratorBackend::Cpu
+        );
+        assert!(health.accelerator.available);
+        assert!(health.accelerator.probes.iter().any(|probe| probe.backend
+            == crate::config::AcceleratorBackend::Cpu
+            && probe.selected
+            && probe.available));
+    }
+
+    #[tokio::test]
+    async fn capabilities_include_accelerator_probe_inventory() {
+        let harness = Harness::new(HarnessConfig {
+            accelerator: crate::config::AcceleratorBackend::Cuda,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let capabilities = harness.capabilities();
+        assert_eq!(capabilities.stream_transport, "local-pubsub");
+        assert_eq!(
+            capabilities.accelerator.requested,
+            crate::config::AcceleratorBackend::Cuda
+        );
+        assert_eq!(
+            capabilities.accelerator.active,
+            crate::config::AcceleratorBackend::Cpu
+        );
+        assert!(capabilities
+            .accelerator
+            .probes
+            .iter()
+            .any(
+                |probe| probe.backend == crate::config::AcceleratorBackend::Cuda
+                    && !probe.available
+            ));
+    }
+
+    #[tokio::test]
+    async fn telemetry_is_published_to_selected_stream_transport() {
+        let harness = Harness::new(HarnessConfig {
+            stream_transport: crate::transport::StreamTransportBackend::Memory,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let mut receiver = harness.subscribe_stream("telemetry").unwrap();
+
+        let message = receiver.recv().await.unwrap();
+
+        assert_eq!(message.stream, "telemetry");
+        assert_eq!(message.payload["kind"], "telemetry");
+        assert_eq!(message.payload["telemetry"]["profile"], "sim");
+        assert!(message.payload["health"]["modules"].is_array());
+        assert_eq!(message.payload["safety"]["deadman_ok"], true);
+    }
+
+    #[tokio::test]
+    async fn agent_messages_are_recorded_and_published_without_provider() {
+        let harness = Harness::new(HarnessConfig {
+            stream_transport: crate::transport::StreamTransportBackend::Memory,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let mut receiver = harness.subscribe_stream("agent").unwrap();
+
+        let message = harness
+            .submit_agent_message("test", "inspect the battery")
+            .unwrap();
+        let received = receiver.recv().await.unwrap();
+
+        assert_eq!(message.id, 1);
+        assert_eq!(message.source, "test");
+        assert_eq!(message.text, "inspect the battery");
+        assert_eq!(harness.agent_messages(), vec![message]);
+        assert_eq!(received.stream, "agent");
+        assert_eq!(received.payload["text"], "inspect the battery");
+    }
+
+    #[tokio::test]
+    async fn sim_runtime_uses_deterministic_agent_provider_without_network() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let response = harness
+            .agent_model_response(" inspect   the battery ")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.provider, "deterministic-test");
+        assert_eq!(response.text, "deterministic-agent: inspect the battery");
+    }
+
+    #[tokio::test]
+    async fn agent_messages_reject_empty_text() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let err = harness.submit_agent_message("test", "   ").unwrap_err();
+
+        assert!(err.to_string().contains("text cannot be empty"));
+    }
+
+    #[tokio::test]
+    async fn replay_profile_observes_fixture_as_non_physical() {
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::Replay,
+            replay_source: Some(std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let health = harness.health();
+        assert_eq!(health.mode, "replay");
+        assert!(health.replay);
+        assert_eq!(health.profile, "replay");
+        assert!(!health.physical_actuation_enabled);
+
+        let capabilities = harness.capabilities();
+        assert_eq!(capabilities.mode, "replay");
+        assert!(capabilities.replay);
+        assert!(!capabilities.physical);
+
+        let telemetry = harness.telemetry();
+        assert_eq!(telemetry.profile, "replay");
+        assert_eq!(telemetry.source, "replay");
     }
 }

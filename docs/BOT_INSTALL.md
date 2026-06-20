@@ -1,7 +1,8 @@
 # Bot Install
 
 Leash can be installed on a bot host as a user service. The install path is
-source-based for now; release binaries are tracked separately.
+source-based for Ubuntu UGV and Jetson hosts until Linux aarch64 release
+binaries are proven in CI.
 
 ## Sim Install
 
@@ -27,6 +28,20 @@ curl -s -X POST http://127.0.0.1:8000/motors/stop
 
 Only run this after the bot is physically safe and the stock Waveshare process
 is stopped. The serial port is single-owner.
+
+Preflight the resolved config before starting the service:
+
+```bash
+leash show-config waveshare-ugv \
+  --role courier \
+  --listen 0.0.0.0:8000 \
+  --serial-port /dev/ttyTHS1 \
+  --no-untokened-drive \
+  --allow-physical-actuation
+```
+
+Check `network_bind`, `physical_actuation_enabled`, and the field `source`
+values before moving on.
 
 ```bash
 scripts/install-bot.sh \
@@ -67,4 +82,3 @@ sudo loginctl enable-linger "$USER"
   `LEASH_ALLOW_PHYSICAL_ACTUATION=true` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1`.
 - Deadman stop defaults to `400ms`.
 - `estop` is latching and requires reset before future drive commands.
-

@@ -161,6 +161,7 @@ else
   cat >"$env_file" <<EOF
 LEASH_ROLE=$role
 LEASH_PROFILE=$profile
+LEASH_STREAM_TRANSPORT=local-pubsub
 LEASH_LISTEN=$listen
 LEASH_ALLOW_UNTOKENED_DRIVE=$allow_untokened_drive
 LEASH_ALLOW_PHYSICAL_ACTUATION=$allow_physical_actuation
