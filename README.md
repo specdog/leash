@@ -23,6 +23,41 @@ leash serve mcp-http     # localhost MCP JSON control surface
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
 - **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
 
+## Repository Map
+
+```mermaid
+flowchart TB
+  root["repo root\nCargo crate, package metadata, top-level README"] --> src["src/\nReusable harness library"]
+  root --> cli["src/bin/\nleash CLI entrypoint"]
+  root --> scripts["scripts/\nSmoke tests and bot installer"]
+  root --> docs["docs/\nOperator, release, and source-map docs"]
+  root --> examples["examples/\nSafe runnable examples and fixtures"]
+  root --> specs["specs/leash/\nDotDog project graph source and compiled DAG"]
+  root --> workflows[".github/workflows/\nCI and release automation"]
+
+  src --> runtime["runtime.rs\nHarness state, drivers, telemetry"]
+  src --> capability["capability.rs\nSafety classes and invocation policy"]
+  src --> http["http.rs\nHTTP, SSE, WebSocket routes"]
+  src --> mcp["mcp.rs\nMCP tools and transport"]
+  src --> config["config.rs\nProfiles, env, CLI precedence"]
+```
+
+## Runtime Map
+
+```mermaid
+flowchart LR
+  human["Human operator\nCLI or curl"] --> surfaces["Control surfaces\nCLI, HTTP, MCP"]
+  agent["LLM agent\nMCP stdio or MCP HTTP"] --> surfaces
+  surfaces --> registry["CapabilityRegistry\nschemas, safety class, policy"]
+  registry --> harness["Harness runtime\ncommand state, modules, telemetry"]
+  harness --> drivers{"Profile driver"}
+  drivers --> sim["sim\nno hardware"]
+  drivers --> replay["replay\nJSONL fixtures"]
+  drivers --> ugv["waveshare-ugv\n/dev/ttyTHS1 serial"]
+  harness --> streams["Telemetry streams\nHTTP, SSE, WebSocket, MCP observe"]
+  registry --> safety["Safety gates\ntoken, approval, dry-run, deny, estop, deadman"]
+```
+
 ## Quick Start
 
 ```bash
