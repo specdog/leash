@@ -137,7 +137,7 @@ lifecycle: planned → designed → implemented → tested → active
 ```
 
 ### Entity: Telemetry
-Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.
+Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, safety state, and viewer-ready visualization data.
 
 ```yaml
 entity: Telemetry
@@ -159,6 +159,10 @@ properties:
     type: string
     required: true
     description: graph, streams, spatial, command-center
+  visualization_frame:
+    type: string
+    required: true
+    description: leash-visualization-v1 pose, path, occupancy-grid, point-cloud metadata, detections, command overlay
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```

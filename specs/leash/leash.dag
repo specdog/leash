@@ -292,7 +292,7 @@
       4,
       "Telemetry",
       "entity",
-      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.",
+      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, safety state, and viewer-ready visualization data.",
       [
         "outputs",
         "s!",
@@ -301,6 +301,8 @@
         "sse",
         "b!",
         "views",
+        "s!",
+        "visualization_frame",
         "s!"
       ],
       [
@@ -1120,11 +1122,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 8110,
-    "ct": 8110,
-    "dt": 2062,
-    "sv": 74.6,
-    "cs": 74.6,
-    "saved": 6048
+    "st": 8220,
+    "ct": 8220,
+    "dt": 2077,
+    "sv": 74.7,
+    "cs": 74.7,
+    "saved": 6143
   }
 }

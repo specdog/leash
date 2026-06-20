@@ -142,6 +142,22 @@ POST /estop/reset          { token, approval } Clear estop
 WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
 
+## Viewer Frames
+
+`WS /ws/telemetry`, `GET /events/telemetry`, and `GET /sse/telemetry` emit
+`TelemetryStreamFrame` JSON. Each frame includes a versioned
+`visualization.version = "leash-visualization-v1"` payload with:
+
+- `pose`: map-frame 2D pose
+- `path`: viewer-ready pose list
+- `occupancy_grid`: compact grid metadata + cells
+- `point_cloud`: metadata only, no viewer dependency
+- `detections`: generic detection boxes
+- `command`: motor command overlay for operators
+
+External viewers can subscribe to the stream endpoints and render those fields
+without linking a viewer SDK into the core crate.
+
 ## Agent Input
 
 Run a local HTTP stack, then send natural-language text into the runtime without
@@ -313,6 +329,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [ ] Cross-process and network transports
 - [ ] MAVLink drone + manipulator adapters
 - [x] Localhost command center dashboard
+- [x] Viewer-ready visualization frames
 - [ ] Spatial memory and perception primitives
 - [ ] Patrol and exploration in simulation
 - [x] Full no-hardware smoke suite
