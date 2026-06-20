@@ -15,6 +15,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
       - run: cargo test --no-default-features --features sim,mcp
+      - run: cargo run --features mcp --bin leash-schema -- --check
       - run: cargo package --locked
       - run: scripts/smoke-all.sh
 
