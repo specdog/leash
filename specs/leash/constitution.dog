@@ -3,21 +3,16 @@
 ## Core Rules
 
 1. Safety gates are non-negotiable. Every motor command passes through deadman, estop, soft-odometry-limit, and physical-actuation-gate before reaching hardware.
-2. Feature-gating is mandatory for hardware adapters. Physical profile refuses startup without `--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1`.
+2. Feature-gating is mandatory for hardware-specific adapters. The Waveshare UGV adapter must not compile unless enabled (`--features waveshare-ugv`). Physical profile refuses to start without `--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1`.
 3. The harness runtime is a library first. CLI and MCP server are thin shells around the `Harness` struct.
-4. Pilot token authorization. Drive commands require a valid pilot token with TTL. Tokens expire.
-5. Deadman switch. If no drive command arrives within `deadman_ms` (400ms), motors auto-stop.
-6. Smoke tests gate every release. MCP, HTTP, and physical-gate smoke tests must pass before publish.
-7. LLM agents operate through MCP only. No HTTP endpoint accepts unauthenticated commands.
-8. Sim-safe by default. Harness runs without hardware. CI, demos, smoke tests require zero physical robots.
-9. Explicit physical actuation gate. Physical profiles require `allow_physical_actuation: true` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1`.
-10. Safety classes are mandatory. Every capability has a safety class: observe-only, sim-control, physical-stop, physical-motion, or physical-high-risk. Policy checks apply to all invocation surfaces (MCP, HTTP, CLI, agent).
-11. Policy-gated physical actions. Physical-motion and physical-high-risk capabilities require policy approval. Stop and estop remain available under restrictive policy. Every denied and approved physical action is logged.
-12. Capability registry is the single source of truth. All callable actions (drive, stop, estop, authorize, observe, capture) register with schema, safety class, and module owner. HTTP, MCP, and agent calls route through the same registry.
-13. Blueprint catalog. Every demo, robot config, and replay scenario is a versioned, runnable blueprint. `leash list` shows built-in targets. Invalid blueprint config fails before any physical adapter starts.
-14. Module graph with typed streams. Coordinator starts modules in dependency order, stops in reverse. Health aggregates across modules. Failed optional modules never leave the runtime half-started.
-15. Transport abstraction. Module streams can switch between in-memory and local async transports. No module knows its peer's location.
-16. Replay determinism. Recorded sessions reproduce identical telemetry from the same inputs. Replay mode is clearly marked non-physical.
-17. Feature tiers. Core is always sim-safe and lightweight. Hardware, dashboard, replay, visualization, perception, and interop are optional tiers behind feature flags. Default install is core + sim + http + mcp.
-18. No-hardware smoke suite. Full smoke coverage (blueprint run, daemon lifecycle, MCP HTTP, dashboard, replay, graph export, safety policy) passes without hardware. CI runs the smoke subset.
-19. DimOS parity, not DimOS clone. Leash targets the same operating surface as DimOS but in Rust with stronger defaults, local-first execution, and MCP-native agent integration. No Python, no ROS dependency.
+4. Pilot token authorization. Capability-surface physical motion defaults to `require-token`; direct runtime untokened drive is configurable for sim-only tests. Tokens expire.
+5. Deadman switch. If no drive command arrives within `deadman_ms` (default 400ms), motors are automatically stopped. This is a runtime safety gate, not config-level.
+6. Smoke tests gate every release. MCP, HTTP, and physical-gate smoke tests must pass before any publish.
+7. Agent control is mediated. MCP and localhost agent input may accept natural-language text, but physical actions must route through the capability registry and its safety policy. Agent-origin physical motion requires explicit approval.
+8. Sim-safe by default. The harness must run without hardware present. CI, demos, and smoke tests require zero physical robots. Sim profile logs commands instead of actuating.
+9. Explicit physical actuation gate. Physical profiles (waveshare-ugv) require `allow_physical_actuation: true` in config or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` env var.
+10. Module graph with typed streams. Every module declares inputs, outputs, lifecycle, health, and selected stream transport. Streams are typed and validated at graph construction time.
+11. Replay determinism (planned). Recorded sessions must reproduce identical telemetry when replayed against the same inputs. Replay is a safety and debugging primitive.
+12. Transport abstraction. Module communication works through selectable memory and local async pubsub backends. Cross-process and network transports remain future extensions; modules must not know peer location.
+13. Stack catalog (planned). Every demo, robot config, and replay scenario is a versioned, runnable stack. No ad-hoc wiring at runtime.
+14. Generic operating surface. Leash targets typed modules, reusable stacks, replay, telemetry, local-first execution, and MCP-native agent integration without binding the roadmap to another project.
