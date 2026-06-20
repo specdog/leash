@@ -329,6 +329,7 @@ required gates without changing core command safety policy.
 | bridge compatibility | `compatibility` | `beta` | `sim`, `bridge-compat` | none |
 | Waveshare UGV | `mobile-base` | `alpha` | `waveshare-ugv` | `physical-actuation`, `policy-token-or-approval` |
 | MAVLink drone | `drone` | `experimental` | `mavlink-drone` | `physical-actuation`, `policy-token-or-approval` |
+| manipulator | `manipulator` | `experimental` | `manipulator` | `physical-actuation`, `policy-token-or-approval` |
 
 Maturity levels are:
 
@@ -354,6 +355,7 @@ token gate their commands require.
 | `mcp` | MCP stdio server | ✓ |
 | `waveshare-ugv` | Waveshare UGV physical adapter | opt-in |
 | `mavlink-drone` | MAVLink drone adapter skeleton, sim/replay proof, and gated physical profile | opt-in |
+| `manipulator` | Manipulator adapter skeleton, mock arm teleop, and gated physical profile | opt-in |
 | `bridge-compat` | Legacy robot bridge compatibility | opt-in |
 
 ## MAVLink Drone Skeleton
@@ -381,6 +383,31 @@ cargo run --features mavlink-drone -- run mavlink-drone-http --allow-physical-ac
 Flight capabilities remain policy-gated high-risk actions. The current physical
 profile is a skeleton and refuses real flight command execution until a concrete
 MAVLink adapter is wired behind this boundary.
+
+## Manipulator Skeleton
+
+The `manipulator` feature adds a mock arm teleop boundary for joint state,
+joint command, pose command, home, and stop flows. Joint and pose command
+responses carry the `leash-manipulator-v1` schema version so clients can pin
+against the skeleton while a real IK or planning provider is still external.
+
+```bash
+cargo run --features manipulator -- list
+cargo run --features manipulator -- run manipulator-sim
+cargo run --features manipulator -- run manipulator-replay --replay-source examples/replay/sim-basic.jsonl
+```
+
+Physical manipulator startup is gated just like other physical adapters:
+
+```bash
+LEASH_ALLOW_PHYSICAL_ACTUATION=1 \
+cargo run --features manipulator -- run manipulator-http --allow-physical-actuation
+```
+
+The current physical profile is a skeleton and refuses real joint or pose
+execution until a concrete adapter is wired. IK, collision checking, motion
+planning, retries, calibration, and native SDK bindings belong out-of-process or
+in a future feature/example adapter crate, not in the core command registry.
 
 ## Smoke Tests
 

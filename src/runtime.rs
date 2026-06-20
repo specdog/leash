@@ -17,7 +17,7 @@ use anyhow::{anyhow, Result};
 use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "waveshare-ugv")]
 use serde_json::json;
-#[cfg(feature = "mavlink-drone")]
+#[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
@@ -25,6 +25,10 @@ use tracing::{debug, warn};
 
 #[cfg(feature = "mavlink-drone")]
 use crate::types::DroneCommandStatus;
+#[cfg(feature = "manipulator")]
+use crate::types::{
+    ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MANIPULATOR_SCHEMA_VERSION,
+};
 use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     capability::{default_capability_descriptors, CapabilityRegistry},
@@ -136,6 +140,28 @@ impl RobotDriver for MavlinkDroneDriver {
         debug!(
             endpoint = self.endpoint,
             left, right, "mavlink drone skeleton ignored differential drive command"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(feature = "manipulator")]
+#[derive(Debug)]
+struct ManipulatorDriver;
+
+#[cfg(feature = "manipulator")]
+impl ManipulatorDriver {
+    fn open(_config: &HarnessConfig) -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "manipulator")]
+impl RobotDriver for ManipulatorDriver {
+    fn drive(&self, left: f64, right: f64) -> Result<()> {
+        debug!(
+            left,
+            right, "manipulator skeleton ignored differential drive command"
         );
         Ok(())
     }
@@ -311,6 +337,7 @@ impl Harness {
             Profile::Replay => Arc::new(ReplayDriver),
             Profile::WaveshareUgv => open_physical_driver(&config)?,
             Profile::MavlinkDrone => open_physical_driver(&config)?,
+            Profile::Manipulator => open_physical_driver(&config)?,
         };
 
         let raw = match config.profile {
@@ -318,6 +345,7 @@ impl Harness {
             Profile::Replay => RawTelemetry::replay(),
             Profile::WaveshareUgv => RawTelemetry::physical("waveshare-ugv"),
             Profile::MavlinkDrone => RawTelemetry::physical("mavlink-drone"),
+            Profile::Manipulator => RawTelemetry::physical("manipulator"),
         };
 
         let replay = config
@@ -1256,6 +1284,74 @@ impl Harness {
         })
     }
 
+    #[cfg(feature = "manipulator")]
+    pub fn manipulator_joint_state(&self) -> ManipulatorJointState {
+        let simulated = matches!(self.config.profile, Profile::Sim | Profile::Replay);
+        ManipulatorJointState {
+            version: MANIPULATOR_SCHEMA_VERSION.to_string(),
+            ok: true,
+            profile: self.config.profile.as_str().to_string(),
+            simulated,
+            source: if simulated {
+                "mock-arm".to_string()
+            } else {
+                "manipulator-skeleton".to_string()
+            },
+            joints: vec![
+                ManipulatorJoint {
+                    name: "shoulder_pan".to_string(),
+                    position_rad: 0.0,
+                    velocity_radps: 0.0,
+                    effort_nm: Some(0.0),
+                },
+                ManipulatorJoint {
+                    name: "elbow".to_string(),
+                    position_rad: 0.0,
+                    velocity_radps: 0.0,
+                    effort_nm: Some(0.0),
+                },
+                ManipulatorJoint {
+                    name: "wrist".to_string(),
+                    position_rad: 0.0,
+                    velocity_radps: 0.0,
+                    effort_nm: Some(0.0),
+                },
+            ],
+        }
+    }
+
+    #[cfg(feature = "manipulator")]
+    pub fn manipulator_command(
+        &self,
+        command: &str,
+        token: Option<&str>,
+        args: Value,
+    ) -> Result<ManipulatorCommandStatus> {
+        self.validate_session(token)?;
+        let simulated = matches!(self.config.profile, Profile::Sim | Profile::Replay);
+        if self.config.profile == Profile::Manipulator {
+            return Err(anyhow!(
+                "manipulator profile is a gated skeleton; configure a concrete manipulator adapter before executing '{command}'"
+            ));
+        }
+        if !simulated {
+            return Err(anyhow!(
+                "manipulator capability '{command}' requires sim, replay, or manipulator profile"
+            ));
+        }
+
+        Ok(ManipulatorCommandStatus {
+            version: MANIPULATOR_SCHEMA_VERSION.to_string(),
+            ok: true,
+            command: command.to_string(),
+            profile: self.config.profile.as_str().to_string(),
+            simulated,
+            status: "simulated".to_string(),
+            message: format!("mock manipulator {command} accepted"),
+            args,
+        })
+    }
+
     fn validate_session(&self, token: Option<&str>) -> Result<Option<PilotSession>> {
         if self.config.allow_untokened_drive && token.is_none() {
             return Ok(None);
@@ -1392,6 +1488,19 @@ fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> 
                 let _ = config;
                 Err(anyhow!(
                     "profile 'mavlink-drone' requires building with --features mavlink-drone"
+                ))
+            }
+        }
+        Profile::Manipulator => {
+            #[cfg(feature = "manipulator")]
+            {
+                Ok(Arc::new(ManipulatorDriver::open(config)))
+            }
+            #[cfg(not(feature = "manipulator"))]
+            {
+                let _ = config;
+                Err(anyhow!(
+                    "profile 'manipulator' requires building with --features manipulator"
                 ))
             }
         }
