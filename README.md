@@ -220,6 +220,38 @@ meters-per-cell in `resolution_m`.
 External viewers can subscribe to the stream endpoints and render those fields
 without linking a viewer SDK into the core crate.
 
+## Perception Boundary
+
+Telemetry includes a `vision` result with `ok`, `status`, `source`,
+`observed_at_ms`, `duration_ms`, `detections`, and `error`. `observe` returns the
+same telemetry shape over HTTP and MCP, so sim and replay observe calls include
+deterministic fake detections for demos and CI.
+
+Core owns the `ImageObservation`, `DetectionFrame`, and `VisionResult` schemas
+plus timeout/panic/error isolation. Heavy providers should live outside the core
+crate behind the perception adapter boundary. A local HTTP provider can mirror
+the trait contract with:
+
+```http
+POST /detect
+content-type: application/json
+
+{
+  "ts_ms": 42,
+  "frame_id": "camera",
+  "source": "sim",
+  "width_px": 640,
+  "height_px": 480,
+  "content_type": "image/simulated",
+  "byte_len": 0,
+  "sha256": null
+}
+```
+
+and return a `VisionResult`. Provider failures should be converted to
+`ok=false` results with `status` values such as `error`, `panic`, or `timeout`;
+they must not crash the runtime or block physical safety policy.
+
 ## Agent Input
 
 Run a local HTTP stack, then send natural-language text into the runtime without

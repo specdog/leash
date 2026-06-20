@@ -85,6 +85,22 @@ async function main() {
     fail(`bad module states: ${JSON.stringify(payload.modules)}`);
   }
 
+  send({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: { name: "observe", arguments: {} },
+  });
+  const observe = await readLine();
+  if (observe.id !== 4 || !observe.result) fail(`bad observe response: ${JSON.stringify(observe)}`);
+  const telemetry = JSON.parse(observe.result.content[0].text);
+  if (telemetry.profile !== "sim" || telemetry.vision?.status !== "ok") {
+    fail(`bad observe payload: ${JSON.stringify(telemetry)}`);
+  }
+  if (!Array.isArray(telemetry.vision.detections) || telemetry.vision.detections[0]?.label !== "sim-fixture") {
+    fail(`missing fake detection in observe payload: ${JSON.stringify(telemetry.vision)}`);
+  }
+
   console.log("mcp smoke ok");
 }
 

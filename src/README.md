@@ -34,10 +34,11 @@ flowchart TB
 - `memory.rs`: file-backed spatial memory/object registry with stale confidence handling.
 - `mcp.rs`: MCP stdio server, tool schemas, and tool handlers.
 - `module.rs`: module graph, states, health, dependencies, and graph export.
+- `perception.rs`: pluggable perception adapter boundary, fake detector, and provider isolation.
 - `replay.rs`: replay recording format and playback timing.
-- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, sim planner, sim patrol, and spatial memory ownership.
+- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, sim planner, sim patrol, perception, and spatial memory ownership.
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
 - `bin/`: CLI entrypoint crate target.

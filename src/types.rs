@@ -91,6 +91,8 @@ pub struct TelemetryFrame {
     pub speed_mode: SpeedMode,
     pub max_speed: f64,
     pub sensors: SensorSnapshot,
+    #[serde(default)]
+    pub vision: VisionResult,
     pub resource: Option<ResourceSample>,
     pub source: String,
 }
@@ -493,6 +495,61 @@ pub struct DetectionFrame {
     pub y_m: f64,
     pub width_m: f64,
     pub height_m: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ImageObservation {
+    #[serde(default)]
+    pub ts_ms: u128,
+    pub frame_id: String,
+    pub source: String,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub content_type: String,
+    pub byte_len: usize,
+    pub sha256: Option<String>,
+}
+
+impl Default for ImageObservation {
+    fn default() -> Self {
+        Self {
+            ts_ms: 0,
+            frame_id: "camera".to_string(),
+            source: "unknown".to_string(),
+            width_px: 0,
+            height_px: 0,
+            content_type: "application/octet-stream".to_string(),
+            byte_len: 0,
+            sha256: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VisionResult {
+    pub ok: bool,
+    pub status: String,
+    pub source: String,
+    pub observed_at_ms: u128,
+    pub duration_ms: u128,
+    pub detections: Vec<DetectionFrame>,
+    pub error: Option<String>,
+}
+
+impl Default for VisionResult {
+    fn default() -> Self {
+        Self {
+            ok: false,
+            status: "unavailable".to_string(),
+            source: "none".to_string(),
+            observed_at_ms: 0,
+            duration_ms: 0,
+            detections: Vec::new(),
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

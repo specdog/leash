@@ -15,6 +15,7 @@ pub mod http;
 pub mod mcp;
 pub mod memory;
 pub mod module;
+pub mod perception;
 pub mod replay;
 pub mod runtime;
 pub mod stack;
@@ -32,6 +33,7 @@ pub use memory::{
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
 };
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
+pub use perception::{FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime};
 pub use replay::{
     scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,
     ReplayRecording, REPLAY_FORMAT_VERSION,
@@ -51,10 +53,10 @@ pub use transport::{
 };
 pub use types::{
     AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,
-    DetectionFrame, Health, MapMetadata, OccupancyGridFrame, PatrolStatus, PatrolStrategy,
-    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry,
-    SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-    TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
-    COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
-    VISUALIZATION_FRAME_VERSION,
+    DetectionFrame, Health, ImageObservation, MapMetadata, OccupancyGridFrame, PatrolStatus,
+    PatrolStrategy, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample,
+    RunLogEntry, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
+    TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
+    VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
 };

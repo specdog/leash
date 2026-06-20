@@ -40,7 +40,7 @@ const checks = [
   {
     name: "mcp-stdio",
     argv: ["bash", "scripts/smoke-mcp.sh"],
-    proof: "stdio MCP initialization, tool list, and health call passed",
+    proof: "stdio MCP initialization, tool list, health call, and fake-detection observe passed",
   },
   {
     name: "mcp-http-cli",
@@ -50,12 +50,12 @@ const checks = [
   {
     name: "replay-http-observe",
     argv: ["bash", "scripts/smoke-replay-http.sh"],
-    proof: "HTTP replay health, capabilities, and telemetry observe paths passed",
+    proof: "HTTP replay health, capabilities, telemetry observe, and fake detections passed",
   },
   {
     name: "replay-mcp-observe",
     argv: ["bash", "scripts/smoke-replay-mcp.sh"],
-    proof: "MCP replay health and observe paths passed",
+    proof: "MCP replay health, observe, and fake detections passed",
   },
   {
     name: "physical-gate",

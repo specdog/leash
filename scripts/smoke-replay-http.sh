@@ -66,6 +66,9 @@ if (payload.profile !== "replay" || payload.source !== "replay") {
 }
 if (!payload.sensors || payload.sensors.raw_frame.source !== "replay") {
   throw new Error("telemetry sensors were not replay sourced");
+}
+if (!payload.vision || payload.vision.status !== "ok" || payload.vision.detections?.[0]?.label !== "replay-fixture") {
+  throw new Error(`replay telemetry did not include fake detections: ${JSON.stringify(payload.vision)}`);
 }'
 }
 
