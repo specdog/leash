@@ -2,6 +2,15 @@
 
 This adapter matches the original Ubuntu UGV / Jetson Orin NX demo shape:
 
+```mermaid
+flowchart LR
+  leash["Leash waveshare-ugv profile"] --> gate["Physical actuation gate\nLEASH_ALLOW_PHYSICAL_ACTUATION=1"]
+  gate --> safety["Safety policy\ntoken, estop, deadman, speed caps"]
+  safety --> serial["Serial driver\n/dev/ttyTHS1 @ 115200"]
+  serial --> esp32["ESP32 lower board"]
+  esp32 --> motors["left/right motor frames"]
+```
+
 - ESP32 lower board on `/dev/ttyTHS1`
 - 115200 baud newline JSON drive commands
 - `{"T":1,"L":left,"R":right}` motor frames

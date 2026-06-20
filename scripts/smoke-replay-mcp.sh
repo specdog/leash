@@ -5,9 +5,19 @@ node <<'EOF'
 const { spawn } = require("node:child_process");
 const readline = require("node:readline");
 
-const proc = spawn("cargo", ["run", "--quiet", "--", "serve", "mcp", "--profile", "sim"], {
-  stdio: ["pipe", "pipe", "pipe"],
-});
+const proc = spawn(
+  "cargo",
+  [
+    "run",
+    "--quiet",
+    "--",
+    "serve",
+    "mcp",
+    "--replay-source",
+    "examples/replay/sim-basic.jsonl",
+  ],
+  { stdio: ["pipe", "pipe", "pipe"] }
+);
 
 const rl = readline.createInterface({ input: proc.stdout });
 let stderr = "";
@@ -44,6 +54,13 @@ function readLine(timeoutMs = 10000) {
   });
 }
 
+function textPayload(response) {
+  if (!response.result || !response.result.content || !response.result.content[0]) {
+    fail(`bad tool response: ${JSON.stringify(response)}`);
+  }
+  return JSON.parse(response.result.content[0].text);
+}
+
 async function main() {
   send({
     jsonrpc: "2.0",
@@ -52,45 +69,45 @@ async function main() {
     params: {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "leash-smoke", version: "0.1.0" },
+      clientInfo: { name: "leash-replay-smoke", version: "0.1.0" },
     },
   });
   const init = await readLine();
   if (init.id !== 1 || !init.result) fail(`bad initialize response: ${JSON.stringify(init)}`);
 
   send({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
-  send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  const tools = await readLine();
-  const names = new Set(tools.result.tools.map((tool) => tool.name));
-  for (const name of ["health", "capabilities", "observe", "invoke_capability", "stop", "estop", "capture"]) {
-    if (!names.has(name)) fail(`missing tool: ${name}`);
+
+  send({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "health", arguments: {} },
+  });
+  const health = textPayload(await readLine());
+  if (health.mode !== "replay" || health.replay !== true || health.profile !== "replay") {
+    fail(`bad replay health payload: ${JSON.stringify(health)}`);
+  }
+  if (health.physical_actuation_enabled !== false) {
+    fail(`replay MCP health exposed physical actuation: ${JSON.stringify(health)}`);
   }
 
   send({
     jsonrpc: "2.0",
     id: 3,
     method: "tools/call",
-    params: { name: "health", arguments: {} },
+    params: { name: "observe", arguments: {} },
   });
-  const health = await readLine();
-  if (health.id !== 3 || !health.result) fail(`bad health response: ${JSON.stringify(health)}`);
-  const payload = JSON.parse(health.result.content[0].text);
-  if (payload.ok !== true || payload.profile !== "sim") {
-    fail(`bad health payload: ${JSON.stringify(payload)}`);
-  }
-  if (!Array.isArray(payload.modules) || payload.modules.length < 3) {
-    fail(`missing health modules: ${JSON.stringify(payload)}`);
-  }
-  if (!payload.modules.every((module) => module.state === "running")) {
-    fail(`bad module states: ${JSON.stringify(payload.modules)}`);
+  const telemetry = textPayload(await readLine());
+  if (telemetry.profile !== "replay" || telemetry.source !== "replay") {
+    fail(`bad replay observe payload: ${JSON.stringify(telemetry)}`);
   }
 
-  console.log("mcp smoke ok");
+  console.log("replay mcp smoke ok");
 }
 
 main()
   .catch((error) => {
-    console.error(`mcp smoke failed: ${error.message}`);
+    console.error(`replay mcp smoke failed: ${error.message}`);
     process.exitCode = 1;
   })
   .finally(() => {
