@@ -319,6 +319,92 @@ impl CapabilityRegistry {
                 ensure_fields(&args, &[])?;
                 serde_json::to_value(self.harness.clear_spatial_memory()?).map_err(Into::into)
             }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_arm" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "arm",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_disarm" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "disarm",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_takeoff" => {
+                ensure_fields(&args, &["token", "altitude_m"])?;
+                let token = optional_string(&args, "token")?;
+                let altitude_m = optional_f64(&args, "altitude_m")?.unwrap_or(2.0);
+                serde_json::to_value(self.harness.drone_command(
+                    "takeoff",
+                    token.as_deref(),
+                    json!({ "altitude_m": altitude_m }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_land" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "land",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_move_velocity" => {
+                ensure_fields(
+                    &args,
+                    &["token", "vx_mps", "vy_mps", "vz_mps", "yaw_rate_radps"],
+                )?;
+                let token = optional_string(&args, "token")?;
+                let vx_mps = optional_f64(&args, "vx_mps")?.unwrap_or(0.0);
+                let vy_mps = optional_f64(&args, "vy_mps")?.unwrap_or(0.0);
+                let vz_mps = optional_f64(&args, "vz_mps")?.unwrap_or(0.0);
+                let yaw_rate_radps = optional_f64(&args, "yaw_rate_radps")?.unwrap_or(0.0);
+                serde_json::to_value(self.harness.drone_command(
+                    "move_velocity",
+                    token.as_deref(),
+                    json!({
+                        "vx_mps": vx_mps,
+                        "vy_mps": vy_mps,
+                        "vz_mps": vz_mps,
+                        "yaw_rate_radps": yaw_rate_radps
+                    }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_fly_to" => {
+                ensure_fields(&args, &["token", "lat_deg", "lon_deg", "altitude_m"])?;
+                let token = optional_string(&args, "token")?;
+                let lat_deg = required_f64(&args, "lat_deg")?;
+                let lon_deg = required_f64(&args, "lon_deg")?;
+                let altitude_m = required_f64(&args, "altitude_m")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "fly_to",
+                    token.as_deref(),
+                    json!({
+                        "lat_deg": lat_deg,
+                        "lon_deg": lon_deg,
+                        "altitude_m": altitude_m
+                    }),
+                )?)
+                .map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -433,7 +519,7 @@ impl CapabilityRegistry {
 }
 
 pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
-    vec![
+    let descriptors = vec![
         descriptor(
             "health",
             "Read harness health and safety state",
@@ -608,6 +694,81 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             object_schema(&[]),
             "SpatialMemoryStatus",
         ),
+    ];
+    #[cfg(feature = "mavlink-drone")]
+    {
+        let mut descriptors = descriptors;
+        descriptors.extend(drone_capability_descriptors());
+        descriptors
+    }
+    #[cfg(not(feature = "mavlink-drone"))]
+    {
+        descriptors
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn drone_capability_descriptors() -> Vec<CapabilityDescriptor> {
+    vec![
+        descriptor(
+            "drone_arm",
+            "Arm a MAVLink drone adapter after policy and operator gates",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_disarm",
+            "Disarm a MAVLink drone adapter after policy and operator gates",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_takeoff",
+            "Request a MAVLink drone takeoff altitude",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("altitude_m", "number", false),
+            ]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_land",
+            "Request a MAVLink drone landing sequence",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_move_velocity",
+            "Request MAVLink drone local-frame velocity movement",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("vx_mps", "number", false),
+                ("vy_mps", "number", false),
+                ("vz_mps", "number", false),
+                ("yaw_rate_radps", "number", false),
+            ]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_fly_to",
+            "Request a MAVLink drone global fly-to target",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("lat_deg", "number", true),
+                ("lon_deg", "number", true),
+                ("altitude_m", "number", true),
+            ]),
+            "DroneCommandStatus",
+        ),
     ]
 }
 
@@ -667,6 +828,15 @@ fn canonical_name(name: &str) -> &str {
         "memory.list" | "memory/list" | "list_memory" | "list-memory" => "memory_list",
         "memory.query" | "memory/query" | "query_memory" | "query-memory" => "memory_query",
         "memory.clear" | "memory/clear" | "clear_memory" | "clear-memory" => "memory_clear",
+        "drone.arm" | "drone/arm" => "drone_arm",
+        "drone.disarm" | "drone/disarm" => "drone_disarm",
+        "drone.takeoff" | "drone/takeoff" => "drone_takeoff",
+        "drone.land" | "drone/land" => "drone_land",
+        "drone.move_velocity"
+        | "drone/move_velocity"
+        | "drone.move-velocity"
+        | "drone/move-velocity" => "drone_move_velocity",
+        "drone.fly_to" | "drone/fly_to" | "drone.fly-to" | "drone/fly-to" => "drone_fly_to",
         other => other,
     }
 }
@@ -794,6 +964,8 @@ fn optional_spatial_memory_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "mavlink-drone")]
+    use crate::config::Profile;
     use crate::{config::PolicyMode, types::TelemetryFrame, HarnessConfig};
 
     #[tokio::test]
@@ -849,6 +1021,72 @@ mod tests {
         let value = registry.invoke_value("observe", json!({})).unwrap();
         let telemetry: TelemetryFrame = serde_json::from_value(value).unwrap();
         assert_eq!(telemetry.robot, "robot");
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[tokio::test]
+    async fn drone_capabilities_are_simulated_and_policy_gated() {
+        let harness = Harness::new(HarnessConfig {
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let err = registry
+            .invoke_value("drone_arm", json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("policy require-approval"));
+
+        let armed = registry
+            .invoke_value("drone.arm", json!({ "approval": true }))
+            .unwrap();
+        assert_eq!(armed["ok"], true);
+        assert_eq!(armed["command"], "arm");
+        assert_eq!(armed["profile"], "sim");
+        assert_eq!(armed["simulated"], true);
+
+        let fly_to = registry
+            .invoke_value(
+                "drone_fly_to",
+                json!({
+                    "approval": true,
+                    "lat_deg": 40.0,
+                    "lon_deg": -73.0,
+                    "altitude_m": 12.5
+                }),
+            )
+            .unwrap();
+        assert_eq!(fly_to["command"], "fly_to");
+        assert_eq!(fly_to["args"]["altitude_m"], 12.5);
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[tokio::test]
+    async fn physical_drone_profile_stays_a_gated_skeleton() {
+        let err = match Harness::new(HarnessConfig {
+            profile: Profile::MavlinkDrone,
+            ..HarnessConfig::default()
+        }) {
+            Ok(_) => panic!("expected mavlink-drone profile to require the physical gate"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("LEASH_ALLOW_PHYSICAL_ACTUATION"));
+
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::MavlinkDrone,
+            allow_physical_actuation: true,
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+        let err = registry
+            .invoke_value("drone_land", json!({ "approval": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("gated skeleton"));
     }
 
     #[tokio::test]

@@ -20,6 +20,7 @@ for (const key of [
   "LEASH_ALLOW_UNTOKENED_DRIVE",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
+  "LEASH_MAVLINK_ENDPOINT",
   "LEASH_POLICY_MODE",
   "LEASH_PROFILE",
   "LEASH_REPLAY_SOURCE",
@@ -89,6 +90,38 @@ const checks = [
         throw new Error("waveshare stack did not declare physical-actuation gate");
       }
       return `listed ${stacks.length} built-in stacks`;
+    },
+  },
+  {
+    name: "stack-catalog-mavlink-drone",
+    argv: ["cargo", "run", "--quiet", "--features", "mavlink-drone", "--", "list", "--format", "json"],
+    validate: (stdout) => {
+      const stacks = JSON.parse(stdout);
+      const byName = new Map(stacks.map((stack) => [stack.name, stack]));
+      for (const required of ["mavlink-drone-sim", "mavlink-drone-replay", "mavlink-drone-http"]) {
+        if (!byName.has(required)) {
+          throw new Error(`missing stack ${required}`);
+        }
+      }
+      const sim = byName.get("mavlink-drone-sim");
+      const replay = byName.get("mavlink-drone-replay");
+      const physical = byName.get("mavlink-drone-http");
+      if (sim.hardware_required || replay.hardware_required) {
+        throw new Error("mavlink sim/replay stacks should not require hardware");
+      }
+      if (!physical.hardware_required) {
+        throw new Error("mavlink physical stack did not declare hardware_required");
+      }
+      if (sim.adapter.category !== "drone" || replay.adapter.category !== "drone" || physical.adapter.category !== "drone") {
+        throw new Error("mavlink stacks did not declare drone adapter metadata");
+      }
+      if (!sim.adapter.capabilities.includes("drone_arm") || !replay.adapter.capabilities.includes("drone_fly_to")) {
+        throw new Error("mavlink sim/replay stacks did not expose drone capabilities");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("mavlink physical stack did not declare physical-actuation gate");
+      }
+      return "mavlink drone sim/replay/physical stack metadata resolved without hardware";
     },
   },
   {
