@@ -1,6 +1,6 @@
 [package]
 name = "leash-harness"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Composable local-LLM and robotics harness with MCP, CLI, and safe robot adapters"
