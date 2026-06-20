@@ -162,7 +162,7 @@ properties:
   visualization_frame:
     type: string
     required: true
-    description: leash-visualization-v1 pose, twist, path, map metadata, occupancy-grid, costmap, point-cloud metadata, detections, command overlay
+    description: leash-visualization-v1 pose, twist, path, map metadata, occupancy-grid, costmap, point-cloud metadata, detections, command overlay, autonomy overlay
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```
@@ -442,7 +442,7 @@ lifecycle: planned → implemented → active
 ```
 
 ### Entity: Navigation
-Occupancy-grid + costmap primitives and a sim waypoint router. Patrol remains planned.
+Occupancy-grid + costmap primitives, sim waypoint router, and sim patrol.
 
 ```yaml
 entity: Navigation
@@ -476,14 +476,30 @@ properties:
     type: string
     required: true
     description: planner_set_goal, planner_cancel, planner_status
+  patrol_capabilities:
+    type: string
+    required: true
+    description: start_patrol, stop_patrol, patrol_status
+  patrol_strategies:
+    type: string
+    required: true
+    description: coverage, frontier, random
+  visited_cells:
+    type: string
+    required: true
+    description: patrol tracks visited planner-grid cells over time
+  clearance_mask:
+    type: string
+    required: true
+    description: patrol filters goals through blocked-cell clearance before routing
   safety_routing:
     type: string
     required: true
-    description: planner drive commands pass through speed caps, deadman, estop, and soft odometry limits
+    description: planner and patrol drive commands pass through speed caps, deadman, estop, and soft odometry limits
   patrol:
     type: boolean
     required: true
-    default: false
+    default: true
   sim_only:
     type: boolean
     required: true

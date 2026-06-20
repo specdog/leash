@@ -198,6 +198,8 @@ pub struct VisualizationFrame {
     pub point_cloud: PointCloudMetadata,
     pub detections: Vec<DetectionFrame>,
     pub command: CommandOverlay,
+    #[serde(default)]
+    pub autonomy: AutonomyOverlay,
 }
 
 impl Default for VisualizationFrame {
@@ -216,6 +218,7 @@ impl Default for VisualizationFrame {
             point_cloud: PointCloudMetadata::default(),
             detections: Vec::new(),
             command: CommandOverlay::default(),
+            autonomy: AutonomyOverlay::default(),
         }
     }
 }
@@ -339,6 +342,83 @@ impl Default for PlannerStatus {
             goal: None,
             path: VisualizationPath::default(),
             last_drive: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum PatrolStrategy {
+    #[default]
+    Coverage,
+    Frontier,
+    Random,
+}
+
+impl PatrolStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Coverage => "coverage",
+            Self::Frontier => "frontier",
+            Self::Random => "random",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PatrolStatus {
+    pub ok: bool,
+    pub active: bool,
+    pub status: String,
+    pub message: String,
+    pub strategy: Option<PatrolStrategy>,
+    pub speed_mode: SpeedMode,
+    pub goal: Option<PlannerGoal>,
+    pub path: VisualizationPath,
+    pub visited_cells: Vec<String>,
+}
+
+impl Default for PatrolStatus {
+    fn default() -> Self {
+        Self {
+            ok: true,
+            active: false,
+            status: "idle".to_string(),
+            message: "patrol idle".to_string(),
+            strategy: None,
+            speed_mode: SpeedMode::Low,
+            goal: None,
+            path: VisualizationPath::default(),
+            visited_cells: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AutonomyOverlay {
+    #[serde(default)]
+    pub ts_ms: u128,
+    pub mode: String,
+    pub active: bool,
+    pub status: String,
+    pub strategy: Option<PatrolStrategy>,
+    pub goal: Option<PlannerGoal>,
+    pub visited_cells: Vec<String>,
+}
+
+impl Default for AutonomyOverlay {
+    fn default() -> Self {
+        Self {
+            ts_ms: 0,
+            mode: "idle".to_string(),
+            active: false,
+            status: "idle".to_string(),
+            strategy: None,
+            goal: None,
+            visited_cells: Vec::new(),
         }
     }
 }
@@ -544,6 +624,7 @@ mod tests {
                 max_speed: SpeedMode::Low.cap(),
                 estop: false,
             },
+            autonomy: AutonomyOverlay::default(),
         };
 
         let value = serde_json::to_value(&frame).unwrap();
@@ -618,5 +699,6 @@ mod tests {
         assert_eq!(parsed.twist, Twist2d::default());
         assert_eq!(parsed.map, MapMetadata::default());
         assert_eq!(parsed.costmap, CostmapFrame::default());
+        assert_eq!(parsed.autonomy, AutonomyOverlay::default());
     }
 }

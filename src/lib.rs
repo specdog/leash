@@ -42,9 +42,10 @@ pub use transport::{
     StreamTransportBackend,
 };
 pub use types::{
-    AgentModelResponse, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
-    Health, MapMetadata, OccupancyGridFrame, PlannerGoal, PlannerStatus, PointCloudMetadata,
-    Pose2d, ResourceSample, RunLogEntry, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
-    VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE,
-    OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
+    AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,
+    DetectionFrame, Health, MapMetadata, OccupancyGridFrame, PatrolStatus, PatrolStrategy,
+    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry, SpeedMode,
+    TelemetryFrame, TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath,
+    COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
+    VISUALIZATION_FRAME_VERSION,
 };
