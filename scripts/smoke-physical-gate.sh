@@ -28,4 +28,7 @@ check_refuses_without_gate "waveshare-ugv" \
 check_refuses_without_gate "mavlink-drone" \
   cargo run --quiet --features mavlink-drone -- serve http --profile mavlink-drone --listen 127.0.0.1:18082 --mavlink-endpoint udp://127.0.0.1:14550
 
+check_refuses_without_gate "manipulator" \
+  cargo run --quiet --features manipulator -- serve http --profile manipulator --listen 127.0.0.1:18083
+
 echo "physical gate smoke ok"

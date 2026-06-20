@@ -35,6 +35,7 @@ pub const OCCUPANCY_OCCUPIED: i8 = 100;
 pub const COST_FREE: u8 = 0;
 pub const COST_LETHAL: u8 = 254;
 pub const COST_UNKNOWN: u8 = 255;
+pub const MANIPULATOR_SCHEMA_VERSION: &str = "leash-manipulator-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -638,6 +639,40 @@ pub struct DroneCommandStatus {
     pub status: String,
     pub message: String,
     pub mavlink_endpoint: Option<String>,
+    #[serde(default)]
+    pub args: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ManipulatorJoint {
+    pub name: String,
+    pub position_rad: f64,
+    pub velocity_radps: f64,
+    pub effort_nm: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ManipulatorJointState {
+    pub version: String,
+    pub ok: bool,
+    pub profile: String,
+    pub simulated: bool,
+    pub source: String,
+    pub joints: Vec<ManipulatorJoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ManipulatorCommandStatus {
+    pub version: String,
+    pub ok: bool,
+    pub command: String,
+    pub profile: String,
+    pub simulated: bool,
+    pub status: String,
+    pub message: String,
     #[serde(default)]
     pub args: Value,
 }
