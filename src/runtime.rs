@@ -29,16 +29,17 @@ use crate::{
         default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     },
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
+    perception::PerceptionRuntime,
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
-        CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, MapMetadata,
-        OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
+        CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, ImageObservation,
+        MapMetadata, OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
         PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
         SafetyStreamState, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE,
-        COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
+        COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -250,6 +251,7 @@ pub struct Harness {
     planner: Arc<Mutex<PlannerStatus>>,
     patrol: Arc<Mutex<PatrolState>>,
     spatial_memory: Arc<SpatialMemoryStore>,
+    perception: PerceptionRuntime,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -315,6 +317,7 @@ impl Harness {
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
             patrol: Arc::new(Mutex::new(PatrolState::default())),
             spatial_memory,
+            perception: PerceptionRuntime::fake(),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
@@ -662,7 +665,7 @@ impl Harness {
 
     pub fn telemetry(&self) -> TelemetryFrame {
         if let Some(frame) = self.replay.as_ref().and_then(ReplayPlayback::telemetry_now) {
-            return replay_telemetry_source(frame.telemetry);
+            return self.telemetry_with_vision(replay_telemetry_source(frame.telemetry));
         }
 
         let now = now_ms();
@@ -670,7 +673,7 @@ impl Harness {
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
         let resource = self.config.resource_sampling.then(current_resource_sample);
-        TelemetryFrame {
+        let telemetry = TelemetryFrame {
             ts_ms: now,
             robot: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
@@ -688,9 +691,26 @@ impl Harness {
             speed_mode: command.speed_mode,
             max_speed: command.speed_mode.cap(),
             sensors,
+            vision: VisionResult::default(),
             resource,
             source: raw.source,
-        }
+        };
+        self.telemetry_with_vision(telemetry)
+    }
+
+    fn telemetry_with_vision(&self, mut telemetry: TelemetryFrame) -> TelemetryFrame {
+        let observation = ImageObservation {
+            ts_ms: telemetry.ts_ms,
+            frame_id: "camera".to_string(),
+            source: telemetry.sensors.raw_frame.source.clone(),
+            width_px: 640,
+            height_px: 480,
+            content_type: "image/simulated".to_string(),
+            byte_len: 0,
+            sha256: None,
+        };
+        telemetry.vision = self.perception.observe(observation);
+        telemetry
     }
 
     pub fn telemetry_stream_frame(&self) -> TelemetryStreamFrame {
@@ -819,7 +839,7 @@ impl Harness {
                 fields: vec!["x".to_string(), "y".to_string(), "z".to_string()],
                 source: telemetry.sensors.raw_frame.source.clone(),
             },
-            detections: Vec::new(),
+            detections: telemetry.vision.detections.clone(),
             command: CommandOverlay {
                 ts_ms: telemetry.ts_ms,
                 left_cmd: telemetry.left_cmd,
@@ -1800,6 +1820,11 @@ mod tests {
         assert_eq!(message.stream, "telemetry");
         assert_eq!(message.payload["kind"], "telemetry");
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
+        assert_eq!(message.payload["telemetry"]["vision"]["status"], "ok");
+        assert_eq!(
+            message.payload["visualization"]["detections"][0]["label"],
+            "sim-fixture"
+        );
         assert!(message.payload["health"]["modules"].is_array());
         assert_eq!(message.payload["safety"]["deadman_ok"], true);
     }
@@ -1833,6 +1858,12 @@ mod tests {
             frame.visualization.map
         );
         assert_eq!(frame.visualization.point_cloud.fields, ["x", "y", "z"]);
+        assert_eq!(frame.telemetry.vision.status, "ok");
+        assert_eq!(
+            frame.visualization.detections,
+            frame.telemetry.vision.detections
+        );
+        assert_eq!(frame.visualization.detections[0].label, "sim-fixture");
         assert_eq!(frame.visualization.command.left_cmd, 0.2);
         assert_eq!(frame.visualization.command.speed_mode, SpeedMode::Low);
     }
@@ -2103,5 +2134,7 @@ mod tests {
         let telemetry = harness.telemetry();
         assert_eq!(telemetry.profile, "replay");
         assert_eq!(telemetry.source, "replay");
+        assert_eq!(telemetry.vision.status, "ok");
+        assert_eq!(telemetry.vision.detections[0].label, "replay-fixture");
     }
 }

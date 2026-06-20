@@ -587,9 +587,11 @@ mod tests {
     #[tokio::test]
     async fn typed_outputs_stay_deserializable() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
-        let _: TelemetryFrame =
+        let telemetry: TelemetryFrame =
             serde_json::from_value(call_tool_value(&harness, "observe", json!({})).unwrap())
                 .unwrap();
+        assert_eq!(telemetry.vision.status, "ok");
+        assert_eq!(telemetry.vision.detections[0].label, "sim-fixture");
         let _: CaptureResult =
             serde_json::from_value(call_tool_value(&harness, "capture", json!({})).unwrap())
                 .unwrap();
