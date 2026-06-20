@@ -85,6 +85,24 @@ if (!payload.result || payload.result.ok !== true) throw new Error("JSON call re
 if (payload.result.speed_mode !== "low") throw new Error(`unexpected speed mode: ${payload.result.speed_mode}`);'
 }
 
+assert_planner_goal_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("planner call wrapper was invalid");
+if (!payload.result || payload.result.ok !== true) throw new Error("planner result ok was not true");
+if (payload.result.status !== "active") throw new Error(`unexpected planner status: ${payload.result.status}`);
+if (!payload.result.path || !Array.isArray(payload.result.path.poses) || payload.result.path.poses.length < 2) {
+  throw new Error("planner path was missing");
+}
+if (!payload.result.last_drive || payload.result.last_drive.left <= 0) throw new Error("planner did not issue a drive command");'
+}
+
+assert_planner_status_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("planner status wrapper was invalid");
+if (!payload.result || payload.result.status !== "active") throw new Error("planner status did not stay active");
+if (!payload.result.goal || payload.result.goal.frame_id !== "map") throw new Error("planner goal was missing");'
+}
+
 assert_module_map() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true) throw new Error("module map ok was not true");
@@ -111,5 +129,11 @@ cargo run --quiet -- mcp call --profile sim invoke_capability \
   capability=authorize token=mcp-smoke-token ttl_secs=30 speed_mode=low | assert_key_value_call
 cargo run --quiet -- mcp call --profile sim --json '{"capability":"speed_mode","speed_mode":"low"}' \
   invoke_capability | assert_json_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"planner_set_goal","x_m":0.25,"y_m":0.0,"speed_mode":"low"}}' | assert_planner_goal_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"planner_status"}}' | assert_planner_status_call
 
 echo "mcp-http smoke ok: $base"

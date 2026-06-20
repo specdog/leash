@@ -97,7 +97,7 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 | `capabilities` | Endpoints, MCP tools, speed modes |
 | `modules` | Module graph and stream metadata |
 | `observe` | Latest telemetry frame (odometry, battery, sensors) |
-| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode |
+| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status |
 | `stop` | Non-latching zero-speed motor stop |
 | `estop` | Latch emergency stop until reset |
 | `capture` | Deterministic frame capture |
@@ -112,11 +112,25 @@ leash mcp modules
 leash mcp call health
 leash mcp call invoke_capability capability=authorize token=demo ttl_secs=30
 leash mcp call invoke_capability --json '{"capability":"speed_mode","speed_mode":"low"}'
+leash mcp call invoke_capability --json '{"capability":"planner_set_goal","x_m":0.25,"y_m":0.0,"speed_mode":"low"}'
+leash mcp call invoke_capability capability=planner_status
 ```
 
 `/mcp/tools`, `/mcp/status`, `/mcp/modules`, and `/mcp/call` return JSON for
 local agents and automation. Module/tool mapping exposes tool names by module
 without returning pilot session tokens.
+
+## Sim Planner
+
+The sim profile includes a small `map`-frame waypoint router over a fixed 2D
+occupancy grid. Use `planner_set_goal` to request a local goal, `planner_status`
+to read the current path and last drive command, and `planner_cancel` or any stop
+or estop path to end planner motion.
+
+Planner movement calls the same `drive` capability as manual control, so speed
+caps, deadman state, estop state, and the soft odometry limit still apply. The
+router is a local demo surface; patrol and broader exploration remain separate
+future capabilities.
 
 ## HTTP Endpoints
 
@@ -340,6 +354,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Localhost command center dashboard
 - [x] Viewer-ready visualization frames
 - [x] Occupancy-grid and costmap message primitives
+- [x] Sim waypoint router and local planner demo
 - [ ] Spatial memory and perception primitives
 - [ ] Patrol and exploration in simulation
 - [x] Full no-hardware smoke suite

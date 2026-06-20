@@ -442,7 +442,7 @@ lifecycle: planned → implemented → active
 ```
 
 ### Entity: Navigation
-Occupancy-grid + costmap primitives. Sim waypoint router + patrol.
+Occupancy-grid + costmap primitives and a sim waypoint router. Patrol remains planned.
 
 ```yaml
 entity: Navigation
@@ -467,7 +467,19 @@ properties:
   planner:
     type: boolean
     required: true
-    default: false
+    default: true
+  waypoint_router:
+    type: string
+    required: true
+    description: sim-only 2D map-frame router over a fixed occupancy grid
+  planner_capabilities:
+    type: string
+    required: true
+    description: planner_set_goal, planner_cancel, planner_status
+  safety_routing:
+    type: string
+    required: true
+    description: planner drive commands pass through speed caps, deadman, estop, and soft odometry limits
   patrol:
     type: boolean
     required: true
