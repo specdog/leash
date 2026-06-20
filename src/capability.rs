@@ -2,7 +2,11 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{config::PolicyMode, runtime::Harness, types::SpeedMode};
+use crate::{
+    config::PolicyMode,
+    runtime::Harness,
+    types::{PlannerGoal, SpeedMode},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -232,6 +236,29 @@ impl CapabilityRegistry {
                 self.harness.reset_estop(token.as_deref())?;
                 Ok(json!({ "ok": true, "estop": false }))
             }
+            "planner_set_goal" => {
+                ensure_fields(
+                    &args,
+                    &["frame_id", "x_m", "y_m", "tolerance_m", "speed_mode"],
+                )?;
+                let goal = PlannerGoal {
+                    frame_id: optional_string(&args, "frame_id")?
+                        .unwrap_or_else(|| "map".to_string()),
+                    x_m: required_f64(&args, "x_m")?,
+                    y_m: required_f64(&args, "y_m")?,
+                    tolerance_m: optional_f64(&args, "tolerance_m")?.unwrap_or(0.1),
+                    speed_mode: optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low),
+                };
+                serde_json::to_value(self.harness.set_planner_goal(goal)?).map_err(Into::into)
+            }
+            "planner_cancel" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.cancel_planner_goal()?).map_err(Into::into)
+            }
+            "planner_status" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.planner_status()).map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -430,6 +457,33 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
             "EstopResp",
         ),
+        descriptor(
+            "planner_set_goal",
+            "Set a sim-only waypoint goal and begin local planner drive commands",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("frame_id", "string", false),
+                ("x_m", "number", true),
+                ("y_m", "number", true),
+                ("tolerance_m", "number", false),
+                ("speed_mode", "SpeedMode", false),
+            ]),
+            "PlannerStatus",
+        ),
+        descriptor(
+            "planner_cancel",
+            "Cancel the active sim planner goal and stop movement",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "PlannerStatus",
+        ),
+        descriptor(
+            "planner_status",
+            "Report the current sim planner goal, path, and last drive command",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "PlannerStatus",
+        ),
     ]
 }
 
@@ -471,6 +525,9 @@ fn canonical_name(name: &str) -> &str {
     match name {
         "motors.stop" | "motors/stop" => "stop",
         "estop/reset" | "estop.reset" => "estop_reset",
+        "planner.set_goal" | "planner/set_goal" => "planner_set_goal",
+        "planner.cancel" | "planner/cancel" => "planner_cancel",
+        "planner.status" | "planner/status" => "planner_status",
         other => other,
     }
 }
@@ -536,6 +593,17 @@ fn required_f64(args: &Map<String, Value>, key: &str) -> Result<f64> {
             .ok_or_else(|| anyhow!("{key} must be a finite number")),
         Some(_) => bail!("{key} must be a number"),
         None => bail!("{key} is required"),
+    }
+}
+
+fn optional_f64(args: &Map<String, Value>, key: &str) -> Result<Option<f64>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => value
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| anyhow!("{key} must be a finite number")),
+        Some(_) => bail!("{key} must be a number"),
     }
 }
 

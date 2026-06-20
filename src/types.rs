@@ -295,6 +295,54 @@ pub struct CostmapFrame {
     pub costs: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PlannerGoal {
+    pub frame_id: String,
+    pub x_m: f64,
+    pub y_m: f64,
+    pub tolerance_m: f64,
+    pub speed_mode: SpeedMode,
+}
+
+impl Default for PlannerGoal {
+    fn default() -> Self {
+        Self {
+            frame_id: "map".to_string(),
+            x_m: 0.0,
+            y_m: 0.0,
+            tolerance_m: 0.1,
+            speed_mode: SpeedMode::Low,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PlannerStatus {
+    pub ok: bool,
+    pub active: bool,
+    pub status: String,
+    pub message: String,
+    pub goal: Option<PlannerGoal>,
+    pub path: VisualizationPath,
+    pub last_drive: Option<DriveOutcome>,
+}
+
+impl Default for PlannerStatus {
+    fn default() -> Self {
+        Self {
+            ok: true,
+            active: false,
+            status: "idle".to_string(),
+            message: "planner idle".to_string(),
+            goal: None,
+            path: VisualizationPath::default(),
+            last_drive: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct PointCloudMetadata {
@@ -385,7 +433,7 @@ pub struct CaptureResult {
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct DriveOutcome {
     pub ok: bool,

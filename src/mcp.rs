@@ -115,7 +115,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, or speed_mode"
+        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, or planner_status"
     )]
     pub async fn invoke_capability(
         &self,
@@ -193,6 +193,14 @@ pub struct InvokeCapabilityParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub right: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tolerance_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval: Option<bool>,
@@ -247,7 +255,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, or speed_mode",
+            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, or planner_status",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[
@@ -256,6 +264,10 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("ttl_secs", "integer", false),
                 ("left", "number", false),
                 ("right", "number", false),
+                ("frame_id", "string", false),
+                ("x_m", "number", false),
+                ("y_m", "number", false),
+                ("tolerance_m", "number", false),
                 ("speed_mode", "SpeedMode", false),
                 ("approval", "boolean", false),
             ]),

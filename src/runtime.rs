@@ -30,15 +30,23 @@ use crate::{
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
         CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, MapMetadata,
-        OccupancyGridFrame, OdometryStatus, PointCloudMetadata, Pose2d, RawFrameStatus,
-        ResourceSample, SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE,
-        OCCUPANCY_FREE, VISUALIZATION_FRAME_VERSION,
+        OccupancyGridFrame, OdometryStatus, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot, SpeedMode,
+        TelemetryFrame, TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath,
+        COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
 const AGENT_MESSAGE_LIMIT: usize = 128;
 const DASHBOARD_EVENT_LIMIT: usize = 64;
+const PLANNER_GRID_WIDTH: usize = 4;
+const PLANNER_GRID_HEIGHT: usize = 4;
+const PLANNER_GRID_CELLS: usize = PLANNER_GRID_WIDTH * PLANNER_GRID_HEIGHT;
+const PLANNER_RESOLUTION_M: f64 = 0.25;
+const PLANNER_ORIGIN_X_M: f64 = -0.5;
+const PLANNER_ORIGIN_Y_M: f64 = -0.5;
+const PLANNER_BLOCKED_CELLS: &[(usize, usize)] = &[(1, 1)];
+const PLANNER_STEP_CMD: f64 = 0.2;
 
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
@@ -205,6 +213,7 @@ pub struct Harness {
     stream_transport: Arc<dyn StreamTransport>,
     agent_messages: Arc<Mutex<VecDeque<AgentMessage>>>,
     dashboard_events: Arc<Mutex<VecDeque<String>>>,
+    planner: Arc<Mutex<PlannerStatus>>,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -254,12 +263,14 @@ impl Harness {
             stream_transport,
             agent_messages: Arc::new(Mutex::new(VecDeque::new())),
             dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
+            planner: Arc::new(Mutex::new(PlannerStatus::default())),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
         };
         harness.spawn_deadman();
+        harness.spawn_planner_loop();
         harness.spawn_telemetry_loop();
         Ok(harness)
     }
@@ -335,6 +346,77 @@ impl Harness {
 
     pub fn dashboard_events(&self) -> Vec<String> {
         self.dashboard_events.lock().iter().cloned().collect()
+    }
+
+    pub fn planner_status(&self) -> PlannerStatus {
+        self.planner.lock().clone()
+    }
+
+    pub fn set_planner_goal(&self, goal: PlannerGoal) -> Result<PlannerStatus> {
+        if self.config.profile != Profile::Sim {
+            return Err(anyhow!("planner is only available for the sim profile"));
+        }
+        if goal.frame_id != "map" {
+            return Err(anyhow!("planner goals must use frame_id 'map'"));
+        }
+        if goal.tolerance_m <= 0.0 {
+            return Err(anyhow!("planner goal tolerance_m must be positive"));
+        }
+
+        let ts_ms = now_ms();
+        let current = self.current_sim_pose(ts_ms);
+        let Some(start) = planner_cell_for_xy(current.x_m, current.y_m) else {
+            return Err(anyhow!("current sim pose is outside the planner grid"));
+        };
+        let Some(goal_cell) = planner_cell_for_xy(goal.x_m, goal.y_m) else {
+            return Err(anyhow!("planner goal is outside the planner grid"));
+        };
+
+        let Some(cells) = planner_route(start, goal_cell) else {
+            let status = PlannerStatus {
+                ok: false,
+                active: false,
+                status: "blocked".to_string(),
+                message: "planner goal is blocked by the sim occupancy grid".to_string(),
+                goal: Some(goal),
+                path: VisualizationPath {
+                    ts_ms,
+                    frame_id: "map".to_string(),
+                    poses: Vec::new(),
+                },
+                last_drive: None,
+            };
+            *self.planner.lock() = status.clone();
+            return Ok(status);
+        };
+
+        let status = PlannerStatus {
+            ok: true,
+            active: true,
+            status: "active".to_string(),
+            message: "planner goal accepted".to_string(),
+            goal: Some(goal),
+            path: VisualizationPath {
+                ts_ms,
+                frame_id: "map".to_string(),
+                poses: cells
+                    .into_iter()
+                    .map(|cell| planner_pose_for_cell(cell, ts_ms))
+                    .collect(),
+            },
+            last_drive: None,
+        };
+        *self.planner.lock() = status;
+        self.planner_step();
+        Ok(self.planner_status())
+    }
+
+    pub fn cancel_planner_goal(&self) -> Result<PlannerStatus> {
+        self.cancel_planner_state("cancelled", "planner goal cancelled");
+        let outcome = self.stop_without_planner_cancel()?;
+        let mut planner = self.planner.lock();
+        planner.last_drive = Some(outcome);
+        Ok(planner.clone())
     }
 
     pub fn agent_model_response(&self, text: &str) -> Result<Option<AgentModelResponse>> {
@@ -501,6 +583,7 @@ impl Harness {
             origin: map_origin.clone(),
             cell_order: "row-major".to_string(),
         };
+        let planner_path = self.planner.lock().path.clone();
         let pose = Pose2d {
             ts_ms: telemetry.ts_ms,
             frame_id: "map".to_string(),
@@ -527,19 +610,23 @@ impl Harness {
             map: map.clone(),
             pose: pose.clone(),
             twist,
-            path: VisualizationPath {
-                ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
-                poses: vec![
-                    Pose2d {
-                        ts_ms: telemetry.ts_ms,
-                        frame_id: "map".to_string(),
-                        x_m: 0.0,
-                        y_m: 0.0,
-                        yaw_rad: 0.0,
-                    },
-                    pose.clone(),
-                ],
+            path: if planner_path.poses.is_empty() {
+                VisualizationPath {
+                    ts_ms: telemetry.ts_ms,
+                    frame_id: "map".to_string(),
+                    poses: vec![
+                        Pose2d {
+                            ts_ms: telemetry.ts_ms,
+                            frame_id: "map".to_string(),
+                            x_m: 0.0,
+                            y_m: 0.0,
+                            yaw_rad: 0.0,
+                        },
+                        pose.clone(),
+                    ],
+                }
+            } else {
+                planner_path
             },
             occupancy_grid: OccupancyGridFrame {
                 ts_ms: telemetry.ts_ms,
@@ -549,7 +636,7 @@ impl Harness {
                 resolution_m: 0.25,
                 origin: map_origin.clone(),
                 metadata: map.clone(),
-                cells: vec![OCCUPANCY_FREE; 16],
+                cells: planner_occupancy_cells(),
             },
             costmap: CostmapFrame {
                 ts_ms: telemetry.ts_ms,
@@ -559,7 +646,7 @@ impl Harness {
                 resolution_m: 0.25,
                 origin: map_origin,
                 metadata: map,
-                costs: vec![COST_FREE; 16],
+                costs: planner_costs(),
             },
             point_cloud: PointCloudMetadata {
                 ts_ms: telemetry.ts_ms,
@@ -667,6 +754,11 @@ impl Harness {
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
+        self.cancel_planner_state("stopped", "planner movement stopped");
+        self.stop_without_planner_cancel()
+    }
+
+    fn stop_without_planner_cancel(&self) -> Result<DriveOutcome> {
         self.driver.stop()?;
         let mut command = self.command.lock();
         command.left_cmd = 0.0;
@@ -685,6 +777,7 @@ impl Harness {
     }
 
     pub fn estop(&self) -> Result<()> {
+        self.cancel_planner_state("estop", "planner movement cancelled by estop");
         self.driver.stop()?;
         let mut command = self.command.lock();
         command.left_cmd = 0.0;
@@ -692,6 +785,94 @@ impl Harness {
         command.estop = true;
         command.stopped_by_deadman = false;
         Ok(())
+    }
+
+    fn current_sim_pose(&self, ts_ms: u128) -> Pose2d {
+        let raw = self.raw.read();
+        let left_m = raw.odometry_left.unwrap_or_default();
+        let right_m = raw.odometry_right.unwrap_or_default();
+        Pose2d {
+            ts_ms,
+            frame_id: "map".to_string(),
+            x_m: round3((left_m + right_m) / 2.0),
+            y_m: 0.0,
+            yaw_rad: round3((right_m - left_m) * 0.25),
+        }
+    }
+
+    fn planner_step(&self) {
+        let (goal, path) = {
+            let planner = self.planner.lock();
+            if !planner.active {
+                return;
+            }
+            let Some(goal) = planner.goal.clone() else {
+                return;
+            };
+            (goal, planner.path.clone())
+        };
+
+        let now = now_ms();
+        let current = self.current_sim_pose(now);
+        let goal_distance = distance2d(current.x_m, current.y_m, goal.x_m, goal.y_m);
+        if goal_distance <= goal.tolerance_m {
+            self.cancel_planner_state("reached", "planner goal reached");
+            let _ = self.stop_without_planner_cancel();
+            return;
+        }
+
+        let next = path
+            .poses
+            .iter()
+            .find(|pose| distance2d(current.x_m, current.y_m, pose.x_m, pose.y_m) > 0.05)
+            .cloned()
+            .unwrap_or_else(|| Pose2d {
+                ts_ms: now,
+                frame_id: "map".to_string(),
+                x_m: goal.x_m,
+                y_m: goal.y_m,
+                yaw_rad: 0.0,
+            });
+        let (left, right) = planner_drive_command(&current, &next);
+
+        match self.drive(None, left, right, Some(goal.speed_mode)) {
+            Ok(outcome) => {
+                let mut planner = self.planner.lock();
+                planner.last_drive = Some(outcome.clone());
+                if outcome.soft_odometry_limited {
+                    planner.ok = false;
+                    planner.active = false;
+                    planner.status = "limited".to_string();
+                    planner.message = "planner stopped by soft odometry limit".to_string();
+                } else {
+                    planner.ok = true;
+                    planner.active = true;
+                    planner.status = "active".to_string();
+                    planner.message = "planner driving toward goal".to_string();
+                }
+            }
+            Err(err) => {
+                let mut planner = self.planner.lock();
+                planner.ok = false;
+                planner.active = false;
+                planner.status = "stopped".to_string();
+                planner.message = format!("planner drive stopped: {err}");
+            }
+        }
+    }
+
+    fn cancel_planner_state(&self, status: &str, message: &str) {
+        let mut planner = self.planner.lock();
+        if planner.goal.is_none() && planner.path.poses.is_empty() {
+            return;
+        }
+        planner.ok = matches!(
+            status,
+            "cancelled" | "idle" | "reached" | "stopped" | "estop"
+        );
+        planner.active = false;
+        planner.status = status.to_string();
+        planner.message = message.to_string();
     }
 
     pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
@@ -790,6 +971,17 @@ impl Harness {
         });
     }
 
+    fn spawn_planner_loop(&self) {
+        let harness = self.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+                harness.planner_step();
+            }
+        });
+    }
+
     fn spawn_telemetry_loop(&self) {
         let harness = self.clone();
         tokio::spawn(async move {
@@ -872,6 +1064,152 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
 
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PlannerCell {
+    col: usize,
+    row: usize,
+}
+
+impl PlannerCell {
+    fn index(self) -> usize {
+        self.row * PLANNER_GRID_WIDTH + self.col
+    }
+}
+
+fn planner_occupancy_cells() -> Vec<i8> {
+    let mut cells = vec![OCCUPANCY_FREE; PLANNER_GRID_CELLS];
+    for &(col, row) in PLANNER_BLOCKED_CELLS {
+        cells[row * PLANNER_GRID_WIDTH + col] = OCCUPANCY_OCCUPIED;
+    }
+    cells
+}
+
+fn planner_costs() -> Vec<u8> {
+    planner_occupancy_cells()
+        .into_iter()
+        .map(|cell| {
+            if cell == OCCUPANCY_OCCUPIED {
+                COST_LETHAL
+            } else {
+                COST_FREE
+            }
+        })
+        .collect()
+}
+
+fn planner_cell_for_xy(x_m: f64, y_m: f64) -> Option<PlannerCell> {
+    let max_x = PLANNER_ORIGIN_X_M + PLANNER_GRID_WIDTH as f64 * PLANNER_RESOLUTION_M;
+    let max_y = PLANNER_ORIGIN_Y_M + PLANNER_GRID_HEIGHT as f64 * PLANNER_RESOLUTION_M;
+    if x_m < PLANNER_ORIGIN_X_M || y_m < PLANNER_ORIGIN_Y_M || x_m >= max_x || y_m >= max_y {
+        return None;
+    }
+
+    let col = ((x_m - PLANNER_ORIGIN_X_M) / PLANNER_RESOLUTION_M).floor() as usize;
+    let row = ((y_m - PLANNER_ORIGIN_Y_M) / PLANNER_RESOLUTION_M).floor() as usize;
+    Some(PlannerCell { col, row })
+}
+
+fn planner_pose_for_cell(cell: PlannerCell, ts_ms: u128) -> Pose2d {
+    Pose2d {
+        ts_ms,
+        frame_id: "map".to_string(),
+        x_m: round3(PLANNER_ORIGIN_X_M + (cell.col as f64 + 0.5) * PLANNER_RESOLUTION_M),
+        y_m: round3(PLANNER_ORIGIN_Y_M + (cell.row as f64 + 0.5) * PLANNER_RESOLUTION_M),
+        yaw_rad: 0.0,
+    }
+}
+
+fn planner_route(start: PlannerCell, goal: PlannerCell) -> Option<Vec<PlannerCell>> {
+    if planner_cell_blocked(start) || planner_cell_blocked(goal) {
+        return None;
+    }
+
+    let mut queue = VecDeque::from([start]);
+    let mut seen = [false; PLANNER_GRID_CELLS];
+    let mut previous = [None; PLANNER_GRID_CELLS];
+    seen[start.index()] = true;
+
+    while let Some(cell) = queue.pop_front() {
+        if cell == goal {
+            break;
+        }
+        for next in planner_neighbors(cell) {
+            let index = next.index();
+            if seen[index] || planner_cell_blocked(next) {
+                continue;
+            }
+            seen[index] = true;
+            previous[index] = Some(cell);
+            queue.push_back(next);
+        }
+    }
+
+    if !seen[goal.index()] {
+        return None;
+    }
+
+    let mut cells = vec![goal];
+    let mut cursor = goal;
+    while cursor != start {
+        cursor = previous[cursor.index()]?;
+        cells.push(cursor);
+    }
+    cells.reverse();
+    Some(cells)
+}
+
+fn planner_cell_blocked(cell: PlannerCell) -> bool {
+    PLANNER_BLOCKED_CELLS
+        .iter()
+        .any(|&(col, row)| col == cell.col && row == cell.row)
+}
+
+fn planner_neighbors(cell: PlannerCell) -> Vec<PlannerCell> {
+    let mut neighbors = Vec::with_capacity(4);
+    if cell.col > 0 {
+        neighbors.push(PlannerCell {
+            col: cell.col - 1,
+            row: cell.row,
+        });
+    }
+    if cell.col + 1 < PLANNER_GRID_WIDTH {
+        neighbors.push(PlannerCell {
+            col: cell.col + 1,
+            row: cell.row,
+        });
+    }
+    if cell.row > 0 {
+        neighbors.push(PlannerCell {
+            col: cell.col,
+            row: cell.row - 1,
+        });
+    }
+    if cell.row + 1 < PLANNER_GRID_HEIGHT {
+        neighbors.push(PlannerCell {
+            col: cell.col,
+            row: cell.row + 1,
+        });
+    }
+    neighbors
+}
+
+fn planner_drive_command(current: &Pose2d, next: &Pose2d) -> (f64, f64) {
+    let dx = next.x_m - current.x_m;
+    let dy = next.y_m - current.y_m;
+    if dx.abs() >= dy.abs() {
+        let direction = if dx >= 0.0 { 1.0 } else { -1.0 };
+        (PLANNER_STEP_CMD * direction, PLANNER_STEP_CMD * direction)
+    } else if dy >= 0.0 {
+        (PLANNER_STEP_CMD * 0.5, PLANNER_STEP_CMD)
+    } else {
+        (PLANNER_STEP_CMD, PLANNER_STEP_CMD * 0.5)
+    }
+}
+
+fn distance2d(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
+    ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
 }
 
 fn current_resource_sample() -> ResourceSample {
@@ -1097,6 +1435,117 @@ mod tests {
         assert_eq!(frame.visualization.point_cloud.fields, ["x", "y", "z"]);
         assert_eq!(frame.visualization.command.left_cmd, 0.2);
         assert_eq!(frame.visualization.command.speed_mode, SpeedMode::Low);
+    }
+
+    #[tokio::test]
+    async fn planner_rejects_blocked_sim_goal_without_motion() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let status = harness
+            .set_planner_goal(PlannerGoal {
+                x_m: -0.25,
+                y_m: -0.25,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+
+        assert!(!status.ok);
+        assert!(!status.active);
+        assert_eq!(status.status, "blocked");
+        assert!(status.path.poses.is_empty());
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
+        assert_eq!(harness.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn planner_accepts_goal_and_cancel_stops_motion() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let status = harness
+            .set_planner_goal(PlannerGoal {
+                x_m: 0.25,
+                y_m: 0.0,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+
+        assert!(status.ok);
+        assert!(status.active);
+        assert!(status.path.poses.len() >= 2);
+        assert!(status
+            .last_drive
+            .as_ref()
+            .is_some_and(|drive| drive.left > 0.0));
+        assert!(harness.telemetry().left_cmd > 0.0);
+
+        let status = harness.cancel_planner_goal().unwrap();
+
+        assert!(!status.active);
+        assert_eq!(status.status, "cancelled");
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
+        assert_eq!(harness.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn stop_and_estop_cancel_planner_movement() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness
+            .set_planner_goal(PlannerGoal {
+                x_m: 0.25,
+                y_m: 0.0,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+
+        harness.stop().unwrap();
+
+        let status = harness.planner_status();
+        assert!(!status.active);
+        assert_eq!(status.status, "stopped");
+
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness
+            .set_planner_goal(PlannerGoal {
+                x_m: 0.25,
+                y_m: 0.0,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+
+        harness.estop().unwrap();
+
+        let status = harness.planner_status();
+        assert!(!status.active);
+        assert_eq!(status.status, "estop");
+    }
+
+    #[tokio::test]
+    async fn planner_stops_when_soft_odometry_limit_is_reached() {
+        let harness = Harness::new(HarnessConfig {
+            soft_odometry_limit_m: 0.001,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let status = harness
+            .set_planner_goal(PlannerGoal {
+                x_m: 0.25,
+                y_m: 0.0,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+        assert!(status.active);
+
+        time::sleep(Duration::from_millis(150)).await;
+
+        let status = harness.planner_status();
+        let telemetry = harness.telemetry();
+        assert!(!status.ok);
+        assert!(!status.active);
+        assert_eq!(status.status, "limited");
+        assert!(telemetry.soft_odometry_limited);
+        assert_eq!(telemetry.left_cmd, 0.0);
+        assert_eq!(telemetry.right_cmd, 0.0);
     }
 
     #[tokio::test]
