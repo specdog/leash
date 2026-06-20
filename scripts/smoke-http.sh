@@ -85,7 +85,22 @@ if (payload.kind !== "telemetry") throw new Error(`unexpected stream kind: ${pay
 if (!payload.telemetry || payload.telemetry.profile !== "sim") throw new Error("stream telemetry payload was missing");
 if (!payload.health || !Array.isArray(payload.health.modules)) throw new Error("stream health modules were missing");
 if (!payload.command || typeof payload.command.left_cmd !== "number") throw new Error("stream command state was missing");
-if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");'
+if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");
+if (!payload.visualization || payload.visualization.version !== "leash-visualization-v1") {
+  throw new Error("stream visualization frame was missing");
+}
+if (!payload.visualization.pose || payload.visualization.pose.frame_id !== "map") {
+  throw new Error("stream visualization pose was missing");
+}
+if (!payload.visualization.path || !Array.isArray(payload.visualization.path.poses)) {
+  throw new Error("stream visualization path was missing");
+}
+if (!payload.visualization.occupancy_grid || !Array.isArray(payload.visualization.occupancy_grid.cells)) {
+  throw new Error("stream visualization occupancy grid was missing");
+}
+if (!payload.visualization.command || typeof payload.visualization.command.left_cmd !== "number") {
+  throw new Error("stream visualization command overlay was missing");
+}'
 }
 
 assert_agent_message() {
