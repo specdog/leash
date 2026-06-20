@@ -11,6 +11,7 @@ use leash_harness::{
         ModuleGraph, ModuleHealth, ModuleInfo, ModuleState, StreamDescriptor, StreamDirection,
     },
     stack::{AdapterCategory, AdapterMaturity, AdapterProfile},
+    transport::NetworkStreamFrame,
     types::{
         AgentMessage, AgentMessageAck, AgentMessageList, AgentModelResponse, AutonomyOverlay,
         BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandOverlay,
@@ -142,6 +143,7 @@ fn schema_document() -> Result<Value> {
     insert::<AdapterCategory>(&mut schemas, "AdapterCategory")?;
     insert::<AdapterMaturity>(&mut schemas, "AdapterMaturity")?;
     insert::<AdapterProfile>(&mut schemas, "AdapterProfile")?;
+    insert::<NetworkStreamFrame>(&mut schemas, "NetworkStreamFrame")?;
     insert::<McpToolDescriptor>(&mut schemas, "McpToolDescriptor")?;
     insert::<McpToolList>(&mut schemas, "McpToolList")?;
     insert::<McpCallResponse>(&mut schemas, "McpCallResponse")?;
