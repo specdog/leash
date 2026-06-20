@@ -17,10 +17,14 @@ use anyhow::{anyhow, Result};
 use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "waveshare-ugv")]
 use serde_json::json;
+#[cfg(feature = "mavlink-drone")]
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
+#[cfg(feature = "mavlink-drone")]
+use crate::types::DroneCommandStatus;
 use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     capability::{default_capability_descriptors, CapabilityRegistry},
@@ -107,6 +111,32 @@ struct ReplayDriver;
 impl RobotDriver for ReplayDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "replay drive ignored");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+#[derive(Debug)]
+struct MavlinkDroneDriver {
+    endpoint: String,
+}
+
+#[cfg(feature = "mavlink-drone")]
+impl MavlinkDroneDriver {
+    fn open(config: &HarnessConfig) -> Result<Self> {
+        Ok(Self {
+            endpoint: config.mavlink_endpoint.clone(),
+        })
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+impl RobotDriver for MavlinkDroneDriver {
+    fn drive(&self, left: f64, right: f64) -> Result<()> {
+        debug!(
+            endpoint = self.endpoint,
+            left, right, "mavlink drone skeleton ignored differential drive command"
+        );
         Ok(())
     }
 }
@@ -215,12 +245,12 @@ impl RawTelemetry {
         }
     }
 
-    fn physical() -> Self {
+    fn physical(source: &str) -> Self {
         Self {
             battery_v: None,
             odometry_left: None,
             odometry_right: None,
-            source: "waveshare-ugv".to_string(),
+            source: source.to_string(),
             last_raw_frame_ms: None,
         }
     }
@@ -280,12 +310,14 @@ impl Harness {
             Profile::Sim => Arc::new(SimDriver),
             Profile::Replay => Arc::new(ReplayDriver),
             Profile::WaveshareUgv => open_physical_driver(&config)?,
+            Profile::MavlinkDrone => open_physical_driver(&config)?,
         };
 
         let raw = match config.profile {
             Profile::Sim => RawTelemetry::sim(),
             Profile::Replay => RawTelemetry::replay(),
-            Profile::WaveshareUgv => RawTelemetry::physical(),
+            Profile::WaveshareUgv => RawTelemetry::physical("waveshare-ugv"),
+            Profile::MavlinkDrone => RawTelemetry::physical("mavlink-drone"),
         };
 
         let replay = config
@@ -1192,6 +1224,38 @@ impl Harness {
         }
     }
 
+    #[cfg(feature = "mavlink-drone")]
+    pub fn drone_command(
+        &self,
+        command: &str,
+        token: Option<&str>,
+        args: Value,
+    ) -> Result<DroneCommandStatus> {
+        self.validate_session(token)?;
+        let simulated = matches!(self.config.profile, Profile::Sim | Profile::Replay);
+        if self.config.profile == Profile::MavlinkDrone {
+            return Err(anyhow!(
+                "MAVLink drone profile is a gated skeleton; configure a concrete MAVLink adapter before executing '{command}'"
+            ));
+        }
+        if !simulated {
+            return Err(anyhow!(
+                "drone capability '{command}' requires sim, replay, or mavlink-drone profile"
+            ));
+        }
+
+        Ok(DroneCommandStatus {
+            ok: true,
+            command: command.to_string(),
+            profile: self.config.profile.as_str().to_string(),
+            simulated,
+            status: "simulated".to_string(),
+            message: format!("simulated MAVLink drone {command} accepted"),
+            mavlink_endpoint: None,
+            args,
+        })
+    }
+
     fn validate_session(&self, token: Option<&str>) -> Result<Option<PilotSession>> {
         if self.config.allow_untokened_drive && token.is_none() {
             return Ok(None);
@@ -1315,6 +1379,19 @@ fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> 
                 let _ = config;
                 Err(anyhow!(
                     "profile 'waveshare-ugv' requires building with --features waveshare-ugv"
+                ))
+            }
+        }
+        Profile::MavlinkDrone => {
+            #[cfg(feature = "mavlink-drone")]
+            {
+                Ok(Arc::new(MavlinkDroneDriver::open(config)?))
+            }
+            #[cfg(not(feature = "mavlink-drone"))]
+            {
+                let _ = config;
+                Err(anyhow!(
+                    "profile 'mavlink-drone' requires building with --features mavlink-drone"
                 ))
             }
         }

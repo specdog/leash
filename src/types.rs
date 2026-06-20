@@ -628,6 +628,20 @@ pub struct DriveOutcome {
     pub soft_odometry_limited: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct DroneCommandStatus {
+    pub ok: bool,
+    pub command: String,
+    pub profile: String,
+    pub simulated: bool,
+    pub status: String,
+    pub message: String,
+    pub mavlink_endpoint: Option<String>,
+    #[serde(default)]
+    pub args: Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

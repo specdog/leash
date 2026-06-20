@@ -144,6 +144,9 @@ struct RuntimeArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     drive_swap: bool,
 
+    #[arg(long)]
+    mavlink_endpoint: Option<String>,
+
     #[arg(long, value_enum)]
     accelerator: Option<AcceleratorBackend>,
 
@@ -784,6 +787,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
         "sim" => Profile::Sim,
         "replay" => Profile::Replay,
         "waveshare-ugv" => Profile::WaveshareUgv,
+        "mavlink-drone" => Profile::MavlinkDrone,
         other => {
             let stacks = built_in_stacks()
                 .into_iter()
@@ -791,7 +795,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!(
-                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, or one of: {stacks}"
+                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, mavlink-drone, or one of: {stacks}"
             );
         }
     };
@@ -834,6 +838,7 @@ impl RuntimeArgs {
             serial_baud: self.serial_baud,
             drive_invert: self.drive_invert.then_some(true),
             drive_swap: self.drive_swap.then_some(true),
+            mavlink_endpoint: self.mavlink_endpoint,
             accelerator: self.accelerator,
             require_accelerator: self.require_accelerator.then_some(true),
             resource_sampling: if self.resource_sampling {
