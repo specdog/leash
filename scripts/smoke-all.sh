@@ -125,6 +125,38 @@ const checks = [
     },
   },
   {
+    name: "stack-catalog-manipulator",
+    argv: ["cargo", "run", "--quiet", "--features", "manipulator", "--", "list", "--format", "json"],
+    validate: (stdout) => {
+      const stacks = JSON.parse(stdout);
+      const byName = new Map(stacks.map((stack) => [stack.name, stack]));
+      for (const required of ["manipulator-sim", "manipulator-replay", "manipulator-http"]) {
+        if (!byName.has(required)) {
+          throw new Error(`missing stack ${required}`);
+        }
+      }
+      const sim = byName.get("manipulator-sim");
+      const replay = byName.get("manipulator-replay");
+      const physical = byName.get("manipulator-http");
+      if (sim.hardware_required || replay.hardware_required) {
+        throw new Error("manipulator sim/replay stacks should not require hardware");
+      }
+      if (!physical.hardware_required) {
+        throw new Error("manipulator physical stack did not declare hardware_required");
+      }
+      if (sim.adapter.category !== "manipulator" || replay.adapter.category !== "manipulator" || physical.adapter.category !== "manipulator") {
+        throw new Error("manipulator stacks did not declare manipulator adapter metadata");
+      }
+      if (!sim.adapter.capabilities.includes("manipulator_joint_state") || !replay.adapter.capabilities.includes("manipulator_pose_command")) {
+        throw new Error("manipulator sim/replay stacks did not expose manipulator capabilities");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("manipulator physical stack did not declare physical-actuation gate");
+      }
+      return "manipulator sim/replay/physical stack metadata resolved without hardware";
+    },
+  },
+  {
     name: "graph-sim-json",
     argv: ["cargo", "run", "--quiet", "--", "graph", "sim", "--format", "json"],
     validate: (stdout) => {

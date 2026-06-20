@@ -405,6 +405,52 @@ impl CapabilityRegistry {
                 )?)
                 .map_err(Into::into)
             }
+            #[cfg(feature = "manipulator")]
+            "manipulator_joint_state" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.manipulator_joint_state()).map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_joint_command" => {
+                ensure_fields(&args, &["token", "joints"])?;
+                let token = optional_string(&args, "token")?;
+                let joints = args
+                    .get("joints")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("joints is required"))?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "joint_command",
+                    token.as_deref(),
+                    json!({ "joints": joints }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_pose_command" => {
+                ensure_fields(&args, &["token", "pose"])?;
+                let token = optional_string(&args, "token")?;
+                let pose = args
+                    .get("pose")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("pose is required"))?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "pose_command",
+                    token.as_deref(),
+                    json!({ "pose": pose }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_home" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "home",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -695,16 +741,25 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             "SpatialMemoryStatus",
         ),
     ];
+    feature_capability_descriptors(descriptors)
+}
+
+#[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
+fn feature_capability_descriptors(
+    mut descriptors: Vec<CapabilityDescriptor>,
+) -> Vec<CapabilityDescriptor> {
     #[cfg(feature = "mavlink-drone")]
-    {
-        let mut descriptors = descriptors;
-        descriptors.extend(drone_capability_descriptors());
-        descriptors
-    }
-    #[cfg(not(feature = "mavlink-drone"))]
-    {
-        descriptors
-    }
+    descriptors.extend(drone_capability_descriptors());
+    #[cfg(feature = "manipulator")]
+    descriptors.extend(manipulator_capability_descriptors());
+    descriptors
+}
+
+#[cfg(not(any(feature = "mavlink-drone", feature = "manipulator")))]
+fn feature_capability_descriptors(
+    descriptors: Vec<CapabilityDescriptor>,
+) -> Vec<CapabilityDescriptor> {
+    descriptors
 }
 
 #[cfg(feature = "mavlink-drone")]
@@ -768,6 +823,48 @@ fn drone_capability_descriptors() -> Vec<CapabilityDescriptor> {
                 ("altitude_m", "number", true),
             ]),
             "DroneCommandStatus",
+        ),
+    ]
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_capability_descriptors() -> Vec<CapabilityDescriptor> {
+    vec![
+        descriptor(
+            "manipulator_joint_state",
+            "Read the versioned manipulator joint state",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "ManipulatorJointState",
+        ),
+        descriptor(
+            "manipulator_joint_command",
+            "Send a versioned manipulator joint command",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("joints", "ManipulatorJointCommandV1", true),
+            ]),
+            "ManipulatorCommandStatus",
+        ),
+        descriptor(
+            "manipulator_pose_command",
+            "Send a versioned manipulator end-effector pose command",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("pose", "ManipulatorPoseCommandV1", true),
+            ]),
+            "ManipulatorCommandStatus",
+        ),
+        descriptor(
+            "manipulator_home",
+            "Move the manipulator to its configured home pose",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "ManipulatorCommandStatus",
         ),
     ]
 }
@@ -837,6 +934,19 @@ fn canonical_name(name: &str) -> &str {
         | "drone.move-velocity"
         | "drone/move-velocity" => "drone_move_velocity",
         "drone.fly_to" | "drone/fly_to" | "drone.fly-to" | "drone/fly-to" => "drone_fly_to",
+        "manipulator.joint_state"
+        | "manipulator/joint_state"
+        | "manipulator.joint-state"
+        | "manipulator/joint-state" => "manipulator_joint_state",
+        "manipulator.joint_command"
+        | "manipulator/joint_command"
+        | "manipulator.joint-command"
+        | "manipulator/joint-command" => "manipulator_joint_command",
+        "manipulator.pose_command"
+        | "manipulator/pose_command"
+        | "manipulator.pose-command"
+        | "manipulator/pose-command" => "manipulator_pose_command",
+        "manipulator.home" | "manipulator/home" => "manipulator_home",
         other => other,
     }
 }
@@ -964,7 +1074,7 @@ fn optional_spatial_memory_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "mavlink-drone")]
+    #[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
     use crate::config::Profile;
     use crate::{config::PolicyMode, types::TelemetryFrame, HarnessConfig};
 
@@ -1084,6 +1194,78 @@ mod tests {
         let registry = CapabilityRegistry::new(harness);
         let err = registry
             .invoke_value("drone_land", json!({ "approval": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("gated skeleton"));
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[tokio::test]
+    async fn manipulator_capabilities_are_simulated_and_policy_gated() {
+        let harness = Harness::new(HarnessConfig {
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let state = registry
+            .invoke_value("manipulator.joint-state", json!({}))
+            .unwrap();
+        assert_eq!(state["version"], "leash-manipulator-v1");
+        assert_eq!(state["simulated"], true);
+        assert_eq!(state["joints"][0]["name"], "shoulder_pan");
+
+        let err = registry
+            .invoke_value(
+                "manipulator_joint_command",
+                json!({ "joints": [{ "name": "elbow", "position_rad": 0.4 }] }),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("policy require-approval"));
+
+        let commanded = registry
+            .invoke_value(
+                "manipulator.joint-command",
+                json!({
+                    "approval": true,
+                    "joints": [{ "name": "elbow", "position_rad": 0.4 }]
+                }),
+            )
+            .unwrap();
+        assert_eq!(commanded["version"], "leash-manipulator-v1");
+        assert_eq!(commanded["command"], "joint_command");
+        assert_eq!(commanded["simulated"], true);
+
+        let homed = registry
+            .invoke_value("manipulator_home", json!({ "approval": true }))
+            .unwrap();
+        assert_eq!(homed["command"], "home");
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[tokio::test]
+    async fn physical_manipulator_profile_stays_a_gated_skeleton() {
+        let err = match Harness::new(HarnessConfig {
+            profile: Profile::Manipulator,
+            ..HarnessConfig::default()
+        }) {
+            Ok(_) => panic!("expected manipulator profile to require the physical gate"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("LEASH_ALLOW_PHYSICAL_ACTUATION"));
+
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::Manipulator,
+            allow_physical_actuation: true,
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+        let err = registry
+            .invoke_value("manipulator_home", json!({ "approval": true }))
             .unwrap_err()
             .to_string();
         assert!(err.contains("gated skeleton"));

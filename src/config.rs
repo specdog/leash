@@ -17,6 +17,7 @@ pub enum Profile {
     Replay,
     WaveshareUgv,
     MavlinkDrone,
+    Manipulator,
 }
 
 impl Profile {
@@ -26,11 +27,15 @@ impl Profile {
             Self::Replay => "replay",
             Self::WaveshareUgv => "waveshare-ugv",
             Self::MavlinkDrone => "mavlink-drone",
+            Self::Manipulator => "manipulator",
         }
     }
 
     pub fn is_physical(self) -> bool {
-        matches!(self, Self::WaveshareUgv | Self::MavlinkDrone)
+        matches!(
+            self,
+            Self::WaveshareUgv | Self::MavlinkDrone | Self::Manipulator
+        )
     }
 }
 
@@ -443,7 +448,8 @@ fn parse_profile(value: &str) -> anyhow::Result<Profile> {
         "replay" => Ok(Profile::Replay),
         "waveshare-ugv" => Ok(Profile::WaveshareUgv),
         "mavlink-drone" => Ok(Profile::MavlinkDrone),
-        _ => anyhow::bail!("expected sim, replay, waveshare-ugv, or mavlink-drone"),
+        "manipulator" => Ok(Profile::Manipulator),
+        _ => anyhow::bail!("expected sim, replay, waveshare-ugv, mavlink-drone, or manipulator"),
     }
 }
 
@@ -690,6 +696,12 @@ impl ConfigBuilder {
         {
             self.allow_untokened_drive
                 .set(false, "stack:mavlink-drone".to_string());
+        }
+        if self.profile.value == Profile::Manipulator
+            && self.allow_untokened_drive.source == "default"
+        {
+            self.allow_untokened_drive
+                .set(false, "stack:manipulator".to_string());
         }
     }
 

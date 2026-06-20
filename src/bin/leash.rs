@@ -788,6 +788,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
         "replay" => Profile::Replay,
         "waveshare-ugv" => Profile::WaveshareUgv,
         "mavlink-drone" => Profile::MavlinkDrone,
+        "manipulator" => Profile::Manipulator,
         other => {
             let stacks = built_in_stacks()
                 .into_iter()
@@ -795,7 +796,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!(
-                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, mavlink-drone, or one of: {stacks}"
+                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, mavlink-drone, manipulator, or one of: {stacks}"
             );
         }
     };

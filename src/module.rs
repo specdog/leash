@@ -318,6 +318,7 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
         Profile::Replay => "replay-driver",
         Profile::WaveshareUgv => "waveshare-ugv-driver",
         Profile::MavlinkDrone => "mavlink-drone-driver",
+        Profile::Manipulator => "manipulator-driver",
     };
     let driver_capabilities = match config.profile {
         Profile::MavlinkDrone => vec![
@@ -330,14 +331,24 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             "stop".to_string(),
             "estop".to_string(),
         ],
+        Profile::Manipulator => vec![
+            "manipulator_joint_state".to_string(),
+            "manipulator_joint_command".to_string(),
+            "manipulator_pose_command".to_string(),
+            "manipulator_home".to_string(),
+            "stop".to_string(),
+            "estop".to_string(),
+        ],
         _ => vec!["drive".to_string(), "stop".to_string(), "estop".to_string()],
     };
     let driver_input = match config.profile {
         Profile::MavlinkDrone => "FlightCommand",
+        Profile::Manipulator => "ManipulatorCommand",
         _ => "DriveReq",
     };
     let driver_output = match config.profile {
         Profile::MavlinkDrone => "DroneCommandStatus",
+        Profile::Manipulator => "ManipulatorCommandStatus",
         _ => "OdometryStatus",
     };
     let transport = config.stream_transport;
@@ -378,6 +389,8 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             inputs: vec![stream(
                 if config.profile == Profile::MavlinkDrone {
                     "flight_command"
+                } else if config.profile == Profile::Manipulator {
+                    "manipulator_command"
                 } else {
                     "drive_command"
                 },
@@ -388,6 +401,8 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             outputs: vec![stream(
                 if config.profile == Profile::MavlinkDrone {
                     "flight_status"
+                } else if config.profile == Profile::Manipulator {
+                    "manipulator_status"
                 } else {
                     "odometry"
                 },
