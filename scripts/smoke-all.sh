@@ -54,6 +54,11 @@ const checks = [
     proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, key=value/JSON direct calls, planner, patrol, and spatial-memory calls passed",
   },
   {
+    name: "stream-hub",
+    argv: ["bash", "scripts/smoke-stream-hub.sh"],
+    proof: "TCP JSONL stream hub accepted valid frames and kept serving after an invalid peer",
+  },
+  {
     name: "replay-http-observe",
     argv: ["bash", "scripts/smoke-replay-http.sh"],
     proof: "HTTP replay health, capabilities, telemetry observe, and fake detections passed",
@@ -79,10 +84,14 @@ const checks = [
     validate: (stdout) => {
       const stacks = JSON.parse(stdout);
       const names = stacks.map((stack) => stack.name);
-      for (const required of ["sim-http", "sim-mcp", "bridge-compat-http", "waveshare-ugv-http"]) {
+      for (const required of ["sim-http", "sim-mcp", "sim-stream-hub", "bridge-compat-http", "waveshare-ugv-http"]) {
         if (!names.includes(required)) {
           throw new Error(`missing stack ${required}`);
         }
+      }
+      const streamHub = stacks.find((stack) => stack.name === "sim-stream-hub");
+      if (!streamHub || streamHub.transport.kind !== "stream-hub") {
+        throw new Error("sim-stream-hub stack did not declare stream-hub transport");
       }
       const physical = stacks.find((stack) => stack.name === "waveshare-ugv-http");
       if (!physical.hardware_required) {

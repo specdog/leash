@@ -1,4 +1,3 @@
-#[cfg(feature = "http")]
 use std::io::{self, Write};
 use std::{collections::BTreeMap, fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -17,7 +16,7 @@ use leash_harness::{
     module::default_module_graph,
     replay::{scaled_delay, ReplayEvent, ReplayEventKind, ReplayRecording, REPLAY_FORMAT_VERSION},
     stack::{built_in_stacks, find_stack, Stack, StackTransport},
-    transport::StreamTransportBackend,
+    transport::{spawn_tcp_jsonl_stream_hub, StreamTransportBackend},
     types::RunLogEntry,
     Harness, HarnessConfig, Profile, TelemetryStreamFrame,
 };
@@ -98,6 +97,7 @@ enum Transport {
     McpHttp(McpHttpServeArgs),
     #[cfg(feature = "http")]
     Http(HttpServeArgs),
+    StreamHub(StreamHubServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -193,6 +193,15 @@ struct McpHttpServeArgs {
     runtime: RuntimeArgs,
 
     #[arg(long, default_value = "127.0.0.1:9990")]
+    listen: SocketAddr,
+}
+
+#[derive(Debug, Args)]
+struct StreamHubServeArgs {
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+
+    #[arg(long, default_value = "127.0.0.1:9970")]
     listen: SocketAddr,
 }
 
@@ -407,6 +416,11 @@ async fn main() -> Result<()> {
                 let listen = config.listen;
                 let harness = Harness::new(config)?;
                 leash_harness::http::serve_http(harness, listen).await?;
+            }
+            Transport::StreamHub(args) => {
+                let config =
+                    config_from_args(args.runtime, Some(args.listen), cli.config.clone(), None)?;
+                serve_stream_hub(config).await?;
             }
         },
         Command::Record(args) => {
@@ -726,7 +740,40 @@ async fn run_stack(args: RunArgs, config_path: Option<PathBuf>) -> Result<()> {
                 bail!("MCP stacks require the 'mcp' feature");
             }
         }
+        StackTransport::StreamHub => {
+            if args.daemon {
+                bail!("daemon mode is only supported for HTTP stacks");
+            }
+            serve_stream_hub(config).await?;
+        }
     }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct StreamHubServeOutput {
+    ok: bool,
+    transport: &'static str,
+    profile: String,
+    listen: String,
+    stream_transport: String,
+}
+
+async fn serve_stream_hub(config: HarnessConfig) -> Result<()> {
+    let listen = config.listen;
+    let output = StreamHubServeOutput {
+        ok: true,
+        transport: "stream-hub",
+        profile: config.profile.as_str().to_string(),
+        listen: listen.to_string(),
+        stream_transport: config.stream_transport.as_str().to_string(),
+    };
+    let harness = Harness::new(config)?;
+    let hub = spawn_tcp_jsonl_stream_hub(listen, harness.stream_transport()).await?;
+    println!("{}", serde_json::to_string(&output)?);
+    io::stdout().flush()?;
+    tokio::signal::ctrl_c().await?;
+    hub.shutdown().await?;
     Ok(())
 }
 
