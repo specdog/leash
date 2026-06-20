@@ -35,7 +35,7 @@ const checks = [
   {
     name: "http-routes-and-policy",
     argv: ["bash", "scripts/smoke-http.sh"],
-    proof: "HTTP routes, WebSocket/SSE telemetry, agent input, capture, authorized drive, and drive-denial policy passed",
+    proof: "HTTP routes, WebSocket/SSE telemetry with visualization frames, agent input, capture, authorized drive, and drive-denial policy passed",
   },
   {
     name: "mcp-stdio",

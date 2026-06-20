@@ -92,7 +92,7 @@ POST /stop                 → alias for /motors/stop
 POST /estop                → { ok: true, estop: true }
 POST /estop/reset          → { token, approval } → { ok: true, estop: false }
 GET  /stream               → SVG frame (image/svg+xml)
-WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
+WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON with visualization payload
 ```
 
 ## User Stories
@@ -117,3 +117,4 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-15 | Developer configures a model provider without leaking secrets | P1 | deterministic provider works in CI; hosted/local config validates; API key is redacted |
 | LS-16 | Operator policy-gates physical capability invocation | P0 | safety classes include physical-high-risk; modes support dry-run, require-token, require-approval, deny; stop/estop remain available |
 | LS-17 | Operator opens a localhost command center | P1 | `/dashboard` renders health, telemetry, modules, capabilities, logs, and stop/estop controls without client JavaScript |
+| LS-18 | External viewer subscribes to telemetry stream frames | P1 | frames include `leash-visualization-v1` pose, path, occupancy-grid, point-cloud metadata, detections, and command overlay payloads |

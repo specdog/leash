@@ -29,8 +29,10 @@ use crate::{
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
-        CommandStreamState, DriveOutcome, Health, OdometryStatus, RawFrameStatus, ResourceSample,
+        CommandOverlay, CommandStreamState, DriveOutcome, Health, OccupancyGridFrame,
+        OdometryStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
         SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        VisualizationFrame, VisualizationPath, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -451,6 +453,7 @@ impl Harness {
 
     fn stream_frame_from_telemetry(&self, telemetry: TelemetryFrame) -> TelemetryStreamFrame {
         let health = self.health();
+        let visualization = self.visualization_frame_from_telemetry(&telemetry);
         TelemetryStreamFrame {
             kind: "telemetry".to_string(),
             ts_ms: telemetry.ts_ms,
@@ -469,8 +472,68 @@ impl Harness {
                 soft_odometry_limit_m: telemetry.soft_odometry_limit_m,
                 physical_actuation_enabled: self.physical_actuation_enabled(),
             },
+            visualization,
             telemetry,
             health,
+        }
+    }
+
+    fn visualization_frame_from_telemetry(&self, telemetry: &TelemetryFrame) -> VisualizationFrame {
+        let left_m = telemetry.odometry_left.unwrap_or_default();
+        let right_m = telemetry.odometry_right.unwrap_or_default();
+        let x_m = round3((left_m + right_m) / 2.0);
+        let yaw_rad = round3((right_m - left_m) * 0.25);
+        let pose = Pose2d {
+            frame_id: "map".to_string(),
+            x_m,
+            y_m: 0.0,
+            yaw_rad,
+        };
+        VisualizationFrame {
+            version: VISUALIZATION_FRAME_VERSION.to_string(),
+            ts_ms: telemetry.ts_ms,
+            robot: telemetry.robot.clone(),
+            profile: telemetry.profile.clone(),
+            pose: pose.clone(),
+            path: VisualizationPath {
+                frame_id: "map".to_string(),
+                poses: vec![
+                    Pose2d {
+                        frame_id: "map".to_string(),
+                        x_m: 0.0,
+                        y_m: 0.0,
+                        yaw_rad: 0.0,
+                    },
+                    pose.clone(),
+                ],
+            },
+            occupancy_grid: OccupancyGridFrame {
+                frame_id: "map".to_string(),
+                width: 4,
+                height: 4,
+                resolution_m: 0.25,
+                origin: Pose2d {
+                    frame_id: "map".to_string(),
+                    x_m: -0.5,
+                    y_m: -0.5,
+                    yaw_rad: 0.0,
+                },
+                cells: vec![0; 16],
+            },
+            point_cloud: PointCloudMetadata {
+                frame_id: "base_link".to_string(),
+                point_count: 0,
+                fields: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+                source: telemetry.sensors.raw_frame.source.clone(),
+            },
+            detections: Vec::new(),
+            command: CommandOverlay {
+                left_cmd: telemetry.left_cmd,
+                right_cmd: telemetry.right_cmd,
+                speed_mode: telemetry.speed_mode,
+                max_speed: telemetry.max_speed,
+                estop: telemetry.estop,
+            },
         }
     }
 
@@ -958,6 +1021,25 @@ mod tests {
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
         assert!(message.payload["health"]["modules"].is_array());
         assert_eq!(message.payload["safety"]["deadman_ok"], true);
+    }
+
+    #[tokio::test]
+    async fn telemetry_stream_frame_includes_visualization_frame() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness.drive(None, 0.2, 0.2, Some(SpeedMode::Low)).unwrap();
+
+        let frame = harness.telemetry_stream_frame();
+
+        assert_eq!(frame.visualization.version, VISUALIZATION_FRAME_VERSION);
+        assert_eq!(frame.visualization.robot, "robot");
+        assert_eq!(frame.visualization.profile, "sim");
+        assert_eq!(frame.visualization.pose.frame_id, "map");
+        assert!(frame.visualization.pose.x_m > 0.0);
+        assert_eq!(frame.visualization.path.poses.len(), 2);
+        assert_eq!(frame.visualization.occupancy_grid.cells.len(), 16);
+        assert_eq!(frame.visualization.point_cloud.fields, ["x", "y", "z"]);
+        assert_eq!(frame.visualization.command.left_cmd, 0.2);
+        assert_eq!(frame.visualization.command.speed_mode, SpeedMode::Low);
     }
 
     #[tokio::test]
