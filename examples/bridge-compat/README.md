@@ -3,6 +3,15 @@
 Leash can stand in as a simulated or hardware-backed robot runtime for an
 existing bridge/client that already speaks the harness HTTP/WebSocket contract.
 
+```mermaid
+flowchart LR
+  bridge["Existing bridge or client"] --> routes["Bridge-compatible HTTP routes"]
+  routes --> leash["Leash HTTP runtime"]
+  leash --> sim["sim profile"]
+  leash --> ugv["optional waveshare-ugv profile"]
+  leash --> telemetry["telemetry, sensors, camera status, WebSocket"]
+```
+
 Run Leash in compatibility mode:
 
 ```bash
@@ -28,4 +37,3 @@ Compatibility routes currently include:
 - `POST /estop/reset`
 - `GET /stream`
 - `WS /ws/telemetry`
-
