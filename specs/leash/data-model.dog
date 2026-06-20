@@ -465,7 +465,7 @@ lifecycle: planned → designed → implemented → tested
 ```
 
 ### Entity: CommandCenter
-Localhost web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.
+Localhost server-rendered web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.
 
 ```yaml
 entity: CommandCenter
@@ -483,6 +483,10 @@ properties:
     type: string
     required: true
     description: health, telemetry, modules, capabilities, logs, policy, controls
+  control_path:
+    type: string
+    required: true
+    description: plain HTML form posts routed through CapabilityRegistry
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```

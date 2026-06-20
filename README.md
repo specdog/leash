@@ -121,6 +121,13 @@ without returning pilot session tokens.
 ## HTTP Endpoints
 
 ```
+GET  /                    Local command center dashboard
+GET  /dashboard            Local command center dashboard
+POST /dashboard/authorize  Authorize pilot token from dashboard form
+POST /dashboard/stop       Stop through shared capability registry
+POST /dashboard/estop      Latch estop through shared capability registry
+POST /dashboard/estop-reset  Clear estop through shared capability registry
+POST /dashboard/capture    Capture frame through shared capability registry
 GET  /health              Harness health
 GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
@@ -146,6 +153,9 @@ leash agent-send "inspect the battery"
 printf 'look for obstacles\n/quit\n' | leash agent-interactive
 ```
 
+The command center at `/dashboard` is server-rendered HTML with regular form
+posts for authorize, stop, estop, reset, and capture actions. Those forms call
+the same shared capability registry used by JSON HTTP, CLI, and MCP paths.
 `POST /agent/messages` records a bounded recent inbox and publishes each message
 on the `agent` stream for local subscribers. The web form at `/agent` is only
 available when the `http` feature is built, and Leash binds HTTP to
@@ -302,7 +312,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Agent input channels: one-shot CLI, interactive CLI, and localhost web input
 - [ ] Cross-process and network transports
 - [ ] MAVLink drone + manipulator adapters
-- [ ] Localhost command center dashboard
+- [x] Localhost command center dashboard
 - [ ] Spatial memory and perception primitives
 - [ ] Patrol and exploration in simulation
 - [x] Full no-hardware smoke suite

@@ -4,12 +4,12 @@ use anyhow::Result;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        State, WebSocketUpgrade,
+        Form, State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
+        IntoResponse, Redirect, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -58,6 +58,14 @@ struct AgentMessageReq {
     source: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct DashboardActionReq {
+    token: Option<String>,
+    ttl_secs: Option<u64>,
+    speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
+}
+
 pub async fn serve_http(harness: Harness, listen: SocketAddr) -> Result<()> {
     let app = router(harness);
     let listener = tokio::net::TcpListener::bind(listen).await?;
@@ -77,6 +85,13 @@ pub async fn serve_mcp_http(harness: Harness, listen: SocketAddr) -> Result<()> 
 
 pub fn router(harness: Harness) -> Router {
     Router::new()
+        .route("/", get(dashboard_page))
+        .route("/dashboard", get(dashboard_page))
+        .route("/dashboard/authorize", post(dashboard_authorize))
+        .route("/dashboard/stop", post(dashboard_stop))
+        .route("/dashboard/estop", post(dashboard_estop))
+        .route("/dashboard/estop-reset", post(dashboard_estop_reset))
+        .route("/dashboard/capture", post(dashboard_capture))
         .route("/health", get(health))
         .route("/capabilities", get(capabilities))
         .route("/modules", get(modules))
@@ -179,6 +194,401 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
     }))
 }
 
+async fn dashboard_page(State(harness): State<Harness>) -> Response {
+    let config = harness.config();
+    let health = harness.health();
+    let telemetry = harness.telemetry();
+    let capabilities = harness.capabilities();
+    let module_graph = harness.module_graph();
+    let health_status = if health.ok { "ok" } else { "attention" };
+    let health_dot = if health.ok { "ok" } else { "warn" };
+    let health_metrics = dashboard_metrics(vec![
+        ("ok", health.ok.to_string()),
+        ("mode", health.mode.clone()),
+        ("uptime ms", health.uptime_ms.to_string()),
+        ("estop", health.estop.to_string()),
+        (
+            "deadman",
+            if health.deadman_ok { "ok" } else { "stale" }.to_string(),
+        ),
+        (
+            "accelerator",
+            health.accelerator.active.as_str().to_string(),
+        ),
+    ]);
+    let policy_metrics = dashboard_metrics(vec![
+        ("mode", config.policy_mode.as_str().to_string()),
+        ("untokened drive", config.allow_untokened_drive.to_string()),
+        (
+            "physical actuation",
+            harness.physical_actuation_enabled().to_string(),
+        ),
+        (
+            "stream transport",
+            config.stream_transport.as_str().to_string(),
+        ),
+    ]);
+    let telemetry_metrics = dashboard_metrics(vec![
+        ("ts ms", telemetry.ts_ms.to_string()),
+        ("left", telemetry.left_cmd.to_string()),
+        ("right", telemetry.right_cmd.to_string()),
+        ("speed", speed_mode_label(telemetry.speed_mode).to_string()),
+        ("battery", optional_f64(telemetry.battery_v)),
+        ("source", telemetry.source.clone()),
+    ]);
+    let modules = dashboard_modules(&module_graph.modules);
+    let capability_items = dashboard_capabilities(&capabilities.capabilities);
+    let logs_tail = dashboard_logs(&harness);
+    let body = format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="2">
+  <title>Leash Command Center</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7f8;
+      color: #172126;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      background: #f5f7f8;
+      color: #172126;
+    }}
+    header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 24px;
+      border-bottom: 1px solid #d7dee2;
+      background: #ffffff;
+    }}
+    h1 {{ margin: 0; font-size: 20px; font-weight: 700; }}
+    h2 {{ margin: 0 0 12px; font-size: 14px; font-weight: 700; color: #31424a; }}
+    main {{
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.4fr);
+      gap: 16px;
+      padding: 16px;
+    }}
+    section {{
+      min-width: 0;
+      border: 1px solid #d7dee2;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 14px;
+    }}
+    .stack {{ display: grid; gap: 16px; align-content: start; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }}
+    .metric {{
+      min-height: 68px;
+      border: 1px solid #e1e6e9;
+      border-radius: 6px;
+      padding: 10px;
+      background: #fbfcfc;
+    }}
+    .label {{ display: block; margin-bottom: 5px; color: #60717a; font-size: 12px; }}
+    .value {{ display: block; overflow-wrap: anywhere; font-size: 18px; font-weight: 700; }}
+    .value.small {{ font-size: 13px; font-weight: 600; line-height: 1.35; }}
+    .status-dot {{
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: #8a9499;
+    }}
+    .status-dot.ok {{ background: #0f8a5f; }}
+    .status-dot.warn {{ background: #b25e09; }}
+    .toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
+    button, input, select {{
+      min-height: 34px;
+      border: 1px solid #bac5ca;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+      background: #ffffff;
+      color: #172126;
+    }}
+    button {{ cursor: pointer; font-weight: 650; }}
+    button.primary {{ background: #0b6b7a; color: #ffffff; border-color: #0b6b7a; }}
+    button.danger {{ background: #a32929; color: #ffffff; border-color: #a32929; }}
+    button:disabled {{ cursor: not-allowed; opacity: 0.55; }}
+    input {{ width: 160px; }}
+    ul {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }}
+    li {{
+      border: 1px solid #e1e6e9;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fbfcfc;
+      overflow-wrap: anywhere;
+    }}
+    pre {{
+      margin: 0;
+      min-height: 260px;
+      max-height: 420px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid #e1e6e9;
+      border-radius: 6px;
+      padding: 10px;
+      background: #101820;
+      color: #d7f3e3;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }}
+    .wide {{ grid-column: 1 / -1; }}
+    @media (max-width: 840px) {{
+      header {{ align-items: flex-start; flex-direction: column; padding: 14px; }}
+      main {{ grid-template-columns: 1fr; padding: 12px; }}
+      .grid {{ grid-template-columns: 1fr; }}
+      input {{ width: min(100%, 220px); }}
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root, body {{ background: #0f1417; color: #e6ecef; }}
+      header, section {{ background: #141b1f; border-color: #2c3940; }}
+      h2 {{ color: #c6d1d6; }}
+      .metric, li {{ background: #182126; border-color: #2c3940; }}
+      .label {{ color: #9aabb3; }}
+      button, input, select {{ background: #101820; border-color: #43535a; color: #e6ecef; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Leash Command Center</h1>
+      <span id="dashboard-status"><span class="status-dot {health_dot}"></span>{health_status} / {role} / {profile}</span>
+    </div>
+    <form class="toolbar" method="post">
+      <input name="token" value="dashboard-token" aria-label="Pilot token">
+      <input type="hidden" name="ttl_secs" value="120">
+      <input type="hidden" name="approval" value="true">
+      <select name="speed_mode" aria-label="Speed mode">
+        <option value="low">low</option>
+        <option value="medium" selected>medium</option>
+        <option value="high">high</option>
+      </select>
+      <button class="primary" type="submit" formaction="/dashboard/authorize">Authorize</button>
+      <button type="submit" formaction="/dashboard/stop">Stop</button>
+      <button class="danger" type="submit" formaction="/dashboard/estop">E-Stop</button>
+      <button type="submit" formaction="/dashboard/estop-reset">Reset</button>
+      <button type="submit" formaction="/dashboard/capture">Capture</button>
+    </form>
+  </header>
+  <main data-telemetry-ts="{telemetry_ts}">
+    <div class="stack">
+      <section>
+        <h2>Health</h2>
+        <div id="health-grid" class="grid">{health_metrics}</div>
+      </section>
+      <section>
+        <h2>Policy</h2>
+        <div id="policy-grid" class="grid">{policy_metrics}</div>
+      </section>
+      <section>
+        <h2>Telemetry</h2>
+        <div id="telemetry-grid" class="grid">{telemetry_metrics}</div>
+      </section>
+    </div>
+    <div class="stack">
+      <section>
+        <h2>Modules</h2>
+        <ul id="module-list">{modules}</ul>
+      </section>
+      <section>
+        <h2>Capabilities</h2>
+        <ul id="capability-list">{capability_items}</ul>
+      </section>
+      <section>
+        <h2>Logs Tail</h2>
+        <pre id="dashboard-log">{logs_tail}</pre>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
+"##,
+        health_dot = health_dot,
+        health_status = health_status,
+        role = html_escape(&health.role),
+        profile = html_escape(&health.profile),
+        telemetry_ts = telemetry.ts_ms,
+        health_metrics = health_metrics,
+        policy_metrics = policy_metrics,
+        telemetry_metrics = telemetry_metrics,
+        modules = modules,
+        capability_items = capability_items,
+        logs_tail = logs_tail
+    );
+    html_response(body)
+}
+
+async fn dashboard_authorize(
+    State(harness): State<Harness>,
+    Form(req): Form<DashboardActionReq>,
+) -> Redirect {
+    let token = cleaned_token(req.token).unwrap_or_else(|| "dashboard-token".to_string());
+    dashboard_invoke(
+        &harness,
+        "authorize",
+        json!({
+            "token": token,
+            "ttl_secs": req.ttl_secs.unwrap_or(120),
+            "speed_mode": req.speed_mode.unwrap_or_default(),
+        }),
+    );
+    Redirect::to("/dashboard")
+}
+
+async fn dashboard_stop(
+    State(harness): State<Harness>,
+    Form(_req): Form<DashboardActionReq>,
+) -> Redirect {
+    dashboard_invoke(&harness, "stop", json!({}));
+    Redirect::to("/dashboard")
+}
+
+async fn dashboard_estop(
+    State(harness): State<Harness>,
+    Form(_req): Form<DashboardActionReq>,
+) -> Redirect {
+    dashboard_invoke(&harness, "estop", json!({}));
+    Redirect::to("/dashboard")
+}
+
+async fn dashboard_estop_reset(
+    State(harness): State<Harness>,
+    Form(req): Form<DashboardActionReq>,
+) -> Redirect {
+    dashboard_invoke(
+        &harness,
+        "estop_reset",
+        json!({
+            "token": cleaned_token(req.token),
+            "approval": req.approval.or(Some(true)),
+        }),
+    );
+    Redirect::to("/dashboard")
+}
+
+async fn dashboard_capture(
+    State(harness): State<Harness>,
+    Form(_req): Form<DashboardActionReq>,
+) -> Redirect {
+    dashboard_invoke(&harness, "capture", json!({}));
+    Redirect::to("/dashboard")
+}
+
+fn dashboard_invoke(harness: &Harness, action: &str, args: Value) {
+    match harness.capability_registry().invoke_value_with_origin(
+        action,
+        args,
+        InvocationOrigin::Http,
+    ) {
+        Ok(payload) => harness.record_dashboard_event(format!("{action} ok {payload}")),
+        Err(error) => harness.record_dashboard_event(format!("{action} error {error}")),
+    }
+}
+
+fn dashboard_metrics(items: Vec<(&str, String)>) -> String {
+    items
+        .into_iter()
+        .map(|(label, value)| {
+            format!(
+                r#"<div class="metric"><span class="label">{}</span><span class="value small">{}</span></div>"#,
+                html_escape(label),
+                html_escape(&value)
+            )
+        })
+        .collect()
+}
+
+fn dashboard_modules(modules: &[crate::module::ModuleInfo]) -> String {
+    modules
+        .iter()
+        .map(|module| {
+            format!(
+                r#"<li><strong>{}</strong><br>{} / {:?} / {}</li>"#,
+                html_escape(&module.name),
+                html_escape(&module.module_type),
+                module.state,
+                html_escape(module.health.message.as_deref().unwrap_or("-")),
+            )
+        })
+        .collect()
+}
+
+fn dashboard_capabilities(capabilities: &[crate::capability::CapabilityDescriptor]) -> String {
+    capabilities
+        .iter()
+        .map(|capability| {
+            format!(
+                r#"<li><strong>{}</strong><br>{} / {}</li>"#,
+                html_escape(&capability.name),
+                capability.safety.as_str(),
+                html_escape(&capability.description),
+            )
+        })
+        .collect()
+}
+
+fn dashboard_logs(harness: &Harness) -> String {
+    let mut lines = harness.dashboard_events();
+    lines.extend(
+        harness
+            .agent_messages()
+            .into_iter()
+            .rev()
+            .take(8)
+            .map(|message| {
+                format!(
+                    "{} agent:{} {}",
+                    message.ts_ms, message.source, message.text
+                )
+            }),
+    );
+    if lines.is_empty() {
+        lines.push("no dashboard actions yet".to_string());
+    }
+    html_escape(&lines.join("\n"))
+}
+
+fn cleaned_token(token: Option<String>) -> Option<String> {
+    token
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+}
+
+fn optional_f64(value: Option<f64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn speed_mode_label(speed_mode: SpeedMode) -> &'static str {
+    match speed_mode {
+        SpeedMode::Low => "low",
+        SpeedMode::Medium => "medium",
+        SpeedMode::High => "high",
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 async fn agent_messages(State(harness): State<Harness>) -> Json<AgentMessageList> {
     Json(AgentMessageList {
         ok: true,
@@ -245,6 +655,10 @@ async fn agent_page() -> Response {
 </body>
 </html>
 "##;
+    html_response(body)
+}
+
+fn html_response(body: impl IntoResponse) -> Response {
     let mut response = body.into_response();
     response.headers_mut().insert(
         CONTENT_TYPE,
