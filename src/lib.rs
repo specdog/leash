@@ -48,8 +48,10 @@ pub use stream_processing::{
     QualityFilter, RateLimiter, TimestampPair, Timestamped,
 };
 pub use transport::{
-    new_stream_transport, StreamMessage, StreamRecvError, StreamSubscriber, StreamTransport,
-    StreamTransportBackend,
+    accept_tcp_jsonl_stream_message, new_stream_transport, read_network_stream_frame,
+    read_network_stream_message, send_tcp_jsonl_stream_message, write_network_stream_frame,
+    write_network_stream_message, NetworkStreamFrame, StreamMessage, StreamRecvError,
+    StreamSubscriber, StreamTransport, StreamTransportBackend, NETWORK_STREAM_FRAME_VERSION,
 };
 pub use types::{
     AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,

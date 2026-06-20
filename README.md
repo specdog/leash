@@ -452,6 +452,14 @@ needs deterministic in-process delivery.
 transport-backed envelope: latest telemetry, health/module state, command state,
 and safety state.
 
+For out-of-process modules, `leash_harness::transport` also exposes a versioned
+TCP JSONL frame contract: `NetworkStreamFrame` with
+`schema_version = "leash-stream-jsonl-v1"`, `stream`, and `payload`. The helper
+functions `send_tcp_jsonl_stream_message` and
+`accept_tcp_jsonl_stream_message` prove one-message loopback delivery without
+changing the default runtime transport. Longer-lived distributed module
+orchestration stays outside this first boundary.
+
 ## Run Logs and Resource Samples
 
 Daemon runs write structured JSONL logs under the Leash state directory. Each
@@ -520,7 +528,8 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Transport abstraction: memory + local async pubsub
 - [x] Stream processing helpers: latest-value backpressure, quality filters, timestamp pairing
 - [x] Agent input channels: one-shot CLI, interactive CLI, and localhost web input
-- [ ] Cross-process and network transports
+- [x] TCP JSONL stream framing for cross-process modules
+- [ ] Long-lived cross-process and network transport orchestration
 - [ ] MAVLink drone + manipulator adapters
 - [x] Localhost command center dashboard
 - [x] Viewer-ready visualization frames
