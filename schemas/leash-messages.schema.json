@@ -2368,6 +2368,25 @@
       "title": "ModuleState",
       "type": "string"
     },
+    "NetworkStreamFrame": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "payload": true,
+        "schema_version": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "stream",
+        "payload"
+      ],
+      "title": "NetworkStreamFrame",
+      "type": "object"
+    },
     "OccupancyGridFrame": {
       "$defs": {
         "MapMetadata": {
