@@ -101,6 +101,9 @@ async function main() {
   if (telemetry.profile !== "replay" || telemetry.source !== "replay") {
     fail(`bad replay observe payload: ${JSON.stringify(telemetry)}`);
   }
+  if (telemetry.vision?.status !== "ok" || telemetry.vision.detections?.[0]?.label !== "replay-fixture") {
+    fail(`missing replay fake detection: ${JSON.stringify(telemetry.vision)}`);
+  }
 
   console.log("replay mcp smoke ok");
 }
