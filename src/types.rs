@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo};
+use crate::{
+    accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo,
+    stack::AdapterProfile,
+};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -58,6 +61,7 @@ pub struct Capabilities {
     pub role: String,
     pub profile: String,
     pub physical: bool,
+    pub adapter: AdapterProfile,
     pub stream_transport: String,
     pub endpoints: Vec<String>,
     pub mcp_tools: Vec<String>,

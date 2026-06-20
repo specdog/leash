@@ -284,6 +284,34 @@ physical motion always requires `approval=true`; physical profiles still require
 `--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` before the
 harness starts.
 
+## Adapter Profile Matrix
+
+`leash list` and `/capabilities` expose adapter metadata so new hardware paths
+can declare their own category, maturity, feature flags, capability set, and
+required gates without changing core command safety policy.
+
+| Adapter | Category | Maturity | Feature flags | Required gates |
+|---------|----------|----------|---------------|----------------|
+| sim | `simulation` | `stable` | `sim` | none |
+| replay | `simulation` | `beta` | none | none |
+| bridge compatibility | `compatibility` | `beta` | `sim`, `bridge-compat` | none |
+| Waveshare UGV | `mobile-base` | `alpha` | `waveshare-ugv` | `physical-actuation`, `policy-token-or-approval` |
+
+Maturity levels are:
+
+- `stable`: default path for CI, demos, or documented local use.
+- `beta`: useful but still compatibility- or fixture-scoped.
+- `alpha`: working adapter path with explicit safety and operator assumptions.
+- `experimental`: exploratory boundary for future providers.
+
+Core owns the capability registry, safety classes, policy modes, config
+resolution, transport, telemetry, and no-hardware release proof. Feature or
+example adapter crates should own hardware protocols, device discovery,
+calibration, planning/IK stacks, provider retries, and any native SDK bindings.
+Physical adapters must declare `physical-actuation` in `required_gates`; flight,
+joint, and other high-risk adapters should also declare the policy approval or
+token gate their commands require.
+
 ## Features
 
 | Feature | Description | Default |

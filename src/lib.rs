@@ -37,7 +37,10 @@ pub use replay::{
     ReplayRecording, REPLAY_FORMAT_VERSION,
 };
 pub use runtime::Harness;
-pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
+pub use stack::{
+    adapter_profile_for_profile, AdapterCategory, AdapterMaturity, AdapterProfile, Stack,
+    StackModule, StackTransport, TransportBinding,
+};
 pub use stream_processing::{
     pair_by_timestamp, select_best_frame, FrameQuality, LatestValue, QualityDecision,
     QualityFilter, RateLimiter, TimestampPair, Timestamped,
