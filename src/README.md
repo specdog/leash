@@ -37,5 +37,5 @@ flowchart TB
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization frames.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, and map metadata frames.
 - `bin/`: CLI entrypoint crate target.

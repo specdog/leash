@@ -92,11 +92,35 @@ if (!payload.visualization || payload.visualization.version !== "leash-visualiza
 if (!payload.visualization.pose || payload.visualization.pose.frame_id !== "map") {
   throw new Error("stream visualization pose was missing");
 }
+if (typeof payload.visualization.pose.ts_ms !== "number") {
+  throw new Error("stream visualization pose timestamp was missing");
+}
+if (!payload.visualization.twist || payload.visualization.twist.frame_id !== "base_link") {
+  throw new Error("stream visualization twist was missing");
+}
 if (!payload.visualization.path || !Array.isArray(payload.visualization.path.poses)) {
   throw new Error("stream visualization path was missing");
 }
+if (typeof payload.visualization.path.ts_ms !== "number") {
+  throw new Error("stream visualization path timestamp was missing");
+}
+if (!payload.visualization.map || payload.visualization.map.frame_id !== "map") {
+  throw new Error("stream visualization map metadata was missing");
+}
+if (payload.visualization.map.cell_order !== "row-major") {
+  throw new Error(`unexpected visualization map cell order: ${payload.visualization.map.cell_order}`);
+}
 if (!payload.visualization.occupancy_grid || !Array.isArray(payload.visualization.occupancy_grid.cells)) {
   throw new Error("stream visualization occupancy grid was missing");
+}
+if (!payload.visualization.occupancy_grid.metadata || payload.visualization.occupancy_grid.metadata.frame_id !== "map") {
+  throw new Error("stream visualization occupancy metadata was missing");
+}
+if (!payload.visualization.costmap || !Array.isArray(payload.visualization.costmap.costs)) {
+  throw new Error("stream visualization costmap was missing");
+}
+if (!payload.visualization.costmap.metadata || payload.visualization.costmap.metadata.frame_id !== "map") {
+  throw new Error("stream visualization costmap metadata was missing");
 }
 if (!payload.visualization.command || typeof payload.visualization.command.left_cmd !== "number") {
   throw new Error("stream visualization command overlay was missing");
