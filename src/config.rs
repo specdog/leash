@@ -74,6 +74,28 @@ impl AgentProvider {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyMode {
+    DryRun,
+    #[default]
+    RequireToken,
+    RequireApproval,
+    Deny,
+}
+
+impl PolicyMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DryRun => "dry-run",
+            Self::RequireToken => "require-token",
+            Self::RequireApproval => "require-approval",
+            Self::Deny => "deny",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct HarnessConfig {
@@ -100,6 +122,7 @@ pub struct HarnessConfig {
     #[serde(skip_serializing)]
     pub agent_api_key: Option<String>,
     pub agent_timeout_ms: u64,
+    pub policy_mode: PolicyMode,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -150,6 +173,8 @@ pub struct PartialHarnessConfig {
     pub agent_api_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_mode: Option<PolicyMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +259,7 @@ struct ConfigBuilder {
     agent_base_url: Resolved<Option<String>>,
     agent_api_key: Resolved<Option<String>>,
     agent_timeout_ms: Resolved<u64>,
+    policy_mode: Resolved<PolicyMode>,
     config_file: Option<String>,
 }
 
@@ -262,6 +288,7 @@ impl Default for HarnessConfig {
             agent_base_url: None,
             agent_api_key: None,
             agent_timeout_ms: 10_000,
+            policy_mode: PolicyMode::RequireToken,
         }
     }
 }
@@ -383,6 +410,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         agent_base_url: env.get("LEASH_AGENT_BASE_URL").cloned(),
         agent_api_key: env.get("LEASH_AGENT_API_KEY").cloned(),
         agent_timeout_ms: parse_env(env, "LEASH_AGENT_TIMEOUT_MS", parse_u64)?,
+        policy_mode: parse_env(env, "LEASH_POLICY_MODE", parse_policy_mode)?,
     })
 }
 
@@ -420,6 +448,16 @@ fn parse_agent_provider(value: &str) -> anyhow::Result<AgentProvider> {
         "openai-compatible-http" => Ok(AgentProvider::OpenAiCompatibleHttp),
         "local-http" => Ok(AgentProvider::LocalHttp),
         _ => anyhow::bail!("expected deterministic-test, openai-compatible-http, or local-http"),
+    }
+}
+
+fn parse_policy_mode(value: &str) -> anyhow::Result<PolicyMode> {
+    match value {
+        "dry-run" => Ok(PolicyMode::DryRun),
+        "require-token" => Ok(PolicyMode::RequireToken),
+        "require-approval" => Ok(PolicyMode::RequireApproval),
+        "deny" => Ok(PolicyMode::Deny),
+        _ => anyhow::bail!("expected dry-run, require-token, require-approval, or deny"),
     }
 }
 
@@ -483,6 +521,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "agent_base_url" => "LEASH_AGENT_BASE_URL",
         "agent_api_key" => "LEASH_AGENT_API_KEY",
         "agent_timeout_ms" => "LEASH_AGENT_TIMEOUT_MS",
+        "policy_mode" => "LEASH_POLICY_MODE",
         _ => "LEASH_UNKNOWN",
     }
 }
@@ -513,6 +552,7 @@ impl Default for ConfigBuilder {
             agent_base_url: Resolved::defaulted(config.agent_base_url),
             agent_api_key: Resolved::defaulted(config.agent_api_key),
             agent_timeout_ms: Resolved::defaulted(config.agent_timeout_ms),
+            policy_mode: Resolved::defaulted(config.policy_mode),
             config_file: None,
         }
     }
@@ -610,6 +650,9 @@ impl ConfigBuilder {
         if let Some(value) = partial.agent_timeout_ms {
             self.agent_timeout_ms.set(value, source("agent_timeout_ms"));
         }
+        if let Some(value) = partial.policy_mode {
+            self.policy_mode.set(value, source("policy_mode"));
+        }
     }
 
     fn apply_profile_defaults(&mut self) {
@@ -649,6 +692,7 @@ impl ConfigBuilder {
             agent_base_url: self.agent_base_url.value,
             agent_api_key: self.agent_api_key.value,
             agent_timeout_ms: self.agent_timeout_ms.value,
+            policy_mode: self.policy_mode.value,
         };
         let physical = config.profile.is_physical();
         let physical_actuation_enabled = config.allow_physical_actuation;
@@ -787,6 +831,12 @@ impl ConfigBuilder {
                 json!(config.agent_timeout_ms),
                 self.agent_timeout_ms.source,
                 Some("agent-model"),
+            ),
+            field(
+                "policy_mode",
+                json!(config.policy_mode.as_str()),
+                self.policy_mode.source,
+                Some("safety-policy"),
             ),
         ];
 
@@ -971,6 +1021,33 @@ mod config_tests {
         assert!(!resolved.config.resource_sampling);
         assert_eq!(source_for(&resolved, "resource_sampling"), "cli");
         assert_eq!(attention_for(&resolved, "resource_sampling"), None);
+    }
+
+    #[test]
+    fn resolves_policy_mode_from_env_and_cli() {
+        let env = BTreeMap::from([("LEASH_POLICY_MODE".to_string(), "deny".to_string())]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig {
+                policy_mode: Some(PolicyMode::RequireApproval),
+                ..PartialHarnessConfig::default()
+            },
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.policy_mode, PolicyMode::RequireApproval);
+        assert_eq!(source_for(&resolved, "policy_mode"), "cli");
+        assert_eq!(
+            value_for(&resolved, "policy_mode"),
+            json!("require-approval")
+        );
+        assert_eq!(
+            attention_for(&resolved, "policy_mode"),
+            Some("safety-policy")
+        );
     }
 
     #[test]

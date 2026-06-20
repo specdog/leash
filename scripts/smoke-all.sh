@@ -20,6 +20,7 @@ for (const key of [
   "LEASH_ALLOW_UNTOKENED_DRIVE",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
+  "LEASH_POLICY_MODE",
   "LEASH_PROFILE",
   "LEASH_REPLAY_SOURCE",
   "LEASH_REPLAY_SPEED",
@@ -218,6 +219,8 @@ const checks = [
       "openai-compatible-http",
       "--agent-base-url",
       "https://example.test/v1",
+      "--policy-mode",
+      "require-approval",
     ],
     validate: (stdout) => {
       if (stdout.includes("super-secret")) {
@@ -234,7 +237,11 @@ const checks = [
       if (!key || key.value !== "<redacted>" || key.source !== "env:LEASH_AGENT_API_KEY") {
         throw new Error("agent API key field was not redacted with env source");
       }
-      return "hosted agent config resolved with redacted API key";
+      const policy = config.fields.find((field) => field.name === "policy_mode");
+      if (config.policy_mode !== "require-approval" || !policy || policy.value !== "require-approval" || policy.source !== "cli") {
+        throw new Error("policy mode did not resolve from CLI");
+      }
+      return "hosted agent config resolved with redacted API key and policy mode";
     },
   },
   {

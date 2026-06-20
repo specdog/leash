@@ -30,6 +30,9 @@ $ leash mcp status --url http://127.0.0.1:9990
 $ leash mcp call invoke_capability capability=authorize token=demo ttl_secs=30
 { "ok": true, "tool": "invoke_capability", "result": { "ok": true, "ttl_secs": 30, ... } }
 
+$ leash mcp call invoke_capability --policy-mode dry-run capability=drive left=0.2 right=0.2
+{ "ok": true, "tool": "invoke_capability", "result": { "ok": true, "dry_run": true, ... } }
+
 $ leash health --url http://127.0.0.1:8000
 { "ok": true, "role": "robot", "profile": "sim", "uptime_ms": 12043, "estop": false, ... }
 
@@ -38,6 +41,9 @@ $ leash agent-send "inspect the battery"
 
 $ LEASH_AGENT_API_KEY=... leash show-config --agent-provider openai-compatible-http --agent-base-url https://example.test/v1
 { "agent_provider": "openai-compatible-http", "fields": [{ "name": "agent_api_key", "value": "<redacted>", ... }] }
+
+$ leash show-config --policy-mode require-approval
+{ "policy_mode": "require-approval", "fields": [{ "name": "policy_mode", "source": "cli", ... }] }
 
 $ leash stop --url http://127.0.0.1:8000
 { "ok": true, "left": 0.0, "right": 0.0, ... }
@@ -72,12 +78,12 @@ POST /agent/messages       → { source, text } → AgentMessageAck
 POST /capture              → CaptureResult (SVG frame + sha256)
 POST /pilot/authorize      → { token, ttl_secs, speed_mode } → PilotTokenResp
 POST /pilot/speed-mode     → { token, speed_mode }
-POST /drive                → { token, left, right, speed_mode } → DriveOutcome
+POST /drive                → { token, left, right, speed_mode, approval } → DriveOutcome
 POST /motors/drive         → alias for /drive
 POST /motors/stop          → DriveOutcome (zeroed)
 POST /stop                 → alias for /motors/stop
 POST /estop                → { ok: true, estop: true }
-POST /estop/reset          → { ok: true, estop: false }
+POST /estop/reset          → { token, approval } → { ok: true, estop: false }
 GET  /stream               → SVG frame (image/svg+xml)
 WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 ```
@@ -102,3 +108,4 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-13 | Integrator bridges external transport | P2 | Cross-process module communicates over TCP |
 | LS-14 | Human sends natural-language input into a local runtime | P1 | `agent-send`, `agent-interactive`, and `/agent` route messages without an LLM provider |
 | LS-15 | Developer configures a model provider without leaking secrets | P1 | deterministic provider works in CI; hosted/local config validates; API key is redacted |
+| LS-16 | Operator policy-gates physical capability invocation | P0 | safety classes include physical-high-risk; modes support dry-run, require-token, require-approval, deny; stop/estop remain available |

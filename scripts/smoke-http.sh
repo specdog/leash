@@ -63,7 +63,7 @@ if (!payload.modules.every((module) => module.state === "running")) throw new Er
 assert_policy_denial() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== false) throw new Error("policy denial did not return ok=false");
-if (!String(payload.error || "").includes("missing pilot token")) throw new Error(`unexpected policy error: ${payload.error}`);'
+  if (!String(payload.error || "").includes("require-token")) throw new Error(`unexpected policy error: ${payload.error}`);'
 }
 
 assert_drive_outcome() {

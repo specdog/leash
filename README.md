@@ -23,6 +23,41 @@ leash serve mcp-http     # localhost MCP JSON control surface
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
 - **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
 
+## Repository Map
+
+```mermaid
+flowchart TB
+  root["repo root\nCargo crate, package metadata, top-level README"] --> src["src/\nReusable harness library"]
+  root --> cli["src/bin/\nleash CLI entrypoint"]
+  root --> scripts["scripts/\nSmoke tests and bot installer"]
+  root --> docs["docs/\nOperator, release, and source-map docs"]
+  root --> examples["examples/\nSafe runnable examples and fixtures"]
+  root --> specs["specs/leash/\nDotDog project graph source and compiled DAG"]
+  root --> workflows[".github/workflows/\nCI and release automation"]
+
+  src --> runtime["runtime.rs\nHarness state, drivers, telemetry"]
+  src --> capability["capability.rs\nSafety classes and invocation policy"]
+  src --> http["http.rs\nHTTP, SSE, WebSocket routes"]
+  src --> mcp["mcp.rs\nMCP tools and transport"]
+  src --> config["config.rs\nProfiles, env, CLI precedence"]
+```
+
+## Runtime Map
+
+```mermaid
+flowchart LR
+  human["Human operator\nCLI or curl"] --> surfaces["Control surfaces\nCLI, HTTP, MCP"]
+  agent["LLM agent\nMCP stdio or MCP HTTP"] --> surfaces
+  surfaces --> registry["CapabilityRegistry\nschemas, safety class, policy"]
+  registry --> harness["Harness runtime\ncommand state, modules, telemetry"]
+  harness --> drivers{"Profile driver"}
+  drivers --> sim["sim\nno hardware"]
+  drivers --> replay["replay\nJSONL fixtures"]
+  drivers --> ugv["waveshare-ugv\n/dev/ttyTHS1 serial"]
+  harness --> streams["Telemetry streams\nHTTP, SSE, WebSocket, MCP observe"]
+  registry --> safety["Safety gates\ntoken, approval, dry-run, deny, estop, deadman"]
+```
+
 ## Quick Start
 
 ```bash
@@ -94,9 +129,9 @@ GET  /sse/telemetry        Alias for /events/telemetry
 GET  /agent                Local web input form
 GET  /agent/messages       Recent agent input messages
 POST /agent/messages       { source, text }
-POST /drive               { token, left, right, speed_mode }
+POST /drive               { token, left, right, speed_mode, approval }
 POST /estop                Latch emergency stop
-POST /estop/reset          Clear estop
+POST /estop/reset          { token, approval } Clear estop
 WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
 
@@ -139,6 +174,27 @@ Provider settings are available as `--agent-provider`, `--agent-model`,
 `--agent-base-url`, `--agent-api-key`, and `--agent-timeout-ms`, or via matching
 `LEASH_AGENT_*` environment variables. `agent_api_key` is redacted from
 `show-config` fields and omitted from top-level serialized config output.
+
+## Safety Policy
+
+Capability invocations carry safety classes: `observe-only`, `sim-control`,
+`physical-stop`, `physical-motion`, and `physical-high-risk`. `drive` is
+`physical-motion`; `stop` and `estop` are `physical-stop`; `estop_reset` is
+`physical-high-risk`.
+
+`--policy-mode` and `LEASH_POLICY_MODE` support:
+
+- `require-token` (default): physical motion and high-risk calls need a token.
+- `require-approval`: physical motion and high-risk calls need `approval=true`.
+- `dry-run`: physical motion and high-risk calls return a dry-run result without
+  changing command state.
+- `deny`: physical motion and high-risk calls are blocked.
+
+`stop` and `estop` remain available under restrictive policy modes. Approved and
+denied physical actions are emitted as structured log events. Agent-origin
+physical motion always requires `approval=true`; physical profiles still require
+`--allow-physical-actuation` or `LEASH_ALLOW_PHYSICAL_ACTUATION=1` before the
+harness starts.
 
 ## Features
 
