@@ -1,0 +1,23 @@
+# Examples
+
+This folder contains runnable examples and fixtures for the main operating modes. Examples should stay safe by default unless their README explicitly calls out physical hardware requirements.
+
+```mermaid
+flowchart TB
+  examples["examples/"] --> bridge["bridge-compat/\nlegacy HTTP/WebSocket bridge shape"]
+  examples --> local["local-llm-mcp/\nMCP client setup for local agents"]
+  examples --> replay["replay/\ndeterministic JSONL fixture"]
+  examples --> ugv["waveshare-ugv/\nphysical Jetson/Waveshare adapter notes"]
+
+  bridge --> http["Leash HTTP runtime"]
+  local --> mcp["Leash MCP stdio"]
+  replay --> deterministic["Replay profile\nno hardware"]
+  ugv --> physical["Physical profile\nexplicit actuation gate"]
+```
+
+## Folders
+
+- `bridge-compat/`: route compatibility for clients that already speak the robot bridge API.
+- `local-llm-mcp/`: how to connect an MCP-capable local LLM client.
+- `replay/`: checked-in replay fixtures for deterministic observe paths.
+- `waveshare-ugv/`: physical adapter notes for the Jetson/Waveshare UGV.

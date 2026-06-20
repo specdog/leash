@@ -3,51 +3,214 @@
 ## Entities
 
 ### Entity: Harness
-
-The core Rust runtime library. Reads hardware config, manages safety gates, routes commands to adapters.
+The core Rust runtime. Safety gates (deadman, estop, soft-odometry-limit, physical-actuation-gate), pilot token sessions, sim+physical drivers, telemetry broadcast, capability registry.
 
 ```yaml
 entity: Harness
 type: entity
 properties:
-  name:
+  role:
     type: string
     required: true
-  adapters:
-    type: string
+    default: robot
+  profile:
+    type: enum
     required: true
-    description: Feature-gated adapter list
+    values: [sim, waveshare-ugv]
+    default: sim
   safety_gates:
     type: string
     required: true
-    description: Active safety gate stack
+    description: deadman, estop, soft-odometry-limit, physical-actuation-gate
+  deadman_ms:
+    type: number
+    required: true
+    default: 400
+  soft_odometry_limit_m:
+    type: number
+    required: true
+    default: 0.0
+  allow_physical_actuation:
+    type: boolean
+    required: true
+    default: false
+  allow_untokened_drive:
+    type: boolean
+    required: true
+    default: true
 states: [planned, mapped, extracted, stabilized, released]
 lifecycle: planned → mapped → extracted → stabilized → released
 ```
 
-### Entity: CLI
+### Entity: ModuleGraph
+Typed module runtime. Coordinator starts modules in dependency order, stops in reverse. Health aggregation. Introspection exports.
 
-Command-line interface and localhost HTTP compatibility server. Thin shell around the harness.
+```yaml
+entity: ModuleGraph
+type: entity
+properties:
+  module_count:
+    type: number
+    required: true
+  stream_count:
+    type: number
+    required: true
+  isolation:
+    type: enum
+    required: true
+    values: [in_process, cross_process, network]
+    default: in_process
+  coordinator:
+    type: boolean
+    required: true
+    default: false
+    description: lifecycle + health aggregation
+  introspection:
+    type: boolean
+    required: true
+    default: false
+    description: graph exports
+states: [planned, designed, implemented, tested, active]
+lifecycle: planned → designed → implemented → tested → active
+```
+
+### Entity: Stacks
+Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.
+
+```yaml
+entity: Stacks
+type: entity
+properties:
+  catalog:
+    type: string
+    required: true
+    description: sim-http, sim-mcp, compat-http, gated-hardware
+  composition:
+    type: boolean
+    required: true
+    default: false
+  built_in:
+    type: boolean
+    required: true
+    default: false
+  versioned:
+    type: boolean
+    required: true
+    default: true
+states: [planned, cataloged, implemented, tested]
+lifecycle: planned → cataloged → implemented → tested
+```
+
+### Entity: Transport
+Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.
+
+```yaml
+entity: Transport
+type: entity
+properties:
+  backends:
+    type: string
+    required: true
+    description: memory, local-pubsub
+  backpressure:
+    type: boolean
+    required: true
+    default: true
+    description: local-pubsub drops oldest messages under receiver lag and reports skipped count
+  quality_filtering:
+    type: boolean
+    required: true
+    default: true
+    description: generic hook for camera/replay frame selection
+  timestamp_pairing:
+    type: boolean
+    required: true
+    default: true
+    description: pair stream items within a tolerance window
+  default_backend:
+    type: enum
+    required: true
+    values: [memory, local-pubsub]
+    default: local-pubsub
+states: [planned, designed, implemented, tested, active]
+lifecycle: planned → designed → implemented → tested → active
+```
+
+### Entity: Telemetry
+Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.
+
+```yaml
+entity: Telemetry
+type: entity
+properties:
+  outputs:
+    type: string
+    required: true
+    description: transport, ws, sse, json_stream
+  websocket:
+    type: boolean
+    required: true
+    default: true
+  sse:
+    type: boolean
+    required: true
+    default: true
+  views:
+    type: string
+    required: true
+    description: graph, streams, spatial, command-center
+states: [planned, implemented, active]
+lifecycle: planned → implemented → active
+```
+
+### Entity: Replay
+Deterministic sensor record + replay. `leash record` + `leash replay`.
+
+```yaml
+entity: Replay
+type: entity
+properties:
+  buffer_format:
+    type: string
+    required: true
+    default: leash-replay-v1
+  determinism:
+    type: boolean
+    required: true
+    default: true
+  sensor_record:
+    type: boolean
+    required: true
+    default: true
+states: [implemented, verified, active]
+lifecycle: implemented → verified → active
+```
+
+### Entity: CLI
+CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.
 
 ```yaml
 entity: CLI
 type: entity
 properties:
-  http_port:
-    type: number
+  listen:
+    type: string
     required: true
-    default: 9000
+    default: 127.0.0.1:8000
   commands:
     type: string
     required: true
-    description: Subcommands (serve, status, estop)
+    description: serve, agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop
+  http_endpoints:
+    type: string
+    required: true
+    description: health, capabilities, telemetry, agent/messages, drive, estop, ws/telemetry, mcp/tools, mcp/call, ...
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: MCPServer
-
-MCP stdio server exposing robot tools to local LLM clients. Tool set: motor, sensor, estop, status.
+MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.
 
 ```yaml
 entity: MCPServer
@@ -56,18 +219,17 @@ properties:
   tools:
     type: string
     required: true
-    description: Exposed MCP tool list
+    description: health, capabilities, modules, observe, invoke_capability, stop, estop, capture
   transport:
     type: enum
     required: true
-    values: [stdio]
+    values: [stdio, mcp-http]
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: UGVAdapter
-
-Feature-gated Waveshare Ubuntu UGV hardware adapter. Only compiles when `--features ugv` is set.
+Waveshare Ubuntu UGV. Feature-gated. Serial JSON-line protocol.
 
 ```yaml
 entity: UGVAdapter
@@ -76,22 +238,33 @@ properties:
   target:
     type: string
     required: true
-    default: "Waveshare Ubuntu UGV"
+    default: Waveshare Ubuntu UGV
   feature_flag:
     type: string
     required: true
-    default: "ugv"
-  motor_channels:
+    default: waveshare-ugv
+  serial_port:
+    type: string
+    required: true
+    default: /dev/ttyTHS1
+  serial_baud:
     type: number
     required: true
-    default: 4
+    default: 115200
+  drive_invert:
+    type: boolean
+    required: true
+    default: false
+  drive_swap:
+    type: boolean
+    required: true
+    default: false
 states: [planned, implemented, feature_gated, documented]
 lifecycle: planned → implemented → feature_gated → documented
 ```
 
 ### Entity: Bridge
-
-Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime.
+Compatibility layer for existing robot bridge clients.
 
 ```yaml
 entity: Bridge
@@ -100,38 +273,44 @@ properties:
   clients:
     type: string
     required: true
-    description: Supported bridge client list
   shim_layer:
     type: string
     required: true
-    description: Compatibility shim path
 states: [planned, mapped, documented, tested]
 lifecycle: planned → mapped → documented → tested
 ```
 
 ### Entity: Safety
-
-Smoke-test scripts for MCP, HTTP, and safety gate verification. Gates every release.
+Runtime safety gates + smoke scripts + policy-gated capability invocation.
 
 ```yaml
 entity: Safety
 type: entity
 properties:
-  test_targets:
+  gates:
     type: string
     required: true
-    description: MCP, HTTP, safety-gates
-  feature_flag:
+    description: deadman, estop, soft-odometry-limit, physical-actuation-gate
+  smoke_scripts:
     type: string
     required: true
-    default: "smoke"
+    description: smoke-http.sh, smoke-mcp.sh, smoke-mcp-http.sh, smoke-physical-gate.sh
+  policy:
+    type: boolean
+    required: true
+    default: true
+    description: safety classes + dry-run/require-token/require-approval/deny gates
+  audit_events:
+    type: boolean
+    required: true
+    default: true
+    description: approved and denied physical actions are structured log events
 states: [planned, implemented, verified]
 lifecycle: planned → implemented → verified
 ```
 
 ### Entity: ReleasePipeline
-
-Packages the harness for crates.io and GitHub binary releases.
+Packages for crates.io + GitHub binaries.
 
 ```yaml
 entity: ReleasePipeline
@@ -150,8 +329,7 @@ lifecycle: planned → configured → publishing
 ```
 
 ### Entity: Bootstrap
-
-Crate skeleton, license (MIT+trademark), CI pipeline, repo provenance.
+Crate skeleton, MIT license, CI, repo provenance.
 
 ```yaml
 entity: Bootstrap
@@ -160,23 +338,378 @@ properties:
   license:
     type: string
     required: true
-    default: "MIT+trademark"
+    default: MIT
   ci_platform:
     type: string
     required: true
-    default: "GitHub Actions"
+    default: GitHub Actions
   crate_name:
     type: string
     required: true
-    default: "leash"
+    default: leash-harness
+  features:
+    type: string
+    required: true
+    description: default=sim+http+mcp, waveshare-ugv, bridge-compat
 states: [planned, bootstrapped, ci_green]
 lifecycle: planned → bootstrapped → ci_green
+```
+
+### Entity: Agent
+Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.
+
+```yaml
+entity: Agent
+type: entity
+properties:
+  providers:
+    type: string
+    required: true
+    description: deterministic-test, openai-compatible-http, local-http
+  channels:
+    type: string
+    required: true
+    description: implemented one-shot CLI, interactive CLI, HTTP POST /agent/messages, web form /agent
+  message_stream:
+    type: string
+    required: true
+    description: bounded runtime inbox plus agent stream publication
+  config:
+    type: string
+    required: true
+    description: agent_provider, agent_model, agent_base_url, agent_api_key redacted, agent_timeout_ms
+  ci_model:
+    type: boolean
+    required: true
+    default: true
+states: [planned, input_channels_implemented, provider_configured, provider_tested, active]
+lifecycle: planned → input_channels_implemented → provider_configured → provider_tested → active
+```
+
+### Entity: CapabilityRegistry
+Shared registry with schema + safety metadata. Routes HTTP, MCP, agent calls.
+
+```yaml
+entity: CapabilityRegistry
+type: entity
+properties:
+  safety_classes:
+    type: string
+    required: true
+    description: observe-only, sim-control, physical-stop, physical-motion, physical-high-risk
+  policy_modes:
+    type: string
+    required: true
+    description: dry-run, require-token, require-approval, deny
+  invocation_origins:
+    type: string
+    required: true
+    description: runtime, cli, http, mcp, agent
+  schema_validation:
+    type: boolean
+    required: true
+    default: true
+states: [planned, implemented, active]
+lifecycle: planned → implemented → active
+```
+
+### Entity: Perception
+Detection/observation adapter. Spatial memory + object registry.
+
+```yaml
+entity: Perception
+type: entity
+properties:
+  adapter:
+    type: boolean
+    required: true
+    default: false
+  spatial_memory:
+    type: boolean
+    required: true
+    default: false
+  store:
+    type: enum
+    required: true
+    values: [file_backed]
+    default: file_backed
+states: [planned, implemented, active]
+lifecycle: planned → implemented → active
+```
+
+### Entity: Navigation
+Occupancy-grid + costmap primitives. Sim waypoint router + patrol.
+
+```yaml
+entity: Navigation
+type: entity
+properties:
+  messages:
+    type: string
+    required: true
+    description: pose, twist, path, occupancy-grid, costmap, map-metadata
+  planner:
+    type: boolean
+    required: true
+    default: false
+  patrol:
+    type: boolean
+    required: true
+    default: false
+  sim_only:
+    type: boolean
+    required: true
+    default: true
+states: [planned, designed, implemented, tested]
+lifecycle: planned → designed → implemented → tested
+```
+
+### Entity: CommandCenter
+Localhost web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.
+
+```yaml
+entity: CommandCenter
+type: entity
+properties:
+  feature_flag:
+    type: string
+    required: true
+    default: dashboard
+  bind:
+    type: string
+    required: true
+    default: localhost
+  views:
+    type: string
+    required: true
+    description: health, telemetry, modules, capabilities, logs, policy, controls
+states: [planned, implemented, active]
+lifecycle: planned → implemented → active
+```
+
+### Entity: DroneAdapter
+MAVLink drone skeleton. Feature-gated. Sim/replay mode.
+
+```yaml
+entity: DroneAdapter
+type: entity
+properties:
+  target:
+    type: string
+    required: true
+    default: MAVLink drone
+  feature_flag:
+    type: string
+    required: true
+    default: mavlink-drone
+  capabilities:
+    type: string
+    required: true
+    description: arm, disarm, takeoff, land, move-velocity, fly-to, observe, stop
+  sim_replay:
+    type: boolean
+    required: true
+    default: true
+states: [planned, implemented, feature_gated]
+lifecycle: planned → implemented → feature_gated
+```
+
+### Entity: ManipulatorAdapter
+Manipulator arm + teleop skeleton. Feature-gated.
+
+```yaml
+entity: ManipulatorAdapter
+type: entity
+properties:
+  target:
+    type: string
+    required: true
+    default: robot arm manipulator
+  feature_flag:
+    type: string
+    required: true
+    default: manipulator
+  teleop:
+    type: boolean
+    required: true
+    default: true
+states: [planned, implemented, feature_gated]
+lifecycle: planned → implemented → feature_gated
+```
+
+### Entity: HardwareMatrix
+Adapter profile matrix + plugin boundary. Categories, maturity levels.
+
+```yaml
+entity: HardwareMatrix
+type: entity
+properties:
+  categories:
+    type: string
+    required: true
+    description: ground, aerial, manipulator
+  maturity_levels:
+    type: string
+    required: true
+    description: stable, beta, alpha, experimental
+  plugin_boundary:
+    type: boolean
+    required: true
+    default: false
+states: [planned, defined, documented]
+lifecycle: planned → defined → documented
+```
+
+### Entity: Daemon
+Background run registry. XDG state dir. `leash run --daemon`, status, log, stop, restart.
+
+```yaml
+entity: Daemon
+type: entity
+properties:
+  state_dir:
+    type: string
+    required: true
+    description: XDG-compatible
+  commands:
+    type: string
+    required: true
+    description: run --daemon, status, log, stop, restart
+  graceful_stop:
+    type: boolean
+    required: true
+    default: true
+states: [planned, implemented, tested]
+lifecycle: planned → implemented → tested
+```
+
+### Entity: Config
+Resolved config precedence. `leash show-config`.
+
+```yaml
+entity: Config
+type: entity
+properties:
+  precedence:
+    type: string
+    required: true
+    description: flags > env > config-file > defaults
+  show_config:
+    type: boolean
+    required: true
+    default: true
+  agent_provider:
+    type: string
+    required: true
+    description: deterministic-test, openai-compatible-http, local-http
+  secret_redaction:
+    type: boolean
+    required: true
+    default: true
+  policy_mode:
+    type: string
+    required: true
+    description: LEASH_POLICY_MODE / --policy-mode
+states: [planned, implemented, tested]
+lifecycle: planned → implemented → tested
+```
+
+### Entity: Logging
+Structured JSONL logs. Lightweight resource monitor.
+
+```yaml
+entity: Logging
+type: entity
+properties:
+  format:
+    type: enum
+    required: true
+    values: [jsonl]
+    default: jsonl
+  resource_monitor:
+    type: boolean
+    required: true
+    default: false
+  cli_json:
+    type: boolean
+    required: true
+    default: true
+  module_filter:
+    type: boolean
+    required: true
+    default: true
+states: [planned, implemented, tested]
+lifecycle: planned → implemented → tested
+```
+
+### Entity: ReleaseMatrix
+Feature tiers + dependency tiers + CI build matrix.
+
+```yaml
+entity: ReleaseMatrix
+type: entity
+properties:
+  tiers:
+    type: string
+    required: true
+    description: core, http, mcp, sim, dashboard, replay, viz, hardware-adapters, perception, interop
+  default:
+    type: string
+    required: true
+    default: core+sim+http+mcp
+  ci_matrix:
+    type: boolean
+    required: true
+    default: false
+states: [planned, defined, verified]
+lifecycle: planned → defined → verified
+```
+
+### Entity: CrossLanguage
+Cross-language message schemas + client examples.
+
+```yaml
+entity: CrossLanguage
+type: entity
+properties:
+  schemas:
+    type: string
+    required: true
+    description: JSON Schema, protobuf candidates
+  clients:
+    type: string
+    required: true
+    description: typed client examples
+states: [planned, implemented, documented]
+lifecycle: planned → implemented → documented
+```
+
+### Entity: SmokeSuite
+Full no-hardware smoke suite for release proof.
+
+```yaml
+entity: SmokeSuite
+type: entity
+properties:
+  coverage:
+    type: string
+    required: true
+    description: stack-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
+  no_hardware:
+    type: boolean
+    required: true
+    default: true
+  ci_integration:
+    type: boolean
+    required: true
+    default: false
+states: [planned, implemented, verified]
+lifecycle: planned → implemented → verified
 ```
 
 ## Relationships
 
 ### Relationship: Bootstrap → Harness
-
 ```yaml
 relationship: Bootstrap → Harness
 verb: provisions
@@ -184,8 +717,15 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: Harness → CLI
+### Relationship: Harness → ModuleGraph
+```yaml
+relationship: Harness → ModuleGraph
+verb: contains
+cardinality: 1:1
+required: true
+```
 
+### Relationship: Harness → CLI
 ```yaml
 relationship: Harness → CLI
 verb: powers
@@ -194,7 +734,6 @@ required: true
 ```
 
 ### Relationship: Harness → MCPServer
-
 ```yaml
 relationship: Harness → MCPServer
 verb: powers
@@ -203,7 +742,6 @@ required: true
 ```
 
 ### Relationship: Harness → Bridge
-
 ```yaml
 relationship: Harness → Bridge
 verb: exposes_through
@@ -211,18 +749,71 @@ cardinality: 1:many
 required: true
 ```
 
-### Relationship: UGVAdapter → Harness
+### Relationship: Stacks → ModuleGraph
+```yaml
+relationship: Stacks → ModuleGraph
+verb: instantiates
+cardinality: 1:many
+required: true
+```
 
+### Relationship: Stacks → Harness
+```yaml
+relationship: Stacks → Harness
+verb: targets
+cardinality: many:1
+required: true
+```
+
+### Relationship: Transport → ModuleGraph
+```yaml
+relationship: Transport → ModuleGraph
+verb: connects
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Telemetry → ModuleGraph
+```yaml
+relationship: Telemetry → ModuleGraph
+verb: observes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Telemetry → Harness
+```yaml
+relationship: Telemetry → Harness
+verb: introspects
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Replay → Stacks
+```yaml
+relationship: Replay → Stacks
+verb: exercises
+cardinality: 1:many
+required: true
+```
+
+### Relationship: Replay → Telemetry
+```yaml
+relationship: Replay → Telemetry
+verb: feeds
+cardinality: 1:1
+required: true
+```
+
+### Relationship: UGVAdapter → Harness
 ```yaml
 relationship: UGVAdapter → Harness
 verb: adapts
 cardinality: 1:1
 required: false
-description: Only when --features ugv is enabled
 ```
 
 ### Relationship: Safety → Harness
-
 ```yaml
 relationship: Safety → Harness
 verb: gates
@@ -230,8 +821,15 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: Safety → UGVAdapter
+### Relationship: Safety → ModuleGraph
+```yaml
+relationship: Safety → ModuleGraph
+verb: gates
+cardinality: 1:1
+required: true
+```
 
+### Relationship: Safety → UGVAdapter
 ```yaml
 relationship: Safety → UGVAdapter
 verb: gates
@@ -239,8 +837,15 @@ cardinality: 1:1
 required: false
 ```
 
-### Relationship: ReleasePipeline → Harness
+### Relationship: Safety → Replay
+```yaml
+relationship: Safety → Replay
+verb: verifies
+cardinality: 1:1
+required: true
+```
 
+### Relationship: ReleasePipeline → Harness
 ```yaml
 relationship: ReleasePipeline → Harness
 verb: packages
@@ -249,10 +854,193 @@ required: true
 ```
 
 ### Relationship: Bridge → CLI
-
 ```yaml
 relationship: Bridge → CLI
 verb: documents_for
 cardinality: many:1
+required: true
+```
+
+### Relationship: MCPServer → ModuleGraph
+```yaml
+relationship: MCPServer → ModuleGraph
+verb: exposes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: MCPServer → Stacks
+```yaml
+relationship: MCPServer → Stacks
+verb: launches
+cardinality: 1:many
+required: true
+```
+
+### Relationship: Agent → Harness
+```yaml
+relationship: Agent → Harness
+verb: commands
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Agent → CapabilityRegistry
+```yaml
+relationship: Agent → CapabilityRegistry
+verb: routes_through
+cardinality: 1:1
+required: true
+```
+
+### Relationship: CapabilityRegistry → Harness
+```yaml
+relationship: CapabilityRegistry → Harness
+verb: gates
+cardinality: 1:1
+required: true
+```
+
+### Relationship: CapabilityRegistry → Safety
+```yaml
+relationship: CapabilityRegistry → Safety
+verb: enforces
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Perception → Harness
+```yaml
+relationship: Perception → Harness
+verb: observes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Navigation → Harness
+```yaml
+relationship: Navigation → Harness
+verb: controls
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Navigation → Perception
+```yaml
+relationship: Navigation → Perception
+verb: depends_on
+cardinality: 1:1
+required: false
+```
+
+### Relationship: CommandCenter → Harness
+```yaml
+relationship: CommandCenter → Harness
+verb: visualizes
+cardinality: 1:1
+required: true
+```
+
+### Relationship: CommandCenter → CapabilityRegistry
+```yaml
+relationship: CommandCenter → CapabilityRegistry
+verb: routes_through
+cardinality: 1:1
+required: true
+```
+
+### Relationship: DroneAdapter → Harness
+```yaml
+relationship: DroneAdapter → Harness
+verb: adapts
+cardinality: 1:1
+required: false
+```
+
+### Relationship: ManipulatorAdapter → Harness
+```yaml
+relationship: ManipulatorAdapter → Harness
+verb: adapts
+cardinality: 1:1
+required: false
+```
+
+### Relationship: HardwareMatrix → UGVAdapter
+```yaml
+relationship: HardwareMatrix → UGVAdapter
+verb: classifies
+cardinality: 1:1
+required: true
+```
+
+### Relationship: HardwareMatrix → DroneAdapter
+```yaml
+relationship: HardwareMatrix → DroneAdapter
+verb: classifies
+cardinality: 1:1
+required: true
+```
+
+### Relationship: HardwareMatrix → ManipulatorAdapter
+```yaml
+relationship: HardwareMatrix → ManipulatorAdapter
+verb: classifies
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Daemon → CLI
+```yaml
+relationship: Daemon → CLI
+verb: extends
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Config → CLI
+```yaml
+relationship: Config → CLI
+verb: feeds
+cardinality: 1:1
+required: true
+```
+
+### Relationship: Logging → Harness
+```yaml
+relationship: Logging → Harness
+verb: monitors
+cardinality: 1:1
+required: true
+```
+
+### Relationship: ReleaseMatrix → ReleasePipeline
+```yaml
+relationship: ReleaseMatrix → ReleasePipeline
+verb: gates
+cardinality: 1:1
+required: true
+```
+
+### Relationship: CrossLanguage → ReleasePipeline
+```yaml
+relationship: CrossLanguage → ReleasePipeline
+verb: documents
+cardinality: 1:1
+required: true
+```
+
+### Relationship: SmokeSuite → Safety
+```yaml
+relationship: SmokeSuite → Safety
+verb: proves
+cardinality: 1:1
+required: true
+```
+
+### Relationship: SmokeSuite → Harness
+```yaml
+relationship: SmokeSuite → Harness
+verb: verifies
+cardinality: 1:1
 required: true
 ```
