@@ -298,8 +298,13 @@ properties:
   policy:
     type: boolean
     required: true
-    default: false
-    description: safety classes + approval gates
+    default: true
+    description: safety classes + dry-run/require-token/require-approval/deny gates
+  audit_events:
+    type: boolean
+    required: true
+    default: true
+    description: approved and denied physical actions are structured log events
 states: [planned, implemented, verified]
 lifecycle: planned → implemented → verified
 ```
@@ -396,6 +401,10 @@ properties:
     type: string
     required: true
     description: dry-run, require-token, require-approval, deny
+  invocation_origins:
+    type: string
+    required: true
+    description: runtime, cli, http, mcp, agent
   schema_validation:
     type: boolean
     required: true
@@ -597,6 +606,10 @@ properties:
     type: boolean
     required: true
     default: true
+  policy_mode:
+    type: string
+    required: true
+    description: LEASH_POLICY_MODE / --policy-mode
 states: [planned, implemented, tested]
 lifecycle: planned → implemented → tested
 ```

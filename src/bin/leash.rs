@@ -8,6 +8,7 @@ use leash_harness::{
     capability::default_capability_descriptors,
     config::{
         resolve_config, AcceleratorBackend, AgentProvider, ConfigRequest, PartialHarnessConfig,
+        PolicyMode,
     },
     daemon::{
         spawn_daemon, stop_process, tail_file, tail_jsonl_file, RunRecord, RunRegistry,
@@ -169,6 +170,9 @@ struct RuntimeArgs {
 
     #[arg(long)]
     agent_timeout_ms: Option<u64>,
+
+    #[arg(long, value_enum)]
+    policy_mode: Option<PolicyMode>,
 }
 
 #[derive(Debug, Args)]
@@ -550,8 +554,11 @@ async fn run_mcp_command(args: McpArgs, config_path: Option<PathBuf>) -> Result<
             } else {
                 let harness =
                     Harness::new(config_from_args(args.runtime, None, config_path, None)?)?;
-                print_json(&leash_harness::mcp::call_tool(
-                    &harness, &args.tool, call_args,
+                print_json(&leash_harness::mcp::call_tool_with_origin(
+                    &harness,
+                    &args.tool,
+                    call_args,
+                    leash_harness::capability::InvocationOrigin::Cli,
                 )?)?;
             }
         }
@@ -826,6 +833,7 @@ impl RuntimeArgs {
             agent_base_url: self.agent_base_url,
             agent_api_key: self.agent_api_key,
             agent_timeout_ms: self.agent_timeout_ms,
+            policy_mode: self.policy_mode,
             ..PartialHarnessConfig::default()
         })
     }

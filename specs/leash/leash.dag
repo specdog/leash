@@ -539,6 +539,8 @@
         "smoke_scripts",
         "s!",
         "policy",
+        "b!",
+        "audit_events",
         "b!"
       ],
       [
@@ -698,6 +700,8 @@
         "safety_classes",
         "s!",
         "policy_modes",
+        "s!",
+        "invocation_origins",
         "s!",
         "schema_validation",
         "b!"
@@ -979,7 +983,9 @@
         "agent_provider",
         "s!",
         "secret_redaction",
-        "b!"
+        "b!",
+        "policy_mode",
+        "s!"
       ],
       [
         "planned",
@@ -1112,11 +1118,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 7651,
-    "ct": 7651,
-    "dt": 2037,
-    "sv": 73.4,
-    "cs": 73.4,
-    "saved": 5614
+    "st": 7913,
+    "ct": 7913,
+    "dt": 2053,
+    "sv": 74.1,
+    "cs": 74.1,
+    "saved": 5860
   }
 }

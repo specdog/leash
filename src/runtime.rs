@@ -460,7 +460,7 @@ impl Harness {
         }
     }
 
-    fn physical_actuation_enabled(&self) -> bool {
+    pub fn physical_actuation_enabled(&self) -> bool {
         self.config.profile.is_physical()
             && (self.config.allow_physical_actuation
                 || std::env::var("LEASH_ALLOW_PHYSICAL_ACTUATION")
@@ -566,10 +566,12 @@ impl Harness {
         Ok(())
     }
 
-    pub fn reset_estop(&self) {
+    pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
+        self.validate_session(token)?;
         let mut command = self.command.lock();
         command.estop = false;
         command.stopped_by_deadman = false;
+        Ok(())
     }
 
     pub fn capture(&self) -> CaptureResult {

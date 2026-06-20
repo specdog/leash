@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
+use crate::capability::InvocationOrigin;
 use crate::types::{AgentMessageAck, AgentMessageList};
 use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
 
@@ -42,6 +43,13 @@ struct DriveReq {
     left: f64,
     right: f64,
     speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EstopResetReq {
+    token: Option<String>,
+    approval: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,9 +255,11 @@ async fn agent_page() -> Response {
 
 async fn capture(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
     Ok(Json(
-        harness
-            .capability_registry()
-            .invoke_value("capture", json!({}))?,
+        harness.capability_registry().invoke_value_with_origin(
+            "capture",
+            json!({}),
+            InvocationOrigin::Http,
+        )?,
     ))
 }
 
@@ -257,65 +267,88 @@ async fn pilot_authorize(
     State(harness): State<Harness>,
     Json(req): Json<PilotTokenReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(harness.capability_registry().invoke_value(
-        "authorize",
-        json!({
-            "token": req.token,
-            "ttl_secs": req.ttl_secs,
-            "speed_mode": req.speed_mode,
-        }),
-    )?))
+    Ok(Json(
+        harness.capability_registry().invoke_value_with_origin(
+            "authorize",
+            json!({
+                "token": req.token,
+                "ttl_secs": req.ttl_secs,
+                "speed_mode": req.speed_mode,
+            }),
+            InvocationOrigin::Http,
+        )?,
+    ))
 }
 
 async fn pilot_speed_mode(
     State(harness): State<Harness>,
     Json(req): Json<SpeedModeReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(harness.capability_registry().invoke_value(
-        "speed_mode",
-        json!({
-            "token": req.token,
-            "speed_mode": req.speed_mode,
-        }),
-    )?))
+    Ok(Json(
+        harness.capability_registry().invoke_value_with_origin(
+            "speed_mode",
+            json!({
+                "token": req.token,
+                "speed_mode": req.speed_mode,
+            }),
+            InvocationOrigin::Http,
+        )?,
+    ))
 }
 
 async fn drive(
     State(harness): State<Harness>,
     Json(req): Json<DriveReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(harness.capability_registry().invoke_value(
-        "drive",
-        json!({
-            "token": req.token,
-            "left": req.left,
-            "right": req.right,
-            "speed_mode": req.speed_mode,
-        }),
-    )?))
+    Ok(Json(
+        harness.capability_registry().invoke_value_with_origin(
+            "drive",
+            json!({
+                "token": req.token,
+                "left": req.left,
+                "right": req.right,
+                "speed_mode": req.speed_mode,
+                "approval": req.approval,
+            }),
+            InvocationOrigin::Http,
+        )?,
+    ))
 }
 
 async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
     Ok(Json(
-        harness
-            .capability_registry()
-            .invoke_value("stop", json!({}))?,
+        harness.capability_registry().invoke_value_with_origin(
+            "stop",
+            json!({}),
+            InvocationOrigin::Http,
+        )?,
     ))
 }
 
 async fn estop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
     Ok(Json(
-        harness
-            .capability_registry()
-            .invoke_value("estop", json!({}))?,
+        harness.capability_registry().invoke_value_with_origin(
+            "estop",
+            json!({}),
+            InvocationOrigin::Http,
+        )?,
     ))
 }
 
-async fn estop_reset(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
+async fn estop_reset(
+    State(harness): State<Harness>,
+    req: Option<Json<EstopResetReq>>,
+) -> Result<Json<Value>, HttpError> {
+    let req = req.map(|Json(req)| req).unwrap_or_default();
     Ok(Json(
-        harness
-            .capability_registry()
-            .invoke_value("estop_reset", json!({}))?,
+        harness.capability_registry().invoke_value_with_origin(
+            "estop_reset",
+            json!({
+                "token": req.token,
+                "approval": req.approval,
+            }),
+            InvocationOrigin::Http,
+        )?,
     ))
 }
 
