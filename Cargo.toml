@@ -2,6 +2,7 @@
 name = "leash-harness"
 version = "0.1.1"
 edition = "2021"
+default-run = "leash"
 license = "MIT"
 description = "Composable local-LLM and robotics harness with MCP, CLI, and safe robot adapters"
 repository = "https://github.com/specdog/leash"
@@ -17,6 +18,7 @@ include = [
   "README.md",
   "docs/**",
   "examples/**",
+  "schemas/**",
   "scripts/**",
   "src/**",
 ]
@@ -24,6 +26,11 @@ include = [
 [[bin]]
 name = "leash"
 path = "src/bin/leash.rs"
+
+[[bin]]
+name = "leash-schema"
+path = "src/bin/leash-schema.rs"
+required-features = ["mcp"]
 
 [features]
 default = ["sim", "http", "mcp"]

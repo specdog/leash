@@ -34,9 +34,14 @@ for (const key of [
 
 const checks = [
   {
+    name: "message-schemas-current",
+    argv: ["cargo", "run", "--quiet", "--features", "mcp", "--bin", "leash-schema", "--", "--check"],
+    proof: "checked-in JSON Schemas matched Rust wire message types",
+  },
+  {
     name: "http-routes-and-policy",
     argv: ["bash", "scripts/smoke-http.sh"],
-    proof: "HTTP routes, WebSocket/SSE telemetry with visualization map/costmap frames, agent input, capture, authorized drive, and drive-denial policy passed",
+    proof: "HTTP routes, WebSocket/SSE telemetry with visualization map/costmap frames, external clients, agent input, capture, authorized drive, and drive-denial policy passed",
   },
   {
     name: "mcp-stdio",

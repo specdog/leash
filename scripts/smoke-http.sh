@@ -264,6 +264,15 @@ assert_sse_telemetry() {
 NODE
 }
 
+assert_client_example_summary() {
+  local runtime="$1"
+  RUNTIME="$runtime" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("client example ok was not true");
+if (payload.runtime !== process.env.RUNTIME) throw new Error(`unexpected client runtime: ${payload.runtime}`);
+if (payload.profile !== "sim") throw new Error(`unexpected client profile: ${payload.profile}`);
+if (!payload.stop || payload.stop.ok !== true) throw new Error("client stop response was missing");'
+}
+
 curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
@@ -310,5 +319,7 @@ curl -fsS -X POST "$base/drive" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","left":0.2,"right":0.2}' | assert_drive_outcome
 curl -fsS -X POST "$base/motors/stop" | parse_json
+LEASH_URL="$base" python3 examples/clients/python/http_client.py | assert_client_example_summary python
+LEASH_URL="$base" node examples/clients/node/http-client.mjs | assert_client_example_summary node
 
 echo "http smoke ok: $base"
