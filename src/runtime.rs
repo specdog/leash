@@ -402,6 +402,10 @@ impl Harness {
         self.stream_transport.subscribe(stream)
     }
 
+    pub fn stream_transport(&self) -> Arc<dyn StreamTransport> {
+        self.stream_transport.clone()
+    }
+
     pub fn capability_registry(&self) -> CapabilityRegistry {
         CapabilityRegistry::new(self.clone())
     }

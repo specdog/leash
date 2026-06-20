@@ -9,6 +9,7 @@ cargo install leash-harness
 leash list               # built-in stacks
 leash run sim-mcp        # MCP stdio for LLM agents
 leash run sim-http       # localhost HTTP + WebSocket
+leash run sim-stream-hub # localhost TCP JSONL stream hub
 leash serve mcp-http     # localhost MCP JSON control surface
 ```
 
@@ -77,6 +78,9 @@ leash run sim-mcp
 leash run sim-http
 leash agent-send "inspect the battery"
 leash agent-interactive
+
+# Run a TCP JSONL stream hub for external module processes
+leash run sim-stream-hub
 
 # Run as a daemon and inspect JSONL logs
 leash run sim-http --daemon
@@ -466,6 +470,13 @@ increment hub rejection status; the listener keeps serving later peers. This is
 the first cross-process stream orchestration layer, not a distributed runtime
 supervisor or remote hardware control surface.
 
+Run it from the CLI with:
+
+```bash
+leash serve stream-hub --profile sim --listen 127.0.0.1:9970
+leash run sim-stream-hub
+```
+
 ## Run Logs and Resource Samples
 
 Daemon runs write structured JSONL logs under the Leash state directory. Each
@@ -535,7 +546,8 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Stream processing helpers: latest-value backpressure, quality filters, timestamp pairing
 - [x] Agent input channels: one-shot CLI, interactive CLI, and localhost web input
 - [x] TCP JSONL stream framing for cross-process modules
-- [ ] Long-lived cross-process and network transport orchestration
+- [x] Runnable TCP JSONL stream hub for cross-process module links
+- [ ] External worker lifecycle and supervision
 - [ ] MAVLink drone + manipulator adapters
 - [x] Localhost command center dashboard
 - [x] Viewer-ready visualization frames
