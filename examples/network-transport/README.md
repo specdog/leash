@@ -4,6 +4,13 @@ Leash runtime streams default to in-process `local-pubsub` or deterministic
 `memory` backends. External module processes can use the smaller TCP JSONL
 boundary without changing those defaults.
 
+Run the localhost hub:
+
+```bash
+leash serve stream-hub --profile sim --listen 127.0.0.1:9970
+leash run sim-stream-hub
+```
+
 Each line is one `NetworkStreamFrame`:
 
 ```json

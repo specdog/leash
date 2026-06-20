@@ -15,6 +15,7 @@ use crate::{
 pub enum StackTransport {
     Http,
     Mcp,
+    StreamHub,
 }
 
 impl StackTransport {
@@ -22,6 +23,7 @@ impl StackTransport {
         match self {
             Self::Http => "http",
             Self::Mcp => "mcp",
+            Self::StreamHub => "stream-hub",
         }
     }
 }
@@ -187,6 +189,7 @@ pub fn built_in_stacks() -> Vec<Stack> {
     feature_stacks(vec![
         sim_http_stack(),
         sim_mcp_stack(),
+        sim_stream_hub_stack(),
         bridge_compat_http_stack(),
         waveshare_ugv_http_stack(),
     ])
@@ -279,6 +282,27 @@ fn sim_mcp_stack() -> Stack {
         config_overrides: PartialHarnessConfig::default(),
         modules: module_refs(Profile::Sim),
         command: "leash run sim-mcp".to_string(),
+    }
+}
+
+fn sim_stream_hub_stack() -> Stack {
+    Stack {
+        name: "sim-stream-hub".to_string(),
+        description: "Simulation TCP JSONL stream hub for external module links".to_string(),
+        profile: Profile::Sim,
+        transport: TransportBinding {
+            kind: StackTransport::StreamHub,
+            listen: Some(socket("127.0.0.1:9970")),
+        },
+        required_features: strings(&["sim"]),
+        hardware_required: false,
+        adapter: simulation_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("127.0.0.1:9970")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Sim),
+        command: "leash run sim-stream-hub".to_string(),
     }
 }
 
@@ -645,6 +669,7 @@ mod tests {
         let stacks = built_in_stacks();
         assert!(stacks.iter().any(|stack| stack.name == "sim-http"));
         assert!(stacks.iter().any(|stack| stack.name == "sim-mcp"));
+        assert!(stacks.iter().any(|stack| stack.name == "sim-stream-hub"));
         assert!(stacks
             .iter()
             .any(|stack| stack.name == "bridge-compat-http"));
@@ -697,6 +722,14 @@ mod tests {
         let sim = adapter_profile_for_profile(Profile::Sim);
         assert_eq!(sim.category, AdapterCategory::Simulation);
         assert!(sim.required_gates.is_empty());
+
+        let stream_hub = stacks
+            .iter()
+            .find(|stack| stack.name == "sim-stream-hub")
+            .unwrap();
+        assert_eq!(stream_hub.transport.kind, StackTransport::StreamHub);
+        assert!(!stream_hub.hardware_required);
+        assert_eq!(stream_hub.transport.listen, Some(socket("127.0.0.1:9970")));
 
         #[cfg(feature = "mavlink-drone")]
         {
