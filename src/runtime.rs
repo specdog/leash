@@ -35,6 +35,7 @@ use crate::{
 };
 
 const AGENT_MESSAGE_LIMIT: usize = 128;
+const DASHBOARD_EVENT_LIMIT: usize = 64;
 
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
@@ -200,6 +201,7 @@ pub struct Harness {
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
     stream_transport: Arc<dyn StreamTransport>,
     agent_messages: Arc<Mutex<VecDeque<AgentMessage>>>,
+    dashboard_events: Arc<Mutex<VecDeque<String>>>,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -248,6 +250,7 @@ impl Harness {
             telemetry_tx,
             stream_transport,
             agent_messages: Arc::new(Mutex::new(VecDeque::new())),
+            dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
@@ -319,6 +322,18 @@ impl Harness {
         self.agent_messages.lock().iter().cloned().collect()
     }
 
+    pub fn record_dashboard_event(&self, event: impl Into<String>) {
+        let mut events = self.dashboard_events.lock();
+        if events.len() == DASHBOARD_EVENT_LIMIT {
+            events.pop_front();
+        }
+        events.push_back(format!("{} {}", now_ms(), event.into()));
+    }
+
+    pub fn dashboard_events(&self) -> Vec<String> {
+        self.dashboard_events.lock().iter().cloned().collect()
+    }
+
     pub fn agent_model_response(&self, text: &str) -> Result<Option<AgentModelResponse>> {
         crate::agent::complete(&self.config, text)
     }
@@ -355,6 +370,13 @@ impl Harness {
             physical: self.config.profile.is_physical(),
             stream_transport: self.config.stream_transport.as_str().to_string(),
             endpoints: vec![
+                "GET /".to_string(),
+                "GET /dashboard".to_string(),
+                "POST /dashboard/authorize".to_string(),
+                "POST /dashboard/stop".to_string(),
+                "POST /dashboard/estop".to_string(),
+                "POST /dashboard/estop-reset".to_string(),
+                "POST /dashboard/capture".to_string(),
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
