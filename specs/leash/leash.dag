@@ -6,14 +6,22 @@
       0,
       "Harness",
       "entity",
-      "The core Rust runtime library. Reads hardware config, manages safety gates, routes commands to adapters.",
+      "The core Rust runtime. Safety gates (deadman, estop, soft-odometry-limit, physical-actuation-gate), pilot token sessions, sim+physical drivers, telemetry broadcast, capability registry.",
       [
-        "name",
+        "role",
         "s!",
-        "adapters",
-        "s!",
+        "profile",
+        "e!",
         "safety_gates",
-        "s!"
+        "s!",
+        "deadman_ms",
+        "n!",
+        "soft_odometry_limit_m",
+        "n!",
+        "allow_physical_actuation",
+        "b!",
+        "allow_untokened_drive",
+        "b!"
       ],
       [
         "planned",
@@ -24,43 +32,113 @@
       ],
       [
         [
-          7,
+          12,
           "provisions",
           "1:1",
           1
         ],
         [
           1,
-          "powers",
-          "1:1",
-          1
-        ],
-        [
-          2,
-          "powers",
-          "1:1",
-          1
-        ],
-        [
-          4,
-          "exposes_through",
-          "1:many",
-          1
-        ],
-        [
-          3,
-          "adapts",
-          "1:1"
-        ],
-        [
-          5,
-          "gates",
+          "contains",
           "1:1",
           1
         ],
         [
           6,
+          "powers",
+          "1:1",
+          1
+        ],
+        [
+          7,
+          "powers",
+          "1:1",
+          1
+        ],
+        [
+          9,
+          "exposes_through",
+          "1:many",
+          1
+        ],
+        [
+          2,
+          "targets",
+          "many:1",
+          1
+        ],
+        [
+          4,
+          "introspects",
+          "1:1",
+          1
+        ],
+        [
+          8,
+          "adapts",
+          "1:1"
+        ],
+        [
+          10,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          11,
           "packages",
+          "1:1",
+          1
+        ],
+        [
+          13,
+          "commands",
+          "1:1",
+          1
+        ],
+        [
+          14,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          15,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          16,
+          "controls",
+          "1:1",
+          1
+        ],
+        [
+          17,
+          "visualizes",
+          "1:1",
+          1
+        ],
+        [
+          18,
+          "adapts",
+          "1:1"
+        ],
+        [
+          19,
+          "adapts",
+          "1:1"
+        ],
+        [
+          23,
+          "monitors",
+          "1:1",
+          1
+        ],
+        [
+          26,
+          "verifies",
           "1:1",
           1
         ]
@@ -68,13 +146,239 @@
     ],
     [
       1,
+      "ModuleGraph",
+      "entity",
+      "Typed module runtime. Coordinator starts modules in dependency order, stops in reverse. Health aggregation. Introspection exports.",
+      [
+        "module_count",
+        "n!",
+        "stream_count",
+        "n!",
+        "isolation",
+        "e!",
+        "coordinator",
+        "b!",
+        "introspection",
+        "b!"
+      ],
+      [
+        "planned",
+        "designed",
+        "implemented",
+        "tested",
+        "active"
+      ],
+      [
+        [
+          0,
+          "contains",
+          "1:1",
+          1
+        ],
+        [
+          2,
+          "instantiates",
+          "1:many",
+          1
+        ],
+        [
+          3,
+          "connects",
+          "1:1",
+          1
+        ],
+        [
+          4,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          10,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          7,
+          "exposes",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      2,
+      "Stacks",
+      "entity",
+      "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.",
+      [
+        "catalog",
+        "s!",
+        "composition",
+        "b!",
+        "built_in",
+        "b!",
+        "versioned",
+        "b!"
+      ],
+      [
+        "planned",
+        "cataloged",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          1,
+          "instantiates",
+          "1:many",
+          1
+        ],
+        [
+          0,
+          "targets",
+          "many:1",
+          1
+        ],
+        [
+          5,
+          "exercises",
+          "1:many",
+          1
+        ],
+        [
+          7,
+          "launches",
+          "1:many",
+          1
+        ]
+      ]
+    ],
+    [
+      3,
+      "Transport",
+      "entity",
+      "Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.",
+      [
+        "backends",
+        "s!",
+        "backpressure",
+        "b!",
+        "quality_filtering",
+        "b!",
+        "timestamp_pairing",
+        "b!",
+        "default_backend",
+        "e!"
+      ],
+      [
+        "planned",
+        "designed",
+        "implemented",
+        "tested",
+        "active"
+      ],
+      [
+        [
+          1,
+          "connects",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      4,
+      "Telemetry",
+      "entity",
+      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.",
+      [
+        "outputs",
+        "s!",
+        "websocket",
+        "b!",
+        "sse",
+        "b!",
+        "views",
+        "s!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "active"
+      ],
+      [
+        [
+          1,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          0,
+          "introspects",
+          "1:1",
+          1
+        ],
+        [
+          5,
+          "feeds",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      5,
+      "Replay",
+      "entity",
+      "Deterministic sensor record + replay. `leash record` + `leash replay`.",
+      [
+        "buffer_format",
+        "s!",
+        "determinism",
+        "b!",
+        "sensor_record",
+        "b!"
+      ],
+      [
+        "implemented",
+        "verified",
+        "active"
+      ],
+      [
+        [
+          2,
+          "exercises",
+          "1:many",
+          1
+        ],
+        [
+          4,
+          "feeds",
+          "1:1",
+          1
+        ],
+        [
+          10,
+          "verifies",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      6,
       "CLI",
       "entity",
-      "Command-line interface and localhost HTTP compatibility server. Thin shell around the harness.",
+      "CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.",
       [
-        "http_port",
-        "n!",
+        "listen",
+        "s!",
         "commands",
+        "s!",
+        "http_endpoints",
         "s!"
       ],
       [
@@ -91,18 +395,30 @@
           1
         ],
         [
-          4,
+          9,
           "documents_for",
           "many:1",
+          1
+        ],
+        [
+          21,
+          "extends",
+          "1:1",
+          1
+        ],
+        [
+          22,
+          "feeds",
+          "1:1",
           1
         ]
       ]
     ],
     [
-      2,
+      7,
       "MCPServer",
       "entity",
-      "MCP stdio server exposing robot tools to local LLM clients. Tool set: motor, sensor, estop, status.",
+      "MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.",
       [
         "tools",
         "s!",
@@ -121,21 +437,39 @@
           "powers",
           "1:1",
           1
+        ],
+        [
+          1,
+          "exposes",
+          "1:1",
+          1
+        ],
+        [
+          2,
+          "launches",
+          "1:many",
+          1
         ]
       ]
     ],
     [
-      3,
+      8,
       "UGVAdapter",
       "entity",
-      "Feature-gated Waveshare Ubuntu UGV hardware adapter. Only compiles when `--features ugv` is set.",
+      "Waveshare Ubuntu UGV. Feature-gated. Serial JSON-line protocol.",
       [
         "target",
         "s!",
         "feature_flag",
         "s!",
-        "motor_channels",
-        "n!"
+        "serial_port",
+        "s!",
+        "serial_baud",
+        "n!",
+        "drive_invert",
+        "b!",
+        "drive_swap",
+        "b!"
       ],
       [
         "planned",
@@ -150,17 +484,23 @@
           "1:1"
         ],
         [
-          5,
+          10,
           "gates",
           "1:1"
+        ],
+        [
+          20,
+          "classifies",
+          "1:1",
+          1
         ]
       ]
     ],
     [
-      4,
+      9,
       "Bridge",
       "entity",
-      "Compatibility layer for existing robot bridge clients. Maps legacy APIs to the harness runtime.",
+      "Compatibility layer for existing robot bridge clients.",
       [
         "clients",
         "s!",
@@ -181,7 +521,7 @@
           1
         ],
         [
-          1,
+          6,
           "documents_for",
           "many:1",
           1
@@ -189,15 +529,19 @@
       ]
     ],
     [
-      5,
+      10,
       "Safety",
       "entity",
-      "Smoke-test scripts for MCP, HTTP, and safety gate verification. Gates every release.",
+      "Runtime safety gates + smoke scripts + policy-gated capability invocation.",
       [
-        "test_targets",
+        "gates",
         "s!",
-        "feature_flag",
-        "s!"
+        "smoke_scripts",
+        "s!",
+        "policy",
+        "b!",
+        "audit_events",
+        "b!"
       ],
       [
         "planned",
@@ -212,17 +556,41 @@
           1
         ],
         [
-          3,
+          1,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          8,
           "gates",
           "1:1"
+        ],
+        [
+          5,
+          "verifies",
+          "1:1",
+          1
+        ],
+        [
+          14,
+          "enforces",
+          "1:1",
+          1
+        ],
+        [
+          26,
+          "proves",
+          "1:1",
+          1
         ]
       ]
     ],
     [
-      6,
+      11,
       "ReleasePipeline",
       "entity",
-      "Packages the harness for crates.io and GitHub binary releases.",
+      "Packages for crates.io + GitHub binaries.",
       [
         "targets",
         "s!",
@@ -240,20 +608,34 @@
           "packages",
           "1:1",
           1
+        ],
+        [
+          24,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          25,
+          "documents",
+          "1:1",
+          1
         ]
       ]
     ],
     [
-      7,
+      12,
       "Bootstrap",
       "entity",
-      "Crate skeleton, license (MIT+trademark), CI pipeline, repo provenance.",
+      "Crate skeleton, MIT license, CI, repo provenance.",
       [
         "license",
         "s!",
         "ci_platform",
         "s!",
         "crate_name",
+        "s!",
+        "features",
         "s!"
       ],
       [
@@ -269,15 +651,478 @@
           1
         ]
       ]
+    ],
+    [
+      13,
+      "Agent",
+      "entity",
+      "Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.",
+      [
+        "providers",
+        "s!",
+        "channels",
+        "s!",
+        "message_stream",
+        "s!",
+        "config",
+        "s!",
+        "ci_model",
+        "b!"
+      ],
+      [
+        "planned",
+        "input_channels_implemented",
+        "provider_configured",
+        "provider_tested",
+        "active"
+      ],
+      [
+        [
+          0,
+          "commands",
+          "1:1",
+          1
+        ],
+        [
+          14,
+          "routes_through",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      14,
+      "CapabilityRegistry",
+      "entity",
+      "Shared registry with schema + safety metadata. Routes HTTP, MCP, agent calls.",
+      [
+        "safety_classes",
+        "s!",
+        "policy_modes",
+        "s!",
+        "invocation_origins",
+        "s!",
+        "schema_validation",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "active"
+      ],
+      [
+        [
+          13,
+          "routes_through",
+          "1:1",
+          1
+        ],
+        [
+          0,
+          "gates",
+          "1:1",
+          1
+        ],
+        [
+          10,
+          "enforces",
+          "1:1",
+          1
+        ],
+        [
+          17,
+          "routes_through",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      15,
+      "Perception",
+      "entity",
+      "Detection/observation adapter. Spatial memory + object registry.",
+      [
+        "adapter",
+        "b!",
+        "spatial_memory",
+        "b!",
+        "store",
+        "e!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "active"
+      ],
+      [
+        [
+          0,
+          "observes",
+          "1:1",
+          1
+        ],
+        [
+          16,
+          "depends_on",
+          "1:1"
+        ]
+      ]
+    ],
+    [
+      16,
+      "Navigation",
+      "entity",
+      "Occupancy-grid + costmap primitives. Sim waypoint router + patrol.",
+      [
+        "messages",
+        "s!",
+        "planner",
+        "b!",
+        "patrol",
+        "b!",
+        "sim_only",
+        "b!"
+      ],
+      [
+        "planned",
+        "designed",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          0,
+          "controls",
+          "1:1",
+          1
+        ],
+        [
+          15,
+          "depends_on",
+          "1:1"
+        ]
+      ]
+    ],
+    [
+      17,
+      "CommandCenter",
+      "entity",
+      "Localhost web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.",
+      [
+        "feature_flag",
+        "s!",
+        "bind",
+        "s!",
+        "views",
+        "s!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "active"
+      ],
+      [
+        [
+          0,
+          "visualizes",
+          "1:1",
+          1
+        ],
+        [
+          14,
+          "routes_through",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      18,
+      "DroneAdapter",
+      "entity",
+      "MAVLink drone skeleton. Feature-gated. Sim/replay mode.",
+      [
+        "target",
+        "s!",
+        "feature_flag",
+        "s!",
+        "capabilities",
+        "s!",
+        "sim_replay",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "feature_gated"
+      ],
+      [
+        [
+          0,
+          "adapts",
+          "1:1"
+        ],
+        [
+          20,
+          "classifies",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      19,
+      "ManipulatorAdapter",
+      "entity",
+      "Manipulator arm + teleop skeleton. Feature-gated.",
+      [
+        "target",
+        "s!",
+        "feature_flag",
+        "s!",
+        "teleop",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "feature_gated"
+      ],
+      [
+        [
+          0,
+          "adapts",
+          "1:1"
+        ],
+        [
+          20,
+          "classifies",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      20,
+      "HardwareMatrix",
+      "entity",
+      "Adapter profile matrix + plugin boundary. Categories, maturity levels.",
+      [
+        "categories",
+        "s!",
+        "maturity_levels",
+        "s!",
+        "plugin_boundary",
+        "b!"
+      ],
+      [
+        "planned",
+        "defined",
+        "documented"
+      ],
+      [
+        [
+          8,
+          "classifies",
+          "1:1",
+          1
+        ],
+        [
+          18,
+          "classifies",
+          "1:1",
+          1
+        ],
+        [
+          19,
+          "classifies",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      21,
+      "Daemon",
+      "entity",
+      "Background run registry. XDG state dir. `leash run --daemon`, status, log, stop, restart.",
+      [
+        "state_dir",
+        "s!",
+        "commands",
+        "s!",
+        "graceful_stop",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          6,
+          "extends",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      22,
+      "Config",
+      "entity",
+      "Resolved config precedence. `leash show-config`.",
+      [
+        "precedence",
+        "s!",
+        "show_config",
+        "b!",
+        "agent_provider",
+        "s!",
+        "secret_redaction",
+        "b!",
+        "policy_mode",
+        "s!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          6,
+          "feeds",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      23,
+      "Logging",
+      "entity",
+      "Structured JSONL logs. Lightweight resource monitor.",
+      [
+        "format",
+        "e!",
+        "resource_monitor",
+        "b!",
+        "cli_json",
+        "b!",
+        "module_filter",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "tested"
+      ],
+      [
+        [
+          0,
+          "monitors",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      24,
+      "ReleaseMatrix",
+      "entity",
+      "Feature tiers + dependency tiers + CI build matrix.",
+      [
+        "tiers",
+        "s!",
+        "default",
+        "s!",
+        "ci_matrix",
+        "b!"
+      ],
+      [
+        "planned",
+        "defined",
+        "verified"
+      ],
+      [
+        [
+          11,
+          "gates",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      25,
+      "CrossLanguage",
+      "entity",
+      "Cross-language message schemas + client examples.",
+      [
+        "schemas",
+        "s!",
+        "clients",
+        "s!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "documented"
+      ],
+      [
+        [
+          11,
+          "documents",
+          "1:1",
+          1
+        ]
+      ]
+    ],
+    [
+      26,
+      "SmokeSuite",
+      "entity",
+      "Full no-hardware smoke suite for release proof.",
+      [
+        "coverage",
+        "s!",
+        "no_hardware",
+        "b!",
+        "ci_integration",
+        "b!"
+      ],
+      [
+        "planned",
+        "implemented",
+        "verified"
+      ],
+      [
+        [
+          10,
+          "proves",
+          "1:1",
+          1
+        ],
+        [
+          0,
+          "verifies",
+          "1:1",
+          1
+        ]
+      ]
     ]
   ],
   "tk": {
     "m": "chars/4",
-    "st": 1821,
-    "ct": 1821,
-    "dt": 521,
-    "sv": 71.4,
-    "cs": 71.4,
-    "saved": 1300
+    "st": 7913,
+    "ct": 7913,
+    "dt": 2053,
+    "sv": 74.1,
+    "cs": 74.1,
+    "saved": 5860
   }
 }
