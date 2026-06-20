@@ -162,7 +162,7 @@ properties:
   visualization_frame:
     type: string
     required: true
-    description: leash-visualization-v1 pose, path, occupancy-grid, point-cloud metadata, detections, command overlay
+    description: leash-visualization-v1 pose, twist, path, map metadata, occupancy-grid, costmap, point-cloud metadata, detections, command overlay
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```
@@ -451,7 +451,19 @@ properties:
   messages:
     type: string
     required: true
-    description: pose, twist, path, occupancy-grid, costmap, map-metadata
+    description: timestamped pose, twist, path, occupancy-grid, costmap, and map-metadata JSON contracts
+  frame_conventions:
+    type: string
+    required: true
+    description: map frame for pose/path/grid/costmap, base_link for twist and point-cloud metadata, camera for detections
+  occupancy_values:
+    type: string
+    required: true
+    description: -1 unknown, 0 free, 100 occupied
+  costmap_values:
+    type: string
+    required: true
+    description: 0 free, 254 lethal, 255 unknown
   planner:
     type: boolean
     required: true

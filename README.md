@@ -148,12 +148,21 @@ WS   /ws/telemetry         Streaming telemetry envelope frames
 `TelemetryStreamFrame` JSON. Each frame includes a versioned
 `visualization.version = "leash-visualization-v1"` payload with:
 
-- `pose`: map-frame 2D pose
-- `path`: viewer-ready pose list
-- `occupancy_grid`: compact grid metadata + cells
+- `map`: map ID, frame ID, dimensions, resolution, origin, and cell order
+- `pose`: timestamped map-frame 2D pose
+- `twist`: timestamped base-link linear/angular velocity
+- `path`: timestamped viewer-ready pose list
+- `occupancy_grid`: compact grid metadata + `-1..100` cells, where `-1` is unknown and `100` is occupied
+- `costmap`: compact grid metadata + `0..255` costs, where `0` is free, `254` is lethal, and `255` is unknown
 - `point_cloud`: metadata only, no viewer dependency
 - `detections`: generic detection boxes
 - `command`: motor command overlay for operators
+
+Frame conventions are deliberately small: `map` is the global 2D frame for
+poses, paths, occupancy grids, and costmaps; `base_link` is the robot-local
+frame for twist and point-cloud metadata; `camera` is used for image-space
+detections. Grid cells are row-major from the map origin at `origin`, with
+meters-per-cell in `resolution_m`.
 
 External viewers can subscribe to the stream endpoints and render those fields
 without linking a viewer SDK into the core crate.
@@ -330,6 +339,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [ ] MAVLink drone + manipulator adapters
 - [x] Localhost command center dashboard
 - [x] Viewer-ready visualization frames
+- [x] Occupancy-grid and costmap message primitives
 - [ ] Spatial memory and perception primitives
 - [ ] Patrol and exploration in simulation
 - [x] Full no-hardware smoke suite

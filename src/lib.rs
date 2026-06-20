@@ -42,6 +42,9 @@ pub use transport::{
     StreamTransportBackend,
 };
 pub use types::{
-    AgentModelResponse, Capabilities, CaptureResult, Health, ResourceSample, RunLogEntry,
-    SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+    AgentModelResponse, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
+    Health, MapMetadata, OccupancyGridFrame, PointCloudMetadata, Pose2d, ResourceSample,
+    RunLogEntry, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisualizationFrame,
+    VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
 };
