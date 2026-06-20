@@ -15,7 +15,7 @@ use crate::{
     types::{PatrolStrategy, SpatialMemoryKind, SpeedMode},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpToolDescriptor {
     pub name: String,
     pub description: String,
@@ -25,20 +25,20 @@ pub struct McpToolDescriptor {
     pub output_schema: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpToolList {
     pub ok: bool,
     pub tools: Vec<McpToolDescriptor>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpCallResponse {
     pub ok: bool,
     pub tool: String,
     pub result: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpStatus {
     pub ok: bool,
     pub transport: String,
@@ -51,13 +51,13 @@ pub struct McpStatus {
     pub tool_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpModuleToolMap {
     pub ok: bool,
     pub modules: Vec<McpModuleTools>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpModuleTools {
     pub module: String,
     pub module_type: String,

@@ -4,7 +4,8 @@ This folder contains shell smoke tests and the bot installer. Scripts are intend
 
 ```mermaid
 flowchart TB
-  all["smoke-all.sh\naggregate no-hardware release proof"] --> http["smoke-http.sh\nHTTP routes, telemetry streams, policy denial"]
+  all["smoke-all.sh\naggregate no-hardware release proof"] --> schema["leash-schema --check\nchecked-in JSON Schemas"]
+  all --> http["smoke-http.sh\nHTTP routes, telemetry streams, policy denial"]
   all --> mcp["smoke-mcp.sh\nstdio MCP initialize, tools, health"]
   all --> mcphttp["smoke-mcp-http.sh\nlocalhost MCP HTTP, CLI, planner, and patrol calls"]
   all --> replayhttp["smoke-replay-http.sh\nHTTP replay observe"]
@@ -17,8 +18,8 @@ flowchart TB
 ## Files
 
 - `install-bot.sh`: builds a Leash binary and installs a user `systemd` service plus env file on a bot host.
-- `smoke-all.sh`: aggregate no-hardware release proof; CI runs this.
-- `smoke-http.sh`: HTTP, WebSocket/SSE, visualization frame, map/costmap contracts, agent input, capture, drive, and policy checks.
+- `smoke-all.sh`: aggregate no-hardware release proof; CI runs this and checks generated schemas.
+- `smoke-http.sh`: HTTP, WebSocket/SSE, visualization frame, map/costmap contracts, external clients, agent input, capture, drive, and policy checks.
 - `smoke-mcp.sh`: stdio MCP initialization and tool calls.
 - `smoke-mcp-http.sh`: localhost MCP HTTP routes, `leash mcp` CLI calls, sim planner set/status calls, and sim patrol start/status/stop calls.
 - `smoke-replay-http.sh`: replay mode over HTTP.

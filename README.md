@@ -194,6 +194,20 @@ POST /estop/reset          { token, approval } Clear estop
 WS   /ws/telemetry         Streaming telemetry envelope frames
 ```
 
+## External Schemas And Clients
+
+Leash publishes generated JSON Schema for external tools at
+`schemas/leash-messages.schema.json`. Regenerate it from Rust wire types with:
+
+```bash
+cargo run --features mcp --bin leash-schema -- --output schemas/leash-messages.schema.json
+```
+
+CI checks schema freshness with `--check`, and
+[docs/SCHEMAS.md](docs/SCHEMAS.md) documents compatibility rules. Standard-library
+Python and Node examples in `examples/clients/` read `/health`, consume
+`/telemetry`, and invoke `POST /stop` against sim HTTP.
+
 ## Viewer Frames
 
 `WS /ws/telemetry`, `GET /events/telemetry`, and `GET /sse/telemetry` emit
