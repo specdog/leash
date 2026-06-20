@@ -103,6 +103,35 @@ if (!payload.result || payload.result.status !== "active") throw new Error("plan
 if (!payload.result.goal || payload.result.goal.frame_id !== "map") throw new Error("planner goal was missing");'
 }
 
+assert_patrol_start_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("patrol start wrapper was invalid");
+if (!payload.result || payload.result.ok !== true) throw new Error("patrol start result ok was not true");
+if (payload.result.active !== true) throw new Error("patrol did not become active");
+if (payload.result.strategy !== "coverage") throw new Error(`unexpected patrol strategy: ${payload.result.strategy}`);
+if (!payload.result.goal || payload.result.goal.frame_id !== "map") throw new Error("patrol goal was missing");
+if (!payload.result.path || !Array.isArray(payload.result.path.poses) || payload.result.path.poses.length < 2) {
+  throw new Error("patrol path was missing");
+}
+if (!Array.isArray(payload.result.visited_cells) || payload.result.visited_cells.length < 1) {
+  throw new Error("patrol visited cells were missing");
+}'
+}
+
+assert_patrol_status_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("patrol status wrapper was invalid");
+if (!payload.result || payload.result.active !== true) throw new Error("patrol status did not stay active");
+if (payload.result.strategy !== "coverage") throw new Error("patrol status lost strategy");'
+}
+
+assert_patrol_stop_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("patrol stop wrapper was invalid");
+if (!payload.result || payload.result.active !== false) throw new Error("patrol did not stop");
+if (payload.result.status !== "stopped") throw new Error(`unexpected patrol stop status: ${payload.result.status}`);'
+}
+
 assert_module_map() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true) throw new Error("module map ok was not true");
@@ -135,5 +164,17 @@ curl -fsS -X POST "$base/mcp/call" \
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"planner_status"}}' | assert_planner_status_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"planner_cancel"}}' >/dev/null
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"start_patrol","strategy":"coverage","speed_mode":"low"}}' | assert_patrol_start_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"patrol_status"}}' | assert_patrol_status_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"stop_patrol"}}' | assert_patrol_stop_call
 
 echo "mcp-http smoke ok: $base"

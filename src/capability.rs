@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 use crate::{
     config::PolicyMode,
     runtime::Harness,
-    types::{PlannerGoal, SpeedMode},
+    types::{PatrolStrategy, PlannerGoal, SpeedMode},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -259,6 +259,22 @@ impl CapabilityRegistry {
                 ensure_fields(&args, &[])?;
                 serde_json::to_value(self.harness.planner_status()).map_err(Into::into)
             }
+            "start_patrol" => {
+                ensure_fields(&args, &["strategy", "speed_mode"])?;
+                let strategy = optional_patrol_strategy(&args, "strategy")?.unwrap_or_default();
+                let speed_mode =
+                    optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low);
+                serde_json::to_value(self.harness.start_patrol(strategy, speed_mode)?)
+                    .map_err(Into::into)
+            }
+            "stop_patrol" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.stop_patrol()?).map_err(Into::into)
+            }
+            "patrol_status" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.patrol_status()).map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -484,6 +500,30 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             object_schema(&[]),
             "PlannerStatus",
         ),
+        descriptor(
+            "start_patrol",
+            "Start a sim-only patrol using coverage, frontier, or random goal selection",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("strategy", "PatrolStrategy", false),
+                ("speed_mode", "SpeedMode", false),
+            ]),
+            "PatrolStatus",
+        ),
+        descriptor(
+            "stop_patrol",
+            "Stop the active sim patrol and cancel planner movement",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "PatrolStatus",
+        ),
+        descriptor(
+            "patrol_status",
+            "Report active sim patrol strategy, goal, path, and visited cells",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "PatrolStatus",
+        ),
     ]
 }
 
@@ -528,6 +568,9 @@ fn canonical_name(name: &str) -> &str {
         "planner.set_goal" | "planner/set_goal" => "planner_set_goal",
         "planner.cancel" | "planner/cancel" => "planner_cancel",
         "planner.status" | "planner/status" => "planner_status",
+        "patrol.start" | "patrol/start" | "patrol_start" => "start_patrol",
+        "patrol.stop" | "patrol/stop" | "patrol_stop" => "stop_patrol",
+        "patrol.status" | "patrol/status" => "patrol_status",
         other => other,
     }
 }
@@ -620,6 +663,18 @@ fn optional_speed_mode(args: &Map<String, Value>, key: &str) -> Result<Option<Sp
     }
 }
 
+fn optional_patrol_strategy(
+    args: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<PatrolStrategy>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|err| anyhow!("{key} must be a valid patrol strategy: {err}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,6 +733,34 @@ mod tests {
         let value = registry.invoke_value("observe", json!({})).unwrap();
         let telemetry: TelemetryFrame = serde_json::from_value(value).unwrap();
         assert_eq!(telemetry.robot, "robot");
+    }
+
+    #[tokio::test]
+    async fn patrol_capabilities_start_stop_and_report_status() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let registry = CapabilityRegistry::new(harness.clone());
+
+        let started = registry
+            .invoke_value_with_origin(
+                "start_patrol",
+                json!({ "strategy": "frontier", "speed_mode": "low" }),
+                InvocationOrigin::Agent,
+            )
+            .unwrap();
+
+        assert_eq!(started["ok"], true);
+        assert_eq!(started["active"], true);
+        assert_eq!(started["strategy"], "frontier");
+        assert!(harness.planner_status().active);
+
+        let status = registry.invoke_value("patrol_status", json!({})).unwrap();
+        assert_eq!(status["active"], true);
+        assert_eq!(status["visited_cells"][0], "2,2");
+
+        let stopped = registry.invoke_value("stop_patrol", json!({})).unwrap();
+        assert_eq!(stopped["active"], false);
+        assert_eq!(stopped["status"], "stopped");
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
     }
 
     #[tokio::test]

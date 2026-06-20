@@ -33,9 +33,9 @@ flowchart TB
 - `mcp.rs`: MCP stdio server, tool schemas, and tool handlers.
 - `module.rs`: module graph, states, health, dependencies, and graph export.
 - `replay.rs`: replay recording format and playback timing.
-- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, and sim planner.
+- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, sim planner, and sim patrol.
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, planner, and map metadata frames.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, planner, patrol, autonomy overlay, and map metadata frames.
 - `bin/`: CLI entrypoint crate target.

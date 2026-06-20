@@ -721,12 +721,12 @@
       16,
       "Navigation",
       "entity",
-      "Occupancy-grid + costmap primitives and a sim waypoint router. Patrol remains planned.",
+      "Occupancy-grid + costmap primitives, sim waypoint router, and sim patrol.",
       [
         "planner",
         "true",
         "patrol",
-        "false",
+        "true",
         "sim_only",
         "true"
       ],
@@ -1036,12 +1036,12 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 8550,
-    "ct": 8550,
-    "dt": 1975,
-    "sv": 76.9,
-    "cs": 76.9,
-    "saved": 6575
+    "st": 8738,
+    "ct": 8738,
+    "dt": 1971,
+    "sv": 77.4,
+    "cs": 77.4,
+    "saved": 6767
   },
   "compact": "[lea]\nHarness→Bootstrap:provi(11)>ModuleGraph:conta(11)>CLI:power(11)>MCPServer:power(11)>Bridge:expos(1m)>Stacks:targe(m1)>Telemetry:intro(11)>UGVAdapter:adapt(11)>Safety:gates(11)>ReleasePipeline:packa(11)>Agent:comma(11)>CapabilityRegistry:gates(11)>Perception:obser(11)>Navigation:contr(11)>CommandCenter:visua(11)>DroneAdapter:adapt(11)>ManipulatorAdapter:adapt(11)>Logging:monit(11)>SmokeSuite:verif(11)\nModuleGraph→Harness:conta(11)>Stacks:insta(1m)>Transport:conne(11)>Telemetry:obser(11)>Safety:gates(11)>MCPServer:expos(11)\nSafety→Harness:gates(11)>ModuleGraph:gates(11)>UGVAdapter:gates(11)>Replay:verif(11)>CapabilityRegistry:enfor(11)>SmokeSuite:prove(11)\nStacks→ModuleGraph:insta(1m)>Harness:targe(m1)>Replay:exerc(1m)>MCPServer:launc(1m)\nCLI→Harness:power(11)>Bridge:docum(m1)>Daemon:exten(11)>Config:feeds(11)\nCapabilityRegistry→Agent:route(11)>Harness:gates(11)>Safety:enfor(11)>CommandCenter:route(11)\nTelemetry→ModuleGraph:obser(11)>Harness:intro(11)>Replay:feeds(11)\nReplay→Stacks:exerc(1m)>Telemetry:feeds(11)>Safety:verif(11)\nMCPServer→Harness:power(11)>ModuleGraph:expos(11)>Stacks:launc(1m)\nUGVAdapter→Harness:adapt(11)>Safety:gates(11)>HardwareMatrix:class(11)\nReleasePipeline→Harness:packa(11)>ReleaseMatrix:gates(11)>CrossLanguage:docum(11)\nHardwareMatrix→UGVAdapter:class(11)>DroneAdapter:class(11)>ManipulatorAdapter:class(11)\nBridge→Harness:expos(1m)>CLI:docum(m1)\nAgent→Harness:comma(11)>CapabilityRegistry:route(11)\nPerception→Harness:obser(11)>Navigation:depen(11)\nNavigation→Harness:contr(11)>Perception:depen(11)\nCommandCenter→Harness:visua(11)>CapabilityRegistry:route(11)\nDroneAdapter→Harness:adapt(11)>HardwareMatrix:class(11)\nManipulatorAdapter→Harness:adapt(11)>HardwareMatrix:class(11)\nSmokeSuite→Safety:prove(11)>Harness:verif(11)"
 }
