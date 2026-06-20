@@ -72,9 +72,16 @@ GET  /events/telemetry     → SSE TelemetryStreamFrame
 GET  /sse/telemetry        → alias for /events/telemetry
 GET  /sensors              → sensor snapshot
 GET  /camera/status        → camera health + stream URLs
+GET  /                    → server-rendered command center dashboard
+GET  /dashboard            → server-rendered command center dashboard
 GET  /agent                → localhost web input form
 GET  /agent/messages       → recent AgentMessage list
 POST /agent/messages       → { source, text } → AgentMessageAck
+POST /dashboard/authorize  → form post → authorize capability
+POST /dashboard/stop       → form post → stop capability
+POST /dashboard/estop      → form post → estop capability
+POST /dashboard/estop-reset → form post → estop_reset capability
+POST /dashboard/capture    → form post → capture capability
 POST /capture              → CaptureResult (SVG frame + sha256)
 POST /pilot/authorize      → { token, ttl_secs, speed_mode } → PilotTokenResp
 POST /pilot/speed-mode     → { token, speed_mode }
@@ -109,3 +116,4 @@ WS   /ws/telemetry         → streaming TelemetryStreamFrame JSON
 | LS-14 | Human sends natural-language input into a local runtime | P1 | `agent-send`, `agent-interactive`, and `/agent` route messages without an LLM provider |
 | LS-15 | Developer configures a model provider without leaking secrets | P1 | deterministic provider works in CI; hosted/local config validates; API key is redacted |
 | LS-16 | Operator policy-gates physical capability invocation | P0 | safety classes include physical-high-risk; modes support dry-run, require-token, require-approval, deny; stop/estop remain available |
+| LS-17 | Operator opens a localhost command center | P1 | `/dashboard` renders health, telemetry, modules, capabilities, logs, and stop/estop controls without client JavaScript |

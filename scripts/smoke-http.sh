@@ -48,6 +48,12 @@ assert_capabilities_streams() {
 for (const endpoint of ["WS /ws/telemetry", "GET /events/telemetry", "GET /sse/telemetry"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing endpoint: ${endpoint}`);
 }
+for (const endpoint of ["GET /", "GET /dashboard"]) {
+  if (!payload.endpoints.includes(endpoint)) throw new Error(`missing dashboard endpoint: ${endpoint}`);
+}
+for (const endpoint of ["POST /dashboard/authorize", "POST /dashboard/stop", "POST /dashboard/estop", "POST /dashboard/estop-reset", "POST /dashboard/capture"]) {
+  if (!payload.endpoints.includes(endpoint)) throw new Error(`missing dashboard action endpoint: ${endpoint}`);
+}
 for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
 }'
@@ -112,6 +118,49 @@ if (!Array.isArray(payload.messages)) throw new Error("agent messages was not an
 if (!payload.messages.some((message) => message.text === process.env.EXPECT_TEXT)) {
   throw new Error(`agent message list did not include: ${process.env.EXPECT_TEXT}`);
 }'
+}
+
+assert_dashboard_page() {
+  local html
+  html="$(cat)"
+  for text in "Leash Command Center" "Health" "Telemetry" "Modules" "Capabilities" "Logs Tail"; do
+    if [[ "$html" != *"$text"* ]]; then
+      echo "dashboard missing $text" >&2
+      return 1
+    fi
+  done
+  for path in "/dashboard/authorize" "/dashboard/stop" "/dashboard/estop" "/dashboard/estop-reset" "/dashboard/capture"; do
+    if [[ "$html" != *"$path"* ]]; then
+      echo "dashboard missing form action $path" >&2
+      return 1
+    fi
+  done
+  if [[ "$html" == *"<script"* ]]; then
+    echo "dashboard should not include script tags" >&2
+    return 1
+  fi
+}
+
+dashboard_ts() {
+  sed -n 's/.*data-telemetry-ts="\([0-9][0-9]*\)".*/\1/p' | head -n 1
+}
+
+assert_dashboard_updates() {
+  local first_ts second_ts
+  first_ts="$(curl -fsS "$base/dashboard" | dashboard_ts)"
+  sleep 1
+  second_ts="$(curl -fsS "$base/dashboard" | dashboard_ts)"
+  if [[ -z "$first_ts" || -z "$second_ts" || "$first_ts" == "$second_ts" ]]; then
+    echo "dashboard telemetry timestamp did not update: '$first_ts' -> '$second_ts'" >&2
+    return 1
+  fi
+}
+
+post_dashboard_action() {
+  local action="$1"
+  curl -fsS -L "$base/dashboard/$action" \
+    -H "content-type: application/x-www-form-urlencoded" \
+    --data 'token=smoke-token&ttl_secs=30&speed_mode=low&approval=true' | assert_dashboard_page
 }
 
 assert_ws_telemetry() {
@@ -182,6 +231,14 @@ curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | parse_json
 curl -fsS "$base/sensors" | parse_json
 curl -fsS -X POST "$base/capture" | parse_json
+curl -fsS "$base/" | assert_dashboard_page
+curl -fsS "$base/dashboard" | assert_dashboard_page
+assert_dashboard_updates
+post_dashboard_action authorize
+post_dashboard_action stop
+post_dashboard_action estop
+post_dashboard_action estop-reset
+post_dashboard_action capture
 curl -fsS "$base/agent" | grep -q "Leash Agent Input"
 curl -fsS -X POST "$base/agent/messages" \
   -H "content-type: application/json" \
@@ -206,6 +263,10 @@ assert_policy_denial <"$policy_response"
 curl -fsS -X POST "$base/pilot/authorize" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","ttl_secs":30,"speed_mode":"low"}' | parse_json
+curl -fsS -X POST "$base/estop" | parse_json
+curl -fsS -X POST "$base/estop/reset" \
+  -H "content-type: application/json" \
+  --data '{"token":"smoke-token","approval":true}' | parse_json
 curl -fsS -X POST "$base/drive" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","left":0.2,"right":0.2}' | assert_drive_outcome
