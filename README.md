@@ -457,8 +457,14 @@ TCP JSONL frame contract: `NetworkStreamFrame` with
 `schema_version = "leash-stream-jsonl-v1"`, `stream`, and `payload`. The helper
 functions `send_tcp_jsonl_stream_message` and
 `accept_tcp_jsonl_stream_message` prove one-message loopback delivery without
-changing the default runtime transport. Longer-lived distributed module
-orchestration stays outside this first boundary.
+changing the default runtime transport.
+
+Use `spawn_tcp_jsonl_stream_hub` when a runtime should accept long-lived
+localhost TCP peers and publish each valid JSONL frame into the selected
+in-process `StreamTransport`. Bad frames close only the offending peer and
+increment hub rejection status; the listener keeps serving later peers. This is
+the first cross-process stream orchestration layer, not a distributed runtime
+supervisor or remote hardware control surface.
 
 ## Run Logs and Resource Samples
 

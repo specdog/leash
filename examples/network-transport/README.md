@@ -17,8 +17,12 @@ The public helpers are:
 - `read_network_stream_frame`
 - `send_tcp_jsonl_stream_message`
 - `accept_tcp_jsonl_stream_message`
+- `spawn_tcp_jsonl_stream_hub`
+- `TcpJsonlStreamHubStatus`
 
 The loopback test in `src/transport.rs` is the executable example: it binds a
 localhost `TcpListener`, sends one `StreamMessage`, and verifies the received
-message matches exactly. This is a framing contract for cross-process modules,
-not a long-lived distributed runtime supervisor.
+message matches exactly. The hub tests use a long-lived localhost peer, publish
+multiple frames into an in-process subscriber, and prove a bad peer does not
+kill the listener. This is cross-process stream orchestration, not a distributed
+runtime supervisor.
