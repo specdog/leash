@@ -516,18 +516,33 @@ fn print_stack_list(format: ListFormat) -> Result<()> {
         ListFormat::Json => println!("{}", serde_json::to_string_pretty(&stacks)?),
         ListFormat::Table => {
             println!(
-                "{:<22} {:<13} {:<9} {:<8} {:<28} COMMAND",
-                "NAME", "PROFILE", "TRANSPORT", "HARDWARE", "FEATURES"
+                "{:<22} {:<13} {:<9} {:<8} {:<14} {:<12} {:<28} {:<43} COMMAND",
+                "NAME",
+                "PROFILE",
+                "TRANSPORT",
+                "HARDWARE",
+                "ADAPTER",
+                "MATURITY",
+                "FEATURES",
+                "GATES"
             );
             for stack in stacks {
                 let features = stack.required_features.join(",");
+                let gates = if stack.adapter.required_gates.is_empty() {
+                    "-".to_string()
+                } else {
+                    stack.adapter.required_gates.join(",")
+                };
                 println!(
-                    "{:<22} {:<13} {:<9} {:<8} {:<28} {}",
+                    "{:<22} {:<13} {:<9} {:<8} {:<14} {:<12} {:<28} {:<43} {}",
                     stack.name,
                     stack.profile.as_str(),
                     stack.transport.kind.as_str(),
                     if stack.hardware_required { "yes" } else { "no" },
+                    stack.adapter.category.as_str(),
+                    stack.adapter.maturity.as_str(),
                     features,
+                    gates,
                     stack.command
                 );
             }

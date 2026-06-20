@@ -82,6 +82,12 @@ const checks = [
       if (!physical.hardware_required) {
         throw new Error("waveshare stack did not declare hardware_required");
       }
+      if (!physical.adapter || physical.adapter.category !== "mobile-base") {
+        throw new Error("waveshare stack did not declare mobile-base adapter metadata");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("waveshare stack did not declare physical-actuation gate");
+      }
       return `listed ${stacks.length} built-in stacks`;
     },
   },

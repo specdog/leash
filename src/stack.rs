@@ -42,6 +42,65 @@ pub struct StackModule {
     pub physical: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AdapterCategory {
+    Simulation,
+    Compatibility,
+    MobileBase,
+    Drone,
+    Manipulator,
+    Perception,
+    Sensor,
+}
+
+impl AdapterCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Simulation => "simulation",
+            Self::Compatibility => "compatibility",
+            Self::MobileBase => "mobile-base",
+            Self::Drone => "drone",
+            Self::Manipulator => "manipulator",
+            Self::Perception => "perception",
+            Self::Sensor => "sensor",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AdapterMaturity {
+    Stable,
+    Beta,
+    Alpha,
+    Experimental,
+}
+
+impl AdapterMaturity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+            Self::Alpha => "alpha",
+            Self::Experimental => "experimental",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AdapterProfile {
+    pub category: AdapterCategory,
+    pub maturity: AdapterMaturity,
+    pub capabilities: Vec<String>,
+    pub feature_flags: Vec<String>,
+    pub required_gates: Vec<String>,
+    pub boundary: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Stack {
@@ -51,6 +110,7 @@ pub struct Stack {
     pub transport: TransportBinding,
     pub required_features: Vec<String>,
     pub hardware_required: bool,
+    pub adapter: AdapterProfile,
     pub config_overrides: PartialHarnessConfig,
     pub modules: Vec<StackModule>,
     pub command: String,
@@ -63,6 +123,33 @@ impl Stack {
                 "stack '{}' hardware metadata does not match profile '{}'",
                 self.name,
                 self.profile.as_str()
+            );
+        }
+
+        for feature in &self.adapter.feature_flags {
+            if !self.required_features.contains(feature) {
+                bail!(
+                    "stack '{}' adapter feature '{}' is missing from required_features",
+                    self.name,
+                    feature
+                );
+            }
+        }
+
+        if self.adapter.capabilities.is_empty() {
+            bail!("stack '{}' adapter must declare capabilities", self.name);
+        }
+
+        if self.hardware_required
+            && !self
+                .adapter
+                .required_gates
+                .iter()
+                .any(|gate| gate == "physical-actuation")
+        {
+            bail!(
+                "stack '{}' physical adapter must declare physical-actuation gate",
+                self.name
             );
         }
 
@@ -124,6 +211,14 @@ pub fn resolve_stack(name: &str) -> Result<Stack> {
     Ok(stack)
 }
 
+pub fn adapter_profile_for_profile(profile: Profile) -> AdapterProfile {
+    match profile {
+        Profile::Sim => simulation_adapter_profile(),
+        Profile::Replay => replay_adapter_profile(),
+        Profile::WaveshareUgv => waveshare_ugv_adapter_profile(),
+    }
+}
+
 fn sim_http_stack() -> Stack {
     Stack {
         name: "sim-http".to_string(),
@@ -135,6 +230,7 @@ fn sim_http_stack() -> Stack {
         },
         required_features: strings(&["sim", "http"]),
         hardware_required: false,
+        adapter: simulation_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("127.0.0.1:8000")),
             ..PartialHarnessConfig::default()
@@ -155,6 +251,7 @@ fn sim_mcp_stack() -> Stack {
         },
         required_features: strings(&["sim", "mcp"]),
         hardware_required: false,
+        adapter: simulation_adapter_profile(),
         config_overrides: PartialHarnessConfig::default(),
         modules: module_refs(Profile::Sim),
         command: "leash run sim-mcp".to_string(),
@@ -172,6 +269,7 @@ fn bridge_compat_http_stack() -> Stack {
         },
         required_features: strings(&["sim", "http", "bridge-compat"]),
         hardware_required: false,
+        adapter: bridge_compat_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("127.0.0.1:8001")),
             ..PartialHarnessConfig::default()
@@ -192,6 +290,7 @@ fn waveshare_ugv_http_stack() -> Stack {
         },
         required_features: strings(&["http", "waveshare-ugv"]),
         hardware_required: true,
+        adapter: waveshare_ugv_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("0.0.0.0:8000")),
             ..PartialHarnessConfig::default()
@@ -200,6 +299,60 @@ fn waveshare_ugv_http_stack() -> Stack {
         command:
             "LEASH_ALLOW_PHYSICAL_ACTUATION=1 leash run waveshare-ugv-http --allow-physical-actuation"
                 .to_string(),
+    }
+}
+
+fn simulation_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Simulation,
+        maturity: AdapterMaturity::Stable,
+        capabilities: strings(&[
+            "drive",
+            "speed_mode",
+            "stop",
+            "estop",
+            "estop_reset",
+            "observe",
+            "capture",
+        ]),
+        feature_flags: strings(&["sim"]),
+        required_gates: Vec::new(),
+        boundary: "in-crate simulation driver; no hardware or external process boundary"
+            .to_string(),
+    }
+}
+
+fn replay_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Simulation,
+        maturity: AdapterMaturity::Beta,
+        capabilities: strings(&["observe", "capture"]),
+        feature_flags: Vec::new(),
+        required_gates: Vec::new(),
+        boundary: "fixture-backed replay source; deterministic and non-physical".to_string(),
+    }
+}
+
+fn bridge_compat_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Compatibility,
+        maturity: AdapterMaturity::Beta,
+        capabilities: strings(&["drive", "stop", "estop", "observe"]),
+        feature_flags: strings(&["sim", "bridge-compat"]),
+        required_gates: Vec::new(),
+        boundary: "HTTP compatibility shim over the simulation adapter".to_string(),
+    }
+}
+
+fn waveshare_ugv_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::MobileBase,
+        maturity: AdapterMaturity::Alpha,
+        capabilities: strings(&["drive", "speed_mode", "stop", "estop", "observe", "capture"]),
+        feature_flags: strings(&["waveshare-ugv"]),
+        required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
+        boundary: "feature-gated RobotDriver implementation; serial I/O isolated from core policy"
+            .to_string(),
     }
 }
 
@@ -255,6 +408,30 @@ mod tests {
         for stack in stacks {
             stack.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn stack_adapter_profiles_form_the_hardware_matrix() {
+        let stacks = built_in_stacks();
+        let physical = stacks
+            .iter()
+            .find(|stack| stack.name == "waveshare-ugv-http")
+            .unwrap();
+        assert_eq!(physical.adapter.category, AdapterCategory::MobileBase);
+        assert_eq!(physical.adapter.maturity, AdapterMaturity::Alpha);
+        assert!(physical
+            .adapter
+            .feature_flags
+            .contains(&"waveshare-ugv".to_string()));
+        assert!(physical
+            .adapter
+            .required_gates
+            .contains(&"physical-actuation".to_string()));
+        assert!(physical.adapter.capabilities.contains(&"drive".to_string()));
+
+        let sim = adapter_profile_for_profile(Profile::Sim);
+        assert_eq!(sim.category, AdapterCategory::Simulation);
+        assert!(sim.required_gates.is_empty());
     }
 
     #[test]

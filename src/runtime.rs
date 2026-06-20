@@ -616,6 +616,7 @@ impl Harness {
             role: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             physical: self.config.profile.is_physical(),
+            adapter: crate::stack::adapter_profile_for_profile(self.config.profile),
             stream_transport: self.config.stream_transport.as_str().to_string(),
             endpoints: vec![
                 "GET /".to_string(),
@@ -1758,6 +1759,15 @@ mod tests {
 
         let capabilities = harness.capabilities();
         assert_eq!(capabilities.stream_transport, "local-pubsub");
+        assert_eq!(
+            capabilities.adapter.category,
+            crate::stack::AdapterCategory::Simulation
+        );
+        assert_eq!(
+            capabilities.adapter.maturity,
+            crate::stack::AdapterMaturity::Stable
+        );
+        assert!(capabilities.adapter.required_gates.is_empty());
         assert_eq!(
             capabilities.accelerator.requested,
             crate::config::AcceleratorBackend::Cuda
