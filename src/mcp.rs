@@ -12,7 +12,7 @@ use crate::{
     capability::{InvocationOrigin, SafetyClass},
     module::ModuleState,
     runtime::Harness,
-    types::SpeedMode,
+    types::{PatrolStrategy, SpeedMode},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +115,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, or planner_status"
+        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, or patrol_status"
     )]
     pub async fn invoke_capability(
         &self,
@@ -201,6 +201,8 @@ pub struct InvokeCapabilityParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tolerance_m: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<PatrolStrategy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval: Option<bool>,
@@ -255,7 +257,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, or planner_status",
+            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, or patrol_status",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[
@@ -268,6 +270,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("x_m", "number", false),
                 ("y_m", "number", false),
                 ("tolerance_m", "number", false),
+                ("strategy", "PatrolStrategy", false),
                 ("speed_mode", "SpeedMode", false),
                 ("approval", "boolean", false),
             ]),

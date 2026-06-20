@@ -30,10 +30,11 @@ use crate::{
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
         CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, MapMetadata,
-        OccupancyGridFrame, OdometryStatus, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot, SpeedMode,
-        TelemetryFrame, TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath,
-        COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
+        PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
+        SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        Twist2d, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE,
+        OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -47,6 +48,34 @@ const PLANNER_ORIGIN_X_M: f64 = -0.5;
 const PLANNER_ORIGIN_Y_M: f64 = -0.5;
 const PLANNER_BLOCKED_CELLS: &[(usize, usize)] = &[(1, 1)];
 const PLANNER_STEP_CMD: f64 = 0.2;
+
+#[derive(Debug, Clone)]
+struct PatrolState {
+    status: PatrolStatus,
+    visited: [bool; PLANNER_GRID_CELLS],
+}
+
+impl Default for PatrolState {
+    fn default() -> Self {
+        Self {
+            status: PatrolStatus::default(),
+            visited: [false; PLANNER_GRID_CELLS],
+        }
+    }
+}
+
+impl PatrolState {
+    fn mark_visited(&mut self, cell: PlannerCell) {
+        self.visited[cell.index()] = true;
+        self.status.visited_cells = visited_cell_labels(&self.visited);
+    }
+
+    fn status_with_visited(&self) -> PatrolStatus {
+        let mut status = self.status.clone();
+        status.visited_cells = visited_cell_labels(&self.visited);
+        status
+    }
+}
 
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
@@ -214,6 +243,7 @@ pub struct Harness {
     agent_messages: Arc<Mutex<VecDeque<AgentMessage>>>,
     dashboard_events: Arc<Mutex<VecDeque<String>>>,
     planner: Arc<Mutex<PlannerStatus>>,
+    patrol: Arc<Mutex<PatrolState>>,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -264,6 +294,7 @@ impl Harness {
             agent_messages: Arc::new(Mutex::new(VecDeque::new())),
             dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
+            patrol: Arc::new(Mutex::new(PatrolState::default())),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
@@ -271,6 +302,7 @@ impl Harness {
         };
         harness.spawn_deadman();
         harness.spawn_planner_loop();
+        harness.spawn_patrol_loop();
         harness.spawn_telemetry_loop();
         Ok(harness)
     }
@@ -412,11 +444,106 @@ impl Harness {
     }
 
     pub fn cancel_planner_goal(&self) -> Result<PlannerStatus> {
+        self.cancel_patrol_state("stopped", "patrol stopped by planner cancel");
         self.cancel_planner_state("cancelled", "planner goal cancelled");
         let outcome = self.stop_without_planner_cancel()?;
         let mut planner = self.planner.lock();
         planner.last_drive = Some(outcome);
         Ok(planner.clone())
+    }
+
+    pub fn patrol_status(&self) -> PatrolStatus {
+        self.patrol.lock().status_with_visited()
+    }
+
+    pub fn start_patrol(
+        &self,
+        strategy: PatrolStrategy,
+        speed_mode: SpeedMode,
+    ) -> Result<PatrolStatus> {
+        if self.config.profile != Profile::Sim {
+            return Err(anyhow!("patrol is only available for the sim profile"));
+        }
+
+        let ts_ms = now_ms();
+        let current = self.current_sim_pose(ts_ms);
+        let Some(start) = planner_cell_for_xy(current.x_m, current.y_m) else {
+            return Err(anyhow!("current sim pose is outside the patrol grid"));
+        };
+
+        let Some(goal_cell) = ({
+            let mut patrol = self.patrol.lock();
+            patrol.mark_visited(start);
+            select_patrol_goal(strategy, start, &patrol.visited)
+        }) else {
+            let mut patrol = self.patrol.lock();
+            patrol.status = patrol_status(PatrolStatusUpdate {
+                ok: false,
+                active: false,
+                status: "no-goal",
+                message: "patrol could not find a safe reachable goal",
+                strategy: Some(strategy),
+                speed_mode,
+                goal: None,
+                path: VisualizationPath {
+                    ts_ms,
+                    frame_id: "map".to_string(),
+                    poses: Vec::new(),
+                },
+            });
+            return Ok(patrol.status_with_visited());
+        };
+
+        let goal = planner_goal_for_cell(goal_cell, speed_mode);
+        let planner = self.set_planner_goal(goal.clone())?;
+        let mut patrol = self.patrol.lock();
+        if planner.ok && planner.active {
+            patrol.status = patrol_status(PatrolStatusUpdate {
+                ok: true,
+                active: true,
+                status: "active",
+                message: "patrol goal accepted",
+                strategy: Some(strategy),
+                speed_mode,
+                goal: Some(goal),
+                path: planner.path,
+            });
+        } else {
+            patrol.status = patrol_status(PatrolStatusUpdate {
+                ok: false,
+                active: false,
+                status: &planner.status,
+                message: &planner.message,
+                strategy: Some(strategy),
+                speed_mode,
+                goal: Some(goal),
+                path: planner.path,
+            });
+        }
+        Ok(patrol.status_with_visited())
+    }
+
+    pub fn stop_patrol(&self) -> Result<PatrolStatus> {
+        self.cancel_patrol_state("stopped", "patrol stopped");
+        let planner = self.cancel_planner_goal()?;
+        let mut patrol = self.patrol.lock();
+        patrol.status.path = planner.path;
+        Ok(patrol.status_with_visited())
+    }
+
+    #[cfg(test)]
+    fn mark_all_patrol_cells_visited_for_test(&self) {
+        let mut patrol = self.patrol.lock();
+        for index in 0..PLANNER_GRID_CELLS {
+            let cell = PlannerCell {
+                col: index % PLANNER_GRID_WIDTH,
+                row: index / PLANNER_GRID_WIDTH,
+            };
+            if patrol_cell_clear(cell) {
+                patrol.visited[index] = true;
+            }
+        }
+        patrol.status.visited_cells = visited_cell_labels(&patrol.visited);
     }
 
     pub fn agent_model_response(&self, text: &str) -> Result<Option<AgentModelResponse>> {
@@ -664,6 +791,7 @@ impl Harness {
                 max_speed: telemetry.max_speed,
                 estop: telemetry.estop,
             },
+            autonomy: self.autonomy_overlay(telemetry.ts_ms),
         }
     }
 
@@ -754,6 +882,7 @@ impl Harness {
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
+        self.cancel_patrol_state("stopped", "patrol movement stopped");
         self.cancel_planner_state("stopped", "planner movement stopped");
         self.stop_without_planner_cancel()
     }
@@ -777,6 +906,7 @@ impl Harness {
     }
 
     pub fn estop(&self) -> Result<()> {
+        self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
         self.driver.stop()?;
         let mut command = self.command.lock();
@@ -873,6 +1003,111 @@ impl Harness {
         planner.active = false;
         planner.status = status.to_string();
         planner.message = message.to_string();
+    }
+
+    fn patrol_step(&self) {
+        let ts_ms = now_ms();
+        let current = self.current_sim_pose(ts_ms);
+        let Some(start) = planner_cell_for_xy(current.x_m, current.y_m) else {
+            self.cancel_patrol_state("no-goal", "patrol current pose is outside the grid");
+            return;
+        };
+
+        let planner = self.planner_status();
+        let next = {
+            let mut patrol = self.patrol.lock();
+            if !patrol.status.active {
+                return;
+            }
+            patrol.mark_visited(start);
+            patrol.status.path = planner.path.clone();
+            patrol.status.goal = planner.goal.clone();
+
+            if planner.active {
+                return;
+            }
+
+            if matches!(planner.status.as_str(), "limited" | "stopped" | "estop") {
+                patrol.status.ok = false;
+                patrol.status.active = false;
+                patrol.status.status = planner.status;
+                patrol.status.message = "patrol stopped by planner safety state".to_string();
+                return;
+            }
+
+            let strategy = patrol.status.strategy.unwrap_or_default();
+            let speed_mode = patrol.status.speed_mode;
+            let Some(goal_cell) = select_patrol_goal(strategy, start, &patrol.visited) else {
+                patrol.status.ok = false;
+                patrol.status.active = false;
+                patrol.status.status = "no-goal".to_string();
+                patrol.status.message = "patrol could not find a safe reachable goal".to_string();
+                patrol.status.goal = None;
+                patrol.status.path = VisualizationPath {
+                    ts_ms,
+                    frame_id: "map".to_string(),
+                    poses: Vec::new(),
+                };
+                return;
+            };
+            (
+                planner_goal_for_cell(goal_cell, speed_mode),
+                strategy,
+                speed_mode,
+            )
+        };
+
+        let (goal, strategy, speed_mode) = next;
+        let planner = match self.set_planner_goal(goal.clone()) {
+            Ok(planner) => planner,
+            Err(err) => {
+                let mut patrol = self.patrol.lock();
+                patrol.status.ok = false;
+                patrol.status.active = false;
+                patrol.status.status = "no-goal".to_string();
+                patrol.status.message = format!("patrol planner failed: {err}");
+                return;
+            }
+        };
+        let mut patrol = self.patrol.lock();
+        patrol.status = patrol_status(PatrolStatusUpdate {
+            ok: planner.ok,
+            active: planner.active,
+            status: &planner.status,
+            message: &planner.message,
+            strategy: Some(strategy),
+            speed_mode,
+            goal: Some(goal),
+            path: planner.path,
+        });
+    }
+
+    fn cancel_patrol_state(&self, status: &str, message: &str) {
+        let mut patrol = self.patrol.lock();
+        if !patrol.status.active && patrol.status.goal.is_none() {
+            return;
+        }
+        patrol.status.ok = matches!(status, "stopped" | "cancelled" | "reached" | "idle");
+        patrol.status.active = false;
+        patrol.status.status = status.to_string();
+        patrol.status.message = message.to_string();
+    }
+
+    fn autonomy_overlay(&self, ts_ms: u128) -> crate::types::AutonomyOverlay {
+        let patrol = self.patrol_status();
+        crate::types::AutonomyOverlay {
+            ts_ms,
+            mode: if patrol.active {
+                "patrol".to_string()
+            } else {
+                "idle".to_string()
+            },
+            active: patrol.active,
+            status: patrol.status,
+            strategy: patrol.strategy,
+            goal: patrol.goal,
+            visited_cells: patrol.visited_cells,
+        }
     }
 
     pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
@@ -978,6 +1213,17 @@ impl Harness {
             loop {
                 interval.tick().await;
                 harness.planner_step();
+            }
+        });
+    }
+
+    fn spawn_patrol_loop(&self) {
+        let harness = self.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(150));
+            loop {
+                interval.tick().await;
+                harness.patrol_step();
             }
         });
     }
@@ -1210,6 +1456,114 @@ fn planner_drive_command(current: &Pose2d, next: &Pose2d) -> (f64, f64) {
 
 fn distance2d(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
+}
+
+struct PatrolStatusUpdate<'a> {
+    ok: bool,
+    active: bool,
+    status: &'a str,
+    message: &'a str,
+    strategy: Option<PatrolStrategy>,
+    speed_mode: SpeedMode,
+    goal: Option<PlannerGoal>,
+    path: VisualizationPath,
+}
+
+fn patrol_status(update: PatrolStatusUpdate<'_>) -> PatrolStatus {
+    PatrolStatus {
+        ok: update.ok,
+        active: update.active,
+        status: update.status.to_string(),
+        message: update.message.to_string(),
+        strategy: update.strategy,
+        speed_mode: update.speed_mode,
+        goal: update.goal,
+        path: update.path,
+        visited_cells: Vec::new(),
+    }
+}
+
+fn planner_goal_for_cell(cell: PlannerCell, speed_mode: SpeedMode) -> PlannerGoal {
+    let pose = planner_pose_for_cell(cell, now_ms());
+    PlannerGoal {
+        frame_id: "map".to_string(),
+        x_m: pose.x_m,
+        y_m: pose.y_m,
+        tolerance_m: 0.1,
+        speed_mode,
+    }
+}
+
+fn select_patrol_goal(
+    strategy: PatrolStrategy,
+    start: PlannerCell,
+    visited: &[bool; PLANNER_GRID_CELLS],
+) -> Option<PlannerCell> {
+    let mut candidates = patrol_goal_candidates(start, visited);
+    match strategy {
+        PatrolStrategy::Coverage => candidates.into_iter().next(),
+        PatrolStrategy::Frontier => candidates.into_iter().find(|cell| {
+            planner_neighbors(*cell)
+                .iter()
+                .any(|near| visited[near.index()])
+        }),
+        PatrolStrategy::Random => {
+            if candidates.is_empty() {
+                None
+            } else {
+                let seed = visited
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, seen)| seen.then_some(index + 1))
+                    .sum::<usize>()
+                    + start.index();
+                let index = seed % candidates.len();
+                Some(candidates.swap_remove(index))
+            }
+        }
+    }
+}
+
+fn patrol_goal_candidates(
+    start: PlannerCell,
+    visited: &[bool; PLANNER_GRID_CELLS],
+) -> Vec<PlannerCell> {
+    let mut cells = Vec::new();
+    for row in 0..PLANNER_GRID_HEIGHT {
+        for col in 0..PLANNER_GRID_WIDTH {
+            let cell = PlannerCell { col, row };
+            if cell == start || visited[cell.index()] || !patrol_cell_clear(cell) {
+                continue;
+            }
+            if planner_route(start, cell).is_some() {
+                cells.push(cell);
+            }
+        }
+    }
+    cells
+}
+
+fn patrol_cell_clear(cell: PlannerCell) -> bool {
+    !planner_cell_blocked(cell)
+}
+
+fn visited_cell_labels(visited: &[bool; PLANNER_GRID_CELLS]) -> Vec<String> {
+    visited
+        .iter()
+        .enumerate()
+        .filter(|(_, seen)| **seen)
+        .map(|(index, _)| {
+            let cell = PlannerCell {
+                col: index % PLANNER_GRID_WIDTH,
+                row: index / PLANNER_GRID_WIDTH,
+            };
+            planner_cell_label(cell)
+        })
+        .collect()
+}
+
+fn planner_cell_label(cell: PlannerCell) -> String {
+    format!("{},{}", cell.col, cell.row)
 }
 
 fn current_resource_sample() -> ResourceSample {
@@ -1546,6 +1900,94 @@ mod tests {
         assert!(telemetry.soft_odometry_limited);
         assert_eq!(telemetry.left_cmd, 0.0);
         assert_eq!(telemetry.right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn patrol_strategy_selection_sets_safe_goals() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        let coverage = harness
+            .start_patrol(PatrolStrategy::Coverage, SpeedMode::Low)
+            .unwrap();
+        assert!(coverage.ok);
+        assert!(coverage.active);
+        assert_eq!(coverage.strategy, Some(PatrolStrategy::Coverage));
+        assert_eq!(coverage.visited_cells, vec!["2,2".to_string()]);
+        assert_eq!(
+            coverage.goal.as_ref().map(|goal| (goal.x_m, goal.y_m)),
+            Some((-0.375, -0.375))
+        );
+        assert!(coverage.path.poses.len() >= 2);
+
+        harness.stop_patrol().unwrap();
+
+        let frontier = harness
+            .start_patrol(PatrolStrategy::Frontier, SpeedMode::Low)
+            .unwrap();
+        assert!(frontier.ok);
+        assert!(frontier.active);
+        assert_eq!(frontier.strategy, Some(PatrolStrategy::Frontier));
+        assert_eq!(
+            frontier.goal.as_ref().map(|goal| (goal.x_m, goal.y_m)),
+            Some((0.125, -0.125))
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_patrol_cancels_planner_motion() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let status = harness
+            .start_patrol(PatrolStrategy::Coverage, SpeedMode::Low)
+            .unwrap();
+        assert!(status.active);
+        assert!(harness.planner_status().active);
+        assert!(harness.telemetry().left_cmd != 0.0 || harness.telemetry().right_cmd != 0.0);
+
+        let status = harness.stop_patrol().unwrap();
+
+        assert!(!status.active);
+        assert_eq!(status.status, "stopped");
+        assert!(!harness.planner_status().active);
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
+        assert_eq!(harness.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn patrol_reports_no_goal_when_all_clear_cells_are_visited() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness.mark_all_patrol_cells_visited_for_test();
+
+        let status = harness
+            .start_patrol(PatrolStrategy::Coverage, SpeedMode::Low)
+            .unwrap();
+
+        assert!(!status.ok);
+        assert!(!status.active);
+        assert_eq!(status.status, "no-goal");
+        assert!(status.goal.is_none());
+        assert!(status.path.poses.is_empty());
+    }
+
+    #[tokio::test]
+    async fn telemetry_frame_includes_patrol_overlay() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness
+            .start_patrol(PatrolStrategy::Random, SpeedMode::Low)
+            .unwrap();
+
+        let frame = harness.telemetry_stream_frame();
+
+        assert!(frame.visualization.autonomy.active);
+        assert_eq!(frame.visualization.autonomy.mode, "patrol");
+        assert_eq!(
+            frame.visualization.autonomy.strategy,
+            Some(PatrolStrategy::Random)
+        );
+        assert!(frame.visualization.autonomy.goal.is_some());
+        assert_eq!(
+            frame.visualization.autonomy.visited_cells,
+            vec!["2,2".to_string()]
+        );
     }
 
     #[tokio::test]
