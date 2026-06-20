@@ -223,7 +223,7 @@ properties:
   tools:
     type: string
     required: true
-    description: health, capabilities, modules, observe, invoke_capability, stop, estop, capture
+    description: health, capabilities, modules, observe, invoke_capability, stop, estop, capture; invoke_capability routes planner, patrol, and memory verbs
   transport:
     type: enum
     required: true
@@ -431,12 +431,28 @@ properties:
   spatial_memory:
     type: boolean
     required: true
-    default: false
+    default: true
+  memory_capabilities:
+    type: string
+    required: true
+    description: memory_tag_location, memory_list, memory_query, memory_clear
   store:
     type: enum
     required: true
     values: [file_backed]
     default: file_backed
+  isolation:
+    type: string
+    required: true
+    description: state-dir memory files are isolated by profile, role, and run id
+  confidence:
+    type: string
+    required: true
+    description: entries carry confidence, effective_confidence, stale flag, and update timestamps
+  replay_demo:
+    type: string
+    required: true
+    description: examples/replay/sim-memory.jsonl supports deterministic memory demos
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```
@@ -742,7 +758,7 @@ properties:
   coverage:
     type: string
     required: true
-    description: stack-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
+    description: stack-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy, spatial-memory
   no_hardware:
     type: boolean
     required: true
@@ -953,6 +969,14 @@ required: true
 ```yaml
 relationship: CapabilityRegistry → Safety
 verb: enforces
+cardinality: 1:1
+required: true
+```
+
+### Relationship: CapabilityRegistry → Perception
+```yaml
+relationship: CapabilityRegistry → Perception
+verb: exposes
 cardinality: 1:1
 required: true
 ```

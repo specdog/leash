@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -24,6 +25,9 @@ use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
+    memory::{
+        default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
+    },
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
@@ -32,9 +36,9 @@ use crate::{
         CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, MapMetadata,
         OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
         PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
-        SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
-        Twist2d, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE,
-        OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        SafetyStreamState, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
+        TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE,
+        COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -48,6 +52,7 @@ const PLANNER_ORIGIN_X_M: f64 = -0.5;
 const PLANNER_ORIGIN_Y_M: f64 = -0.5;
 const PLANNER_BLOCKED_CELLS: &[(usize, usize)] = &[(1, 1)];
 const PLANNER_STEP_CMD: f64 = 0.2;
+static HARNESS_INSTANCE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 struct PatrolState {
@@ -244,6 +249,7 @@ pub struct Harness {
     dashboard_events: Arc<Mutex<VecDeque<String>>>,
     planner: Arc<Mutex<PlannerStatus>>,
     patrol: Arc<Mutex<PatrolState>>,
+    spatial_memory: Arc<SpatialMemoryStore>,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -252,8 +258,21 @@ pub struct Harness {
 
 impl Harness {
     pub fn new(config: HarnessConfig) -> Result<Self> {
+        Self::new_inner(config, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_memory_path(config: HarnessConfig, path: PathBuf) -> Result<Self> {
+        Self::new_inner(config, Some(path))
+    }
+
+    fn new_inner(config: HarnessConfig, memory_path: Option<PathBuf>) -> Result<Self> {
         config.validate()?;
         let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
+        let instance_id = HARNESS_INSTANCE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+        let memory_path =
+            memory_path.unwrap_or_else(|| default_spatial_memory_path(&config, instance_id));
+        let spatial_memory = Arc::new(SpatialMemoryStore::open(memory_path)?);
 
         let driver: Arc<dyn RobotDriver> = match config.profile {
             Profile::Sim => Arc::new(SimDriver),
@@ -295,6 +314,7 @@ impl Harness {
             dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
             patrol: Arc::new(Mutex::new(PatrolState::default())),
+            spatial_memory,
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
             coordinator: Arc::new(RwLock::new(coordinator)),
@@ -454,6 +474,22 @@ impl Harness {
 
     pub fn patrol_status(&self) -> PatrolStatus {
         self.patrol.lock().status_with_visited()
+    }
+
+    pub fn tag_spatial_memory(&self, tag: SpatialMemoryTag) -> Result<SpatialMemoryStatus> {
+        self.spatial_memory.tag(tag)
+    }
+
+    pub fn spatial_memory(&self) -> SpatialMemoryStatus {
+        self.spatial_memory.list()
+    }
+
+    pub fn query_spatial_memory(&self, query: SpatialMemoryQuery) -> Result<SpatialMemoryStatus> {
+        self.spatial_memory.query(query)
+    }
+
+    pub fn clear_spatial_memory(&self) -> Result<SpatialMemoryStatus> {
+        self.spatial_memory.clear()
     }
 
     pub fn start_patrol(

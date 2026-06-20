@@ -4,8 +4,9 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     config::PolicyMode,
+    memory::{SpatialMemoryQuery, SpatialMemoryTag},
     runtime::Harness,
-    types::{PatrolStrategy, PlannerGoal, SpeedMode},
+    types::{PatrolStrategy, PlannerGoal, SpatialMemoryKind, SpeedMode},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -275,6 +276,49 @@ impl CapabilityRegistry {
                 ensure_fields(&args, &[])?;
                 serde_json::to_value(self.harness.patrol_status()).map_err(Into::into)
             }
+            "memory_tag_location" => {
+                ensure_fields(
+                    &args,
+                    &["name", "kind", "frame_id", "x_m", "y_m", "confidence"],
+                )?;
+                let tag = SpatialMemoryTag {
+                    name: required_string(&args, "name")?,
+                    kind: optional_spatial_memory_kind(&args, "kind")?.unwrap_or_default(),
+                    frame_id: optional_string(&args, "frame_id")?
+                        .unwrap_or_else(|| "map".to_string()),
+                    x_m: required_f64(&args, "x_m")?,
+                    y_m: required_f64(&args, "y_m")?,
+                    confidence: optional_f64(&args, "confidence")?.unwrap_or(1.0),
+                };
+                serde_json::to_value(self.harness.tag_spatial_memory(tag)?).map_err(Into::into)
+            }
+            "memory_list" => {
+                ensure_fields(&args, &["include_stale"])?;
+                let include_stale = optional_bool(&args, "include_stale")?.unwrap_or(true);
+                serde_json::to_value(self.harness.query_spatial_memory(SpatialMemoryQuery {
+                    include_stale,
+                    ..SpatialMemoryQuery::default()
+                })?)
+                .map_err(Into::into)
+            }
+            "memory_query" => {
+                ensure_fields(&args, &["query", "kind", "min_confidence", "include_stale"])?;
+                let query = optional_string(&args, "query")?;
+                let kind = optional_spatial_memory_kind(&args, "kind")?;
+                let min_confidence = optional_f64(&args, "min_confidence")?;
+                let include_stale = optional_bool(&args, "include_stale")?.unwrap_or(true);
+                serde_json::to_value(self.harness.query_spatial_memory(SpatialMemoryQuery {
+                    query,
+                    kind,
+                    min_confidence,
+                    include_stale,
+                })?)
+                .map_err(Into::into)
+            }
+            "memory_clear" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.clear_spatial_memory()?).map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -524,6 +568,46 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             object_schema(&[]),
             "PatrolStatus",
         ),
+        descriptor(
+            "memory_tag_location",
+            "Tag or update a named map-frame location or observed object in the local spatial memory store",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("name", "string", true),
+                ("kind", "SpatialMemoryKind", false),
+                ("frame_id", "string", false),
+                ("x_m", "number", true),
+                ("y_m", "number", true),
+                ("confidence", "number", false),
+            ]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_list",
+            "List local spatial memory entries for this run/profile store",
+            SafetyClass::ObserveOnly,
+            object_schema(&[("include_stale", "boolean", false)]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_query",
+            "Query local spatial memory entries by name, kind, and effective confidence",
+            SafetyClass::ObserveOnly,
+            object_schema(&[
+                ("query", "string", false),
+                ("kind", "SpatialMemoryKind", false),
+                ("min_confidence", "number", false),
+                ("include_stale", "boolean", false),
+            ]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_clear",
+            "Clear local spatial memory for this run/profile store",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "SpatialMemoryStatus",
+        ),
     ]
 }
 
@@ -571,6 +655,18 @@ fn canonical_name(name: &str) -> &str {
         "patrol.start" | "patrol/start" | "patrol_start" => "start_patrol",
         "patrol.stop" | "patrol/stop" | "patrol_stop" => "stop_patrol",
         "patrol.status" | "patrol/status" => "patrol_status",
+        "memory.tag"
+        | "memory/tag"
+        | "memory.tag_location"
+        | "memory/tag_location"
+        | "memory.tag-location"
+        | "memory/tag-location"
+        | "memory_tag"
+        | "tag_location"
+        | "tag-location" => "memory_tag_location",
+        "memory.list" | "memory/list" | "list_memory" | "list-memory" => "memory_list",
+        "memory.query" | "memory/query" | "query_memory" | "query-memory" => "memory_query",
+        "memory.clear" | "memory/clear" | "clear_memory" | "clear-memory" => "memory_clear",
         other => other,
     }
 }
@@ -608,6 +704,14 @@ fn optional_bool_removed(args: &mut Map<String, Value>, key: &str) -> Result<Opt
     match args.remove(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Bool(value)) => Ok(Some(value)),
+        Some(_) => bail!("{key} must be a boolean"),
+    }
+}
+
+fn optional_bool(args: &Map<String, Value>, key: &str) -> Result<Option<bool>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
         Some(_) => bail!("{key} must be a boolean"),
     }
 }
@@ -672,6 +776,18 @@ fn optional_patrol_strategy(
         Some(value) => serde_json::from_value(value.clone())
             .map(Some)
             .map_err(|err| anyhow!("{key} must be a valid patrol strategy: {err}")),
+    }
+}
+
+fn optional_spatial_memory_kind(
+    args: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<SpatialMemoryKind>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|err| anyhow!("{key} must be a valid spatial memory kind: {err}")),
     }
 }
 
@@ -761,6 +877,71 @@ mod tests {
         assert_eq!(stopped["active"], false);
         assert_eq!(stopped["status"], "stopped");
         assert_eq!(harness.telemetry().left_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn memory_capabilities_tag_query_list_and_clear() {
+        let path = std::env::temp_dir().join(format!(
+            "leash-memory-capability-{}-{}.json",
+            std::process::id(),
+            crate::runtime::now_ms()
+        ));
+        let harness =
+            Harness::new_with_memory_path(HarnessConfig::default(), path.clone()).unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let tagged = registry
+            .invoke_value_with_origin(
+                "tag_location",
+                json!({
+                    "name": "dock",
+                    "frame_id": "map",
+                    "x_m": 0.25,
+                    "y_m": 0.0,
+                    "confidence": 0.95
+                }),
+                InvocationOrigin::Mcp,
+            )
+            .unwrap();
+        assert_eq!(tagged["ok"], true);
+        assert_eq!(tagged["count"], 1);
+        assert_eq!(tagged["entries"][0]["name"], "dock");
+        assert_eq!(tagged["entries"][0]["kind"], "location");
+        assert!(path.exists());
+
+        registry
+            .invoke_value(
+                "memory_tag_location",
+                json!({
+                    "name": "cone",
+                    "kind": "object",
+                    "frame_id": "map",
+                    "x_m": 0.4,
+                    "y_m": 0.5,
+                    "confidence": 0.8
+                }),
+            )
+            .unwrap();
+        let queried = registry
+            .invoke_value(
+                "query_memory",
+                json!({ "query": "co", "kind": "object", "min_confidence": 0.7 }),
+            )
+            .unwrap();
+        assert_eq!(queried["count"], 1);
+        assert_eq!(queried["entries"][0]["name"], "cone");
+
+        let listed = registry.invoke_value("memory_list", json!({})).unwrap();
+        assert_eq!(listed["count"], 2);
+        assert!(listed["store_path"]
+            .as_str()
+            .unwrap()
+            .ends_with(path.file_name().unwrap().to_str().unwrap()));
+
+        let cleared = registry.invoke_value("memory_clear", json!({})).unwrap();
+        assert_eq!(cleared["count"], 0);
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

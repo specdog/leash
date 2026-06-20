@@ -4,6 +4,7 @@ set -euo pipefail
 port="${LEASH_MCP_HTTP_SMOKE_PORT:-19990}"
 base="http://127.0.0.1:$port"
 log_file="$(mktemp -t leash-mcp-http-smoke.XXXXXX.log)"
+state_dir="$(mktemp -d -t leash-mcp-http-smoke-state.XXXXXX)"
 timeout_secs="${LEASH_SMOKE_TIMEOUT_SECS:-60}"
 
 cleanup() {
@@ -12,10 +13,11 @@ cleanup() {
     wait "$server_pid" 2>/dev/null || true
   fi
   rm -f "$log_file"
+  rm -rf "$state_dir"
 }
 trap cleanup EXIT
 
-cargo run --quiet -- serve mcp-http --profile sim --listen "127.0.0.1:$port" >"$log_file" 2>&1 &
+LEASH_STATE_DIR="$state_dir" cargo run --quiet -- serve mcp-http --profile sim --listen "127.0.0.1:$port" >"$log_file" 2>&1 &
 server_pid=$!
 
 ready=false
@@ -132,6 +134,38 @@ if (!payload.result || payload.result.active !== false) throw new Error("patrol 
 if (payload.result.status !== "stopped") throw new Error(`unexpected patrol stop status: ${payload.result.status}`);'
 }
 
+assert_memory_tag_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory tag wrapper was invalid");
+if (!payload.result || payload.result.ok !== true) throw new Error("memory tag result ok was not true");
+if (payload.result.count !== 1) throw new Error(`unexpected memory count: ${payload.result.count}`);
+if (!String(payload.result.store_path).includes("/memory/sim/robot/")) throw new Error(`unexpected memory path: ${payload.result.store_path}`);
+const entry = payload.result.entries[0];
+if (!entry || entry.name !== "dock" || entry.kind !== "location") throw new Error("memory tag entry was wrong");
+if (entry.frame_id !== "map" || entry.x_m !== 0.25 || entry.y_m !== 0) throw new Error("memory tag pose was wrong");
+if (entry.effective_confidence !== 0.95 || entry.stale !== false) throw new Error("memory confidence was wrong");'
+}
+
+assert_memory_list_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory list wrapper was invalid");
+if (!payload.result || payload.result.count !== 1) throw new Error("memory list did not include the tagged entry");
+if (payload.result.entries[0].name !== "dock") throw new Error("memory list returned the wrong entry");'
+}
+
+assert_memory_query_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory query wrapper was invalid");
+if (!payload.result || payload.result.count !== 1) throw new Error("memory query did not recall dock");
+if (payload.result.entries[0].effective_confidence < 0.9) throw new Error("memory query confidence was too low");'
+}
+
+assert_memory_clear_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory clear wrapper was invalid");
+if (!payload.result || payload.result.count !== 0 || payload.result.entries.length !== 0) throw new Error("memory clear did not empty the store");'
+}
+
 assert_module_map() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true) throw new Error("module map ok was not true");
@@ -176,5 +210,17 @@ curl -fsS -X POST "$base/mcp/call" \
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"stop_patrol"}}' | assert_patrol_stop_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"memory_tag_location","name":"dock","frame_id":"map","x_m":0.25,"y_m":0.0,"confidence":0.95}}' | assert_memory_tag_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"memory_list"}}' | assert_memory_list_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"memory_query","query":"doc","min_confidence":0.9}}' | assert_memory_query_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"memory_clear"}}' | assert_memory_clear_call
 
 echo "mcp-http smoke ok: $base"
