@@ -16,6 +16,7 @@ pub enum Profile {
     Sim,
     Replay,
     WaveshareUgv,
+    MavlinkDrone,
 }
 
 impl Profile {
@@ -24,11 +25,12 @@ impl Profile {
             Self::Sim => "sim",
             Self::Replay => "replay",
             Self::WaveshareUgv => "waveshare-ugv",
+            Self::MavlinkDrone => "mavlink-drone",
         }
     }
 
     pub fn is_physical(self) -> bool {
-        matches!(self, Self::WaveshareUgv)
+        matches!(self, Self::WaveshareUgv | Self::MavlinkDrone)
     }
 }
 
@@ -113,6 +115,7 @@ pub struct HarnessConfig {
     pub serial_baud: u32,
     pub drive_invert: bool,
     pub drive_swap: bool,
+    pub mavlink_endpoint: String,
     pub accelerator: AcceleratorBackend,
     pub require_accelerator: bool,
     pub resource_sampling: bool,
@@ -157,6 +160,8 @@ pub struct PartialHarnessConfig {
     pub drive_invert: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drive_swap: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mavlink_endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accelerator: Option<AcceleratorBackend>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,6 +256,7 @@ struct ConfigBuilder {
     serial_baud: Resolved<u32>,
     drive_invert: Resolved<bool>,
     drive_swap: Resolved<bool>,
+    mavlink_endpoint: Resolved<String>,
     accelerator: Resolved<AcceleratorBackend>,
     require_accelerator: Resolved<bool>,
     resource_sampling: Resolved<bool>,
@@ -280,6 +286,7 @@ impl Default for HarnessConfig {
             serial_baud: 115_200,
             drive_invert: false,
             drive_swap: false,
+            mavlink_endpoint: "udp://127.0.0.1:14550".to_string(),
             accelerator: AcceleratorBackend::None,
             require_accelerator: false,
             resource_sampling: false,
@@ -312,6 +319,11 @@ impl HarnessConfig {
         }
         if self.replay_source.is_some() && self.profile != Profile::Replay {
             anyhow::bail!("replay_source requires profile 'replay'");
+        }
+        if self.profile == Profile::MavlinkDrone && self.mavlink_endpoint.trim().is_empty() {
+            anyhow::bail!(
+                "profile 'mavlink-drone' requires LEASH_MAVLINK_ENDPOINT or mavlink_endpoint"
+            );
         }
         if !self.replay_speed.is_finite() || self.replay_speed <= 0.0 {
             anyhow::bail!("replay_speed must be a finite positive number");
@@ -402,6 +414,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         serial_baud: parse_env(env, "LEASH_SERIAL_BAUD", parse_u32)?,
         drive_invert: parse_env(env, "LEASH_DRIVE_INVERT", parse_bool)?,
         drive_swap: parse_env(env, "LEASH_DRIVE_SWAP", parse_bool)?,
+        mavlink_endpoint: env.get("LEASH_MAVLINK_ENDPOINT").cloned(),
         accelerator: parse_env(env, "LEASH_ACCELERATOR", parse_accelerator)?,
         require_accelerator: parse_env(env, "LEASH_REQUIRE_ACCELERATOR", parse_bool)?,
         resource_sampling: parse_env(env, "LEASH_RESOURCE_SAMPLING", parse_bool)?,
@@ -429,7 +442,8 @@ fn parse_profile(value: &str) -> anyhow::Result<Profile> {
         "sim" => Ok(Profile::Sim),
         "replay" => Ok(Profile::Replay),
         "waveshare-ugv" => Ok(Profile::WaveshareUgv),
-        _ => anyhow::bail!("expected sim, replay, or waveshare-ugv"),
+        "mavlink-drone" => Ok(Profile::MavlinkDrone),
+        _ => anyhow::bail!("expected sim, replay, waveshare-ugv, or mavlink-drone"),
     }
 }
 
@@ -513,6 +527,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "serial_baud" => "LEASH_SERIAL_BAUD",
         "drive_invert" => "LEASH_DRIVE_INVERT",
         "drive_swap" => "LEASH_DRIVE_SWAP",
+        "mavlink_endpoint" => "LEASH_MAVLINK_ENDPOINT",
         "accelerator" => "LEASH_ACCELERATOR",
         "require_accelerator" => "LEASH_REQUIRE_ACCELERATOR",
         "resource_sampling" => "LEASH_RESOURCE_SAMPLING",
@@ -544,6 +559,7 @@ impl Default for ConfigBuilder {
             serial_baud: Resolved::defaulted(config.serial_baud),
             drive_invert: Resolved::defaulted(config.drive_invert),
             drive_swap: Resolved::defaulted(config.drive_swap),
+            mavlink_endpoint: Resolved::defaulted(config.mavlink_endpoint),
             accelerator: Resolved::defaulted(config.accelerator),
             require_accelerator: Resolved::defaulted(config.require_accelerator),
             resource_sampling: Resolved::defaulted(config.resource_sampling),
@@ -623,6 +639,9 @@ impl ConfigBuilder {
         if let Some(value) = partial.drive_swap {
             self.drive_swap.set(value, source("drive_swap"));
         }
+        if let Some(value) = partial.mavlink_endpoint {
+            self.mavlink_endpoint.set(value, source("mavlink_endpoint"));
+        }
         if let Some(value) = partial.accelerator {
             self.accelerator.set(value, source("accelerator"));
         }
@@ -666,6 +685,12 @@ impl ConfigBuilder {
             self.allow_untokened_drive
                 .set(false, "stack:waveshare-ugv".to_string());
         }
+        if self.profile.value == Profile::MavlinkDrone
+            && self.allow_untokened_drive.source == "default"
+        {
+            self.allow_untokened_drive
+                .set(false, "stack:mavlink-drone".to_string());
+        }
     }
 
     fn finish(self) -> ResolvedHarnessConfig {
@@ -684,6 +709,7 @@ impl ConfigBuilder {
             serial_baud: self.serial_baud.value,
             drive_invert: self.drive_invert.value,
             drive_swap: self.drive_swap.value,
+            mavlink_endpoint: self.mavlink_endpoint.value,
             accelerator: self.accelerator.value,
             require_accelerator: self.require_accelerator.value,
             resource_sampling: self.resource_sampling.value,
@@ -779,6 +805,12 @@ impl ConfigBuilder {
                 json!(config.drive_swap),
                 self.drive_swap.source,
                 physical.then_some("physical-drive-map"),
+            ),
+            field(
+                "mavlink_endpoint",
+                json!(config.mavlink_endpoint),
+                self.mavlink_endpoint.source,
+                (config.profile == Profile::MavlinkDrone).then_some("mavlink-network"),
             ),
             field(
                 "accelerator",

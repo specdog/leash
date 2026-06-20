@@ -328,6 +328,7 @@ required gates without changing core command safety policy.
 | replay | `simulation` | `beta` | none | none |
 | bridge compatibility | `compatibility` | `beta` | `sim`, `bridge-compat` | none |
 | Waveshare UGV | `mobile-base` | `alpha` | `waveshare-ugv` | `physical-actuation`, `policy-token-or-approval` |
+| MAVLink drone | `drone` | `experimental` | `mavlink-drone` | `physical-actuation`, `policy-token-or-approval` |
 
 Maturity levels are:
 
@@ -352,7 +353,34 @@ token gate their commands require.
 | `http` | HTTP server + WebSocket | ✓ |
 | `mcp` | MCP stdio server | ✓ |
 | `waveshare-ugv` | Waveshare UGV physical adapter | opt-in |
+| `mavlink-drone` | MAVLink drone adapter skeleton, sim/replay proof, and gated physical profile | opt-in |
 | `bridge-compat` | Legacy robot bridge compatibility | opt-in |
+
+## MAVLink Drone Skeleton
+
+The `mavlink-drone` feature adds a no-hardware integration boundary for future
+flight adapters. It exposes drone capabilities for arm, disarm, takeoff, land,
+move velocity, fly-to, observe, and stop without pulling in a flight stack or
+opening a MAVLink connection by default.
+
+```bash
+cargo run --features mavlink-drone -- list
+cargo run --features mavlink-drone -- run mavlink-drone-sim
+cargo run --features mavlink-drone -- run mavlink-drone-replay --replay-source examples/replay/sim-basic.jsonl
+```
+
+The physical stack is intentionally gated and needs both explicit actuation and
+network endpoint configuration before startup:
+
+```bash
+LEASH_ALLOW_PHYSICAL_ACTUATION=1 \
+LEASH_MAVLINK_ENDPOINT=udp://127.0.0.1:14550 \
+cargo run --features mavlink-drone -- run mavlink-drone-http --allow-physical-actuation
+```
+
+Flight capabilities remain policy-gated high-risk actions. The current physical
+profile is a skeleton and refuses real flight command execution until a concrete
+MAVLink adapter is wired behind this boundary.
 
 ## Smoke Tests
 

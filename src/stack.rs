@@ -184,12 +184,24 @@ impl Stack {
 }
 
 pub fn built_in_stacks() -> Vec<Stack> {
-    vec![
+    let stacks = vec![
         sim_http_stack(),
         sim_mcp_stack(),
         bridge_compat_http_stack(),
         waveshare_ugv_http_stack(),
-    ]
+    ];
+    #[cfg(feature = "mavlink-drone")]
+    {
+        let mut stacks = stacks;
+        stacks.push(mavlink_drone_sim_stack());
+        stacks.push(mavlink_drone_replay_stack());
+        stacks.push(mavlink_drone_http_stack());
+        stacks
+    }
+    #[cfg(not(feature = "mavlink-drone"))]
+    {
+        stacks
+    }
 }
 
 pub fn find_stack(name: &str) -> Option<Stack> {
@@ -216,6 +228,7 @@ pub fn adapter_profile_for_profile(profile: Profile) -> AdapterProfile {
         Profile::Sim => simulation_adapter_profile(),
         Profile::Replay => replay_adapter_profile(),
         Profile::WaveshareUgv => waveshare_ugv_adapter_profile(),
+        Profile::MavlinkDrone => mavlink_drone_adapter_profile(),
     }
 }
 
@@ -302,6 +315,73 @@ fn waveshare_ugv_http_stack() -> Stack {
     }
 }
 
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_sim_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-sim".to_string(),
+        description: "No-hardware MAVLink drone adapter skeleton in simulation".to_string(),
+        profile: Profile::Sim,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("127.0.0.1:8010")),
+        },
+        required_features: strings(&["sim", "http", "mavlink-drone"]),
+        hardware_required: false,
+        adapter: mavlink_drone_sim_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("127.0.0.1:8010")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Sim),
+        command: "leash run mavlink-drone-sim".to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_replay_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-replay".to_string(),
+        description: "Fixture-backed MAVLink drone adapter skeleton for replay proof".to_string(),
+        profile: Profile::Replay,
+        transport: TransportBinding {
+            kind: StackTransport::Mcp,
+            listen: None,
+        },
+        required_features: strings(&["mcp", "mavlink-drone"]),
+        hardware_required: false,
+        adapter: mavlink_drone_replay_adapter_profile(),
+        config_overrides: PartialHarnessConfig::default(),
+        modules: module_refs(Profile::Replay),
+        command: "leash run mavlink-drone-replay --replay-source examples/replay/sim-basic.jsonl"
+            .to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_http_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-http".to_string(),
+        description: "Gated MAVLink drone HTTP runtime skeleton".to_string(),
+        profile: Profile::MavlinkDrone,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("0.0.0.0:8010")),
+        },
+        required_features: strings(&["http", "mavlink-drone"]),
+        hardware_required: true,
+        adapter: mavlink_drone_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("0.0.0.0:8010")),
+            mavlink_endpoint: Some("udp://127.0.0.1:14550".to_string()),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::MavlinkDrone),
+        command:
+            "LEASH_ALLOW_PHYSICAL_ACTUATION=1 LEASH_MAVLINK_ENDPOINT=udp://127.0.0.1:14550 leash run mavlink-drone-http --allow-physical-actuation"
+                .to_string(),
+    }
+}
+
 fn simulation_adapter_profile() -> AdapterProfile {
     AdapterProfile {
         category: AdapterCategory::Simulation,
@@ -356,11 +436,58 @@ fn waveshare_ugv_adapter_profile() -> AdapterProfile {
     }
 }
 
+fn mavlink_drone_capabilities() -> Vec<String> {
+    strings(&[
+        "drone_arm",
+        "drone_disarm",
+        "drone_takeoff",
+        "drone_land",
+        "drone_move_velocity",
+        "drone_fly_to",
+        "observe",
+        "stop",
+    ])
+}
+
+fn mavlink_drone_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Drone,
+        maturity: AdapterMaturity::Experimental,
+        capabilities: mavlink_drone_capabilities(),
+        feature_flags: strings(&["mavlink-drone"]),
+        required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
+        boundary: "feature-gated MAVLink adapter skeleton; network endpoint is configured but flight I/O is intentionally externalized".to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_sim_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Alpha,
+        required_gates: Vec::new(),
+        boundary: "simulated MAVLink drone capability surface; no flight hardware or network I/O"
+            .to_string(),
+        ..mavlink_drone_adapter_profile()
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_replay_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Beta,
+        required_gates: Vec::new(),
+        boundary: "replay-backed MAVLink drone capability surface; deterministic and non-physical"
+            .to_string(),
+        ..mavlink_drone_adapter_profile()
+    }
+}
+
 fn module_refs(profile: Profile) -> Vec<StackModule> {
     let driver = match profile {
         Profile::Sim => ("sim-driver", false),
         Profile::Replay => ("replay-driver", false),
         Profile::WaveshareUgv => ("waveshare-ugv-driver", true),
+        Profile::MavlinkDrone => ("mavlink-drone-driver", true),
     };
     vec![
         stack_module("harness-runtime", "runtime", true, false),
@@ -404,6 +531,16 @@ mod tests {
         assert!(stacks
             .iter()
             .any(|stack| stack.name == "waveshare-ugv-http"));
+        #[cfg(feature = "mavlink-drone")]
+        {
+            assert!(stacks.iter().any(|stack| stack.name == "mavlink-drone-sim"));
+            assert!(stacks
+                .iter()
+                .any(|stack| stack.name == "mavlink-drone-replay"));
+            assert!(stacks
+                .iter()
+                .any(|stack| stack.name == "mavlink-drone-http"));
+        }
 
         for stack in stacks {
             stack.validate().unwrap();
@@ -432,6 +569,32 @@ mod tests {
         let sim = adapter_profile_for_profile(Profile::Sim);
         assert_eq!(sim.category, AdapterCategory::Simulation);
         assert!(sim.required_gates.is_empty());
+
+        #[cfg(feature = "mavlink-drone")]
+        {
+            let drone = stacks
+                .iter()
+                .find(|stack| stack.name == "mavlink-drone-http")
+                .unwrap();
+            assert_eq!(drone.adapter.category, AdapterCategory::Drone);
+            assert_eq!(drone.adapter.maturity, AdapterMaturity::Experimental);
+            assert!(drone
+                .adapter
+                .capabilities
+                .contains(&"drone_arm".to_string()));
+            assert!(drone
+                .adapter
+                .required_gates
+                .contains(&"physical-actuation".to_string()));
+
+            let drone_sim = stacks
+                .iter()
+                .find(|stack| stack.name == "mavlink-drone-sim")
+                .unwrap();
+            assert_eq!(drone_sim.adapter.category, AdapterCategory::Drone);
+            assert!(!drone_sim.hardware_required);
+            assert!(drone_sim.adapter.required_gates.is_empty());
+        }
     }
 
     #[test]
@@ -456,5 +619,24 @@ mod tests {
 
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("physical profile 'waveshare-ugv' refuses to start"));
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[test]
+    fn mavlink_drone_stack_resolves_before_refusing_without_gate() {
+        let stack = resolve_stack("mavlink-drone-http").unwrap();
+        let config = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: Some(stack.profile),
+            stack_defaults: stack.config_overrides,
+            env: BTreeMap::new(),
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap()
+        .config;
+
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("physical profile 'mavlink-drone' refuses to start"));
+        assert_eq!(config.mavlink_endpoint, "udp://127.0.0.1:14550");
     }
 }
