@@ -780,6 +780,12 @@
       [
         "messages",
         "s!",
+        "frame_conventions",
+        "s!",
+        "occupancy_values",
+        "s!",
+        "costmap_values",
+        "s!",
         "planner",
         "b!",
         "patrol",
@@ -1122,11 +1128,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 8220,
-    "ct": 8220,
-    "dt": 2077,
-    "sv": 74.7,
-    "cs": 74.7,
-    "saved": 6143
+    "st": 8378,
+    "ct": 8378,
+    "dt": 2095,
+    "sv": 75,
+    "cs": 75,
+    "saved": 6283
   }
 }

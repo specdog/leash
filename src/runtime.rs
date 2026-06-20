@@ -29,10 +29,11 @@ use crate::{
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
-        CommandOverlay, CommandStreamState, DriveOutcome, Health, OccupancyGridFrame,
-        OdometryStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
-        SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
-        VisualizationFrame, VisualizationPath, VISUALIZATION_FRAME_VERSION,
+        CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, MapMetadata,
+        OccupancyGridFrame, OdometryStatus, PointCloudMetadata, Pose2d, RawFrameStatus,
+        ResourceSample, SafetyStreamState, SensorSnapshot, SpeedMode, TelemetryFrame,
+        TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE,
+        OCCUPANCY_FREE, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -483,22 +484,55 @@ impl Harness {
         let right_m = telemetry.odometry_right.unwrap_or_default();
         let x_m = round3((left_m + right_m) / 2.0);
         let yaw_rad = round3((right_m - left_m) * 0.25);
+        let map_origin = Pose2d {
+            ts_ms: telemetry.ts_ms,
+            frame_id: "map".to_string(),
+            x_m: -0.5,
+            y_m: -0.5,
+            yaw_rad: 0.0,
+        };
+        let map = MapMetadata {
+            ts_ms: telemetry.ts_ms,
+            map_id: "sim-local".to_string(),
+            frame_id: "map".to_string(),
+            width: 4,
+            height: 4,
+            resolution_m: 0.25,
+            origin: map_origin.clone(),
+            cell_order: "row-major".to_string(),
+        };
         let pose = Pose2d {
+            ts_ms: telemetry.ts_ms,
             frame_id: "map".to_string(),
             x_m,
             y_m: 0.0,
             yaw_rad,
+        };
+        let twist = Twist2d {
+            ts_ms: telemetry.ts_ms,
+            frame_id: "base_link".to_string(),
+            linear_x_mps: round3(
+                (telemetry.left_cmd + telemetry.right_cmd) * 0.5 * telemetry.max_speed,
+            ),
+            linear_y_mps: 0.0,
+            angular_z_radps: round3(
+                (telemetry.right_cmd - telemetry.left_cmd) * telemetry.max_speed,
+            ),
         };
         VisualizationFrame {
             version: VISUALIZATION_FRAME_VERSION.to_string(),
             ts_ms: telemetry.ts_ms,
             robot: telemetry.robot.clone(),
             profile: telemetry.profile.clone(),
+            map: map.clone(),
             pose: pose.clone(),
+            twist,
             path: VisualizationPath {
+                ts_ms: telemetry.ts_ms,
                 frame_id: "map".to_string(),
                 poses: vec![
                     Pose2d {
+                        ts_ms: telemetry.ts_ms,
                         frame_id: "map".to_string(),
                         x_m: 0.0,
                         y_m: 0.0,
@@ -508,19 +542,27 @@ impl Harness {
                 ],
             },
             occupancy_grid: OccupancyGridFrame {
+                ts_ms: telemetry.ts_ms,
                 frame_id: "map".to_string(),
                 width: 4,
                 height: 4,
                 resolution_m: 0.25,
-                origin: Pose2d {
-                    frame_id: "map".to_string(),
-                    x_m: -0.5,
-                    y_m: -0.5,
-                    yaw_rad: 0.0,
-                },
-                cells: vec![0; 16],
+                origin: map_origin.clone(),
+                metadata: map.clone(),
+                cells: vec![OCCUPANCY_FREE; 16],
+            },
+            costmap: CostmapFrame {
+                ts_ms: telemetry.ts_ms,
+                frame_id: "map".to_string(),
+                width: 4,
+                height: 4,
+                resolution_m: 0.25,
+                origin: map_origin,
+                metadata: map,
+                costs: vec![COST_FREE; 16],
             },
             point_cloud: PointCloudMetadata {
+                ts_ms: telemetry.ts_ms,
                 frame_id: "base_link".to_string(),
                 point_count: 0,
                 fields: vec!["x".to_string(), "y".to_string(), "z".to_string()],
@@ -528,6 +570,7 @@ impl Harness {
             },
             detections: Vec::new(),
             command: CommandOverlay {
+                ts_ms: telemetry.ts_ms,
                 left_cmd: telemetry.left_cmd,
                 right_cmd: telemetry.right_cmd,
                 speed_mode: telemetry.speed_mode,
@@ -1033,10 +1076,24 @@ mod tests {
         assert_eq!(frame.visualization.version, VISUALIZATION_FRAME_VERSION);
         assert_eq!(frame.visualization.robot, "robot");
         assert_eq!(frame.visualization.profile, "sim");
+        assert_eq!(frame.visualization.map.frame_id, "map");
+        assert_eq!(frame.visualization.map.map_id, "sim-local");
+        assert_eq!(frame.visualization.map.cell_order, "row-major");
         assert_eq!(frame.visualization.pose.frame_id, "map");
         assert!(frame.visualization.pose.x_m > 0.0);
+        assert_eq!(frame.visualization.twist.frame_id, "base_link");
+        assert!(frame.visualization.twist.linear_x_mps > 0.0);
         assert_eq!(frame.visualization.path.poses.len(), 2);
         assert_eq!(frame.visualization.occupancy_grid.cells.len(), 16);
+        assert_eq!(
+            frame.visualization.occupancy_grid.metadata,
+            frame.visualization.map
+        );
+        assert_eq!(frame.visualization.costmap.costs.len(), 16);
+        assert_eq!(
+            frame.visualization.costmap.metadata,
+            frame.visualization.map
+        );
         assert_eq!(frame.visualization.point_cloud.fields, ["x", "y", "z"]);
         assert_eq!(frame.visualization.command.left_cmd, 0.2);
         assert_eq!(frame.visualization.command.speed_mode, SpeedMode::Low);
