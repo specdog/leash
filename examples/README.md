@@ -6,7 +6,7 @@ This folder contains runnable examples and fixtures for the main operating modes
 flowchart TB
   examples["examples/"] --> bridge["bridge-compat/\nlegacy HTTP/WebSocket bridge shape"]
   examples --> local["local-llm-mcp/\nMCP client setup for local agents"]
-  examples --> replay["replay/\ndeterministic JSONL fixture"]
+  examples --> replay["replay/\ndeterministic JSONL fixtures"]
   examples --> ugv["waveshare-ugv/\nphysical Jetson/Waveshare adapter notes"]
 
   bridge --> http["Leash HTTP runtime"]
@@ -19,5 +19,5 @@ flowchart TB
 
 - `bridge-compat/`: route compatibility for clients that already speak the robot bridge API.
 - `local-llm-mcp/`: how to connect an MCP-capable local LLM client.
-- `replay/`: checked-in replay fixtures for deterministic observe paths.
+- `replay/`: checked-in replay fixtures for deterministic observe paths and memory demos.
 - `waveshare-ugv/`: physical adapter notes for the Jetson/Waveshare UGV.

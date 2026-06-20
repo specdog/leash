@@ -12,7 +12,7 @@ use crate::{
     capability::{InvocationOrigin, SafetyClass},
     module::ModuleState,
     runtime::Harness,
-    types::{PatrolStrategy, SpeedMode},
+    types::{PatrolStrategy, SpatialMemoryKind, SpeedMode},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +115,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, or patrol_status"
+        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear"
     )]
     pub async fn invoke_capability(
         &self,
@@ -201,6 +201,18 @@ pub struct InvokeCapabilityParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tolerance_m: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<SpatialMemoryKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<PatrolStrategy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
@@ -257,7 +269,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, or patrol_status",
+            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[
@@ -270,6 +282,12 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("x_m", "number", false),
                 ("y_m", "number", false),
                 ("tolerance_m", "number", false),
+                ("name", "string", false),
+                ("kind", "SpatialMemoryKind", false),
+                ("query", "string", false),
+                ("confidence", "number", false),
+                ("min_confidence", "number", false),
+                ("include_stale", "boolean", false),
                 ("strategy", "PatrolStrategy", false),
                 ("speed_mode", "SpeedMode", false),
                 ("approval", "boolean", false),

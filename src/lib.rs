@@ -13,6 +13,7 @@ pub mod daemon;
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod memory;
 pub mod module;
 pub mod replay;
 pub mod runtime;
@@ -26,6 +27,10 @@ pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
+pub use memory::{
+    default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
+    SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
+};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
 pub use replay::{
     scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,
@@ -44,8 +49,9 @@ pub use transport::{
 pub use types::{
     AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,
     DetectionFrame, Health, MapMetadata, OccupancyGridFrame, PatrolStatus, PatrolStrategy,
-    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry, SpeedMode,
-    TelemetryFrame, TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath,
-    COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
+    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry,
+    SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
+    TelemetryStreamFrame, Twist2d, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
+    COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
     VISUALIZATION_FRAME_VERSION,
 };
