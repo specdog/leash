@@ -21,6 +21,7 @@ leash serve mcp-http     # localhost MCP JSON control surface
 - **Stack catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <stack>`.
 - **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, health, and selected stream transport. Coordinator manages startup/shutdown order.
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
+- **Spatial memory primitives.** Agents can tag, query, list, and clear file-backed location/object memory isolated by run/profile.
 - **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
 
 ## Repository Map
@@ -36,6 +37,7 @@ flowchart TB
   root --> workflows[".github/workflows/\nCI and release automation"]
 
   src --> runtime["runtime.rs\nHarness state, drivers, telemetry"]
+  src --> memory["memory.rs\nFile-backed spatial memory store"]
   src --> capability["capability.rs\nSafety classes and invocation policy"]
   src --> http["http.rs\nHTTP, SSE, WebSocket routes"]
   src --> mcp["mcp.rs\nMCP tools and transport"]
@@ -50,6 +52,7 @@ flowchart LR
   agent["LLM agent\nMCP stdio or MCP HTTP"] --> surfaces
   surfaces --> registry["CapabilityRegistry\nschemas, safety class, policy"]
   registry --> harness["Harness runtime\ncommand state, modules, telemetry"]
+  harness --> memory["Spatial memory\nlocations, objects, confidence"]
   harness --> drivers{"Profile driver"}
   drivers --> sim["sim\nno hardware"]
   drivers --> replay["replay\nJSONL fixtures"]
@@ -97,7 +100,7 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 | `capabilities` | Endpoints, MCP tools, speed modes |
 | `modules` | Module graph and stream metadata |
 | `observe` | Latest telemetry frame (odometry, battery, sensors) |
-| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status |
+| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, memory_clear |
 | `stop` | Non-latching zero-speed motor stop |
 | `estop` | Latch emergency stop until reset |
 | `capture` | Deterministic frame capture |
@@ -116,6 +119,8 @@ leash mcp call invoke_capability --json '{"capability":"planner_set_goal","x_m":
 leash mcp call invoke_capability capability=planner_status
 leash mcp call invoke_capability --json '{"capability":"start_patrol","strategy":"coverage","speed_mode":"low"}'
 leash mcp call invoke_capability capability=stop_patrol
+leash mcp call invoke_capability --json '{"capability":"memory_tag_location","name":"dock","x_m":0.25,"y_m":0.0,"confidence":0.95}'
+leash mcp call invoke_capability capability=memory_query query=dock
 ```
 
 `/mcp/tools`, `/mcp/status`, `/mcp/modules`, and `/mcp/call` return JSON for
@@ -136,8 +141,34 @@ emits the active patrol goal/path in telemetry visualization frames.
 
 Planner movement calls the same `drive` capability as manual control, so speed
 caps, deadman state, estop state, and the soft odometry limit still apply. The
-router and patrol loop are sim-only demo surfaces; broader spatial memory and
-perception remain separate future capabilities.
+router and patrol loop are sim-only demo surfaces.
+
+## Spatial Memory
+
+Leash keeps a small file-backed spatial memory store for named `location` and
+`object` entries. Each entry records `name`, `kind`, `frame_id`, `x_m`, `y_m`,
+`observed_at_ms`, `updated_at_ms`, `confidence`, `effective_confidence`, and a
+`stale` flag. The default path is under the Leash state directory:
+
+```text
+$LEASH_STATE_DIR/memory/<profile>/<role>/<run-id>.json
+```
+
+When `LEASH_STATE_DIR` is not set, the same state-root rules as daemon logs are
+used. Non-daemon runs get a process-local run id; daemon runs use
+`LEASH_RUN_ID`, so memory remains isolated by run/profile by default.
+
+Use `memory_tag_location` to add or update a named place. Pass
+`kind=object` to track an observed object with the same store and update
+semantics:
+
+```bash
+leash mcp call invoke_capability --json '{"capability":"memory_tag_location","name":"dock","frame_id":"map","x_m":0.25,"y_m":0.0,"confidence":0.95}'
+leash mcp call invoke_capability --json '{"capability":"memory_tag_location","name":"cone","kind":"object","frame_id":"map","x_m":0.4,"y_m":0.5,"confidence":0.8}'
+leash mcp call invoke_capability --json '{"capability":"memory_query","query":"dock","min_confidence":0.9}'
+leash mcp call invoke_capability capability=memory_list
+leash mcp call invoke_capability capability=memory_clear
+```
 
 ## HTTP Endpoints
 
@@ -271,8 +302,8 @@ scripts/smoke-all.sh
 
 `scripts/smoke-all.sh` runs the no-hardware release proof and prints a JSON
 summary covering HTTP routes and policy denial, stdio MCP, physical-gate
-refusal, daemon lifecycle, graph export, MCP HTTP + CLI calls, replay HTTP/MCP
-observe paths, and config preflight checks.
+refusal, daemon lifecycle, graph export, MCP HTTP + CLI planner/patrol/memory
+calls, replay HTTP/MCP observe paths, and config preflight checks.
 
 ## Stream Transport
 
@@ -329,11 +360,14 @@ and MCP surfaces without hardware:
 ```bash
 leash serve http --replay-source examples/replay/sim-basic.jsonl
 leash serve mcp --replay-source examples/replay/sim-basic.jsonl
+leash serve mcp-http --replay-source examples/replay/sim-memory.jsonl
 ```
 
 Replay mode resolves to `profile: replay`, `mode: replay`, `replay: true`, and
 `physical: false` / `physical_actuation_enabled: false` in config, health, and
-capability output.
+capability output. The `sim-memory.jsonl` fixture is a short deterministic
+observe source for demos that tag and recall locations through MCP while replay
+telemetry stays stable.
 
 Run narrower checks when you need to isolate one surface:
 
@@ -364,7 +398,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Occupancy-grid and costmap message primitives
 - [x] Sim waypoint router and local planner demo
 - [x] Patrol and exploration in simulation
-- [ ] Spatial memory and perception primitives
+- [x] Spatial memory and object registry primitives
 - [x] Full no-hardware smoke suite
 
 ## License

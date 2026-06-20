@@ -396,6 +396,48 @@ impl Default for PatrolStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SpatialMemoryKind {
+    #[default]
+    Location,
+    Object,
+}
+
+impl SpatialMemoryKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Location => "location",
+            Self::Object => "object",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SpatialMemoryEntry {
+    pub name: String,
+    pub kind: SpatialMemoryKind,
+    pub frame_id: String,
+    pub x_m: f64,
+    pub y_m: f64,
+    pub observed_at_ms: u128,
+    pub updated_at_ms: u128,
+    pub confidence: f64,
+    pub effective_confidence: f64,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SpatialMemoryStatus {
+    pub ok: bool,
+    pub store_path: String,
+    pub count: usize,
+    pub entries: Vec<SpatialMemoryEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct AutonomyOverlay {
