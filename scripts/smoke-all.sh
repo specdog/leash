@@ -59,6 +59,11 @@ const checks = [
     proof: "TCP JSONL stream hub accepted valid frames and kept serving after an invalid peer",
   },
   {
+    name: "worker-supervision",
+    argv: ["bash", "scripts/smoke-worker.sh"],
+    proof: "external worker supervisor started, reported, and stopped a child process",
+  },
+  {
     name: "replay-http-observe",
     argv: ["bash", "scripts/smoke-replay-http.sh"],
     proof: "HTTP replay health, capabilities, telemetry observe, and fake detections passed",

@@ -22,6 +22,7 @@ pub mod stack;
 pub mod stream_processing;
 pub mod transport;
 pub mod types;
+pub mod worker;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
 pub use agent::complete as complete_agent_prompt;
@@ -62,4 +63,8 @@ pub use types::{
     TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
     VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
     OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
+};
+pub use worker::{
+    ExternalWorkerSpec, ExternalWorkerState, ExternalWorkerStatus, WorkerHealthCheck,
+    WorkerRestartPolicy, WorkerSupervisor,
 };
