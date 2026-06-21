@@ -1,0 +1,6116 @@
+{
+  "$id": "https://specdog.github.io/leash/schemas/leash-messages.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Canonical JSON Schema output for Leash HTTP, MCP, telemetry, capability, module, and adapter messages generated from Rust types.",
+  "schema_version": "leash-message-schema-v1",
+  "schemas": {
+    "AdapterCategory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "simulation",
+        "compatibility",
+        "mobile-base",
+        "drone",
+        "manipulator",
+        "perception",
+        "sensor"
+      ],
+      "title": "AdapterCategory",
+      "type": "string"
+    },
+    "AdapterMaturity": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "stable",
+        "beta",
+        "alpha",
+        "experimental"
+      ],
+      "title": "AdapterMaturity",
+      "type": "string"
+    },
+    "AdapterProfile": {
+      "$defs": {
+        "AdapterCategory": {
+          "enum": [
+            "simulation",
+            "compatibility",
+            "mobile-base",
+            "drone",
+            "manipulator",
+            "perception",
+            "sensor"
+          ],
+          "type": "string"
+        },
+        "AdapterMaturity": {
+          "enum": [
+            "stable",
+            "beta",
+            "alpha",
+            "experimental"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "$ref": "#/$defs/AdapterCategory"
+        },
+        "feature_flags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "maturity": {
+          "$ref": "#/$defs/AdapterMaturity"
+        },
+        "required_gates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "maturity",
+        "capabilities",
+        "feature_flags",
+        "required_gates",
+        "boundary"
+      ],
+      "title": "AdapterProfile",
+      "type": "object"
+    },
+    "AgentMessage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "ts_ms",
+        "source",
+        "text"
+      ],
+      "title": "AgentMessage",
+      "type": "object"
+    },
+    "AgentMessageAck": {
+      "$defs": {
+        "AgentMessage": {
+          "properties": {
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "ts_ms",
+            "source",
+            "text"
+          ],
+          "type": "object"
+        },
+        "AgentModelResponse": {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "provider",
+            "model",
+            "prompt",
+            "text"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/AgentMessage"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentModelResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "message"
+      ],
+      "title": "AgentMessageAck",
+      "type": "object"
+    },
+    "AgentMessageList": {
+      "$defs": {
+        "AgentMessage": {
+          "properties": {
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "ts_ms",
+            "source",
+            "text"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/AgentMessage"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "messages"
+      ],
+      "title": "AgentMessageList",
+      "type": "object"
+    },
+    "AgentModelResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "provider",
+        "model",
+        "prompt",
+        "text"
+      ],
+      "title": "AgentModelResponse",
+      "type": "object"
+    },
+    "AutonomyOverlay": {
+      "$defs": {
+        "PatrolStrategy": {
+          "enum": [
+            "coverage",
+            "frontier",
+            "random"
+          ],
+          "type": "string"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannerGoal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PatrolStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "visited_cells": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "active",
+        "status",
+        "visited_cells"
+      ],
+      "title": "AutonomyOverlay",
+      "type": "object"
+    },
+    "BatteryStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "voltage_v": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "BatteryStatus",
+      "type": "object"
+    },
+    "CameraStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "health": {
+          "type": "string"
+        },
+        "snapshot_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "stream_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "health"
+      ],
+      "title": "CameraStatus",
+      "type": "object"
+    },
+    "Capabilities": {
+      "$defs": {
+        "AcceleratorBackend": {
+          "enum": [
+            "none",
+            "cpu",
+            "cuda"
+          ],
+          "type": "string"
+        },
+        "AcceleratorProbe": {
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "backend": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "compiled": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "selected": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "backend",
+            "compiled",
+            "available",
+            "selected",
+            "message"
+          ],
+          "type": "object"
+        },
+        "AcceleratorStatus": {
+          "properties": {
+            "active": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "probes": {
+              "items": {
+                "$ref": "#/$defs/AcceleratorProbe"
+              },
+              "type": "array"
+            },
+            "requested": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requested",
+            "active",
+            "available",
+            "required",
+            "message",
+            "probes"
+          ],
+          "type": "object"
+        },
+        "AdapterCategory": {
+          "enum": [
+            "simulation",
+            "compatibility",
+            "mobile-base",
+            "drone",
+            "manipulator",
+            "perception",
+            "sensor"
+          ],
+          "type": "string"
+        },
+        "AdapterMaturity": {
+          "enum": [
+            "stable",
+            "beta",
+            "alpha",
+            "experimental"
+          ],
+          "type": "string"
+        },
+        "AdapterProfile": {
+          "properties": {
+            "boundary": {
+              "type": "string"
+            },
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "category": {
+              "$ref": "#/$defs/AdapterCategory"
+            },
+            "feature_flags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "maturity": {
+              "$ref": "#/$defs/AdapterMaturity"
+            },
+            "required_gates": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "category",
+            "maturity",
+            "capabilities",
+            "feature_flags",
+            "required_gates",
+            "boundary"
+          ],
+          "type": "object"
+        },
+        "CapabilityDescriptor": {
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "input_schema": true,
+            "module": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "output_schema": true,
+            "safety": {
+              "$ref": "#/$defs/SafetyClass"
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "module",
+            "safety",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        "ModuleHealth": {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "ok",
+            "state"
+          ],
+          "type": "object"
+        },
+        "ModuleInfo": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "health": {
+              "$ref": "#/$defs/ModuleHealth"
+            },
+            "id": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "inputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "module_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "outputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "physical": {
+              "type": "boolean"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "module_type",
+            "state",
+            "health",
+            "dependencies",
+            "inputs",
+            "outputs",
+            "capabilities",
+            "physical",
+            "required"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "StreamDescriptor": {
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/StreamDirection"
+            },
+            "message_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "direction",
+            "message_type",
+            "transport"
+          ],
+          "type": "object"
+        },
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "accelerator": {
+          "$ref": "#/$defs/AcceleratorStatus"
+        },
+        "adapter": {
+          "$ref": "#/$defs/AdapterProfile"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/CapabilityDescriptor"
+          },
+          "type": "array"
+        },
+        "endpoints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mcp_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleInfo"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "physical": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "speed_modes": {
+          "items": {
+            "$ref": "#/$defs/SpeedMode"
+          },
+          "type": "array"
+        },
+        "stream_transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "mode",
+        "replay",
+        "role",
+        "profile",
+        "physical",
+        "adapter",
+        "stream_transport",
+        "endpoints",
+        "mcp_tools",
+        "speed_modes",
+        "accelerator",
+        "modules",
+        "capabilities"
+      ],
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "CapabilityDescriptor": {
+      "$defs": {
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input_schema": true,
+        "module": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_schema": true,
+        "safety": {
+          "$ref": "#/$defs/SafetyClass"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "module",
+        "safety",
+        "input_schema",
+        "output_schema"
+      ],
+      "title": "CapabilityDescriptor",
+      "type": "object"
+    },
+    "CaptureResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "byte_len": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "captured_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "source",
+        "content_type",
+        "byte_len",
+        "captured_at_ms",
+        "sha256"
+      ],
+      "title": "CaptureResult",
+      "type": "object"
+    },
+    "CommandOverlay": {
+      "$defs": {
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "estop": {
+          "type": "boolean"
+        },
+        "left_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_speed": {
+          "format": "double",
+          "type": "number"
+        },
+        "right_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left_cmd",
+        "right_cmd",
+        "speed_mode",
+        "max_speed",
+        "estop"
+      ],
+      "title": "CommandOverlay",
+      "type": "object"
+    },
+    "CommandStreamState": {
+      "$defs": {
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "left_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_speed": {
+          "format": "double",
+          "type": "number"
+        },
+        "right_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        }
+      },
+      "required": [
+        "left_cmd",
+        "right_cmd",
+        "speed_mode",
+        "max_speed"
+      ],
+      "title": "CommandStreamState",
+      "type": "object"
+    },
+    "CostmapFrame": {
+      "$defs": {
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "costs": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "metadata": {
+          "$ref": "#/$defs/MapMetadata",
+          "default": {
+            "cell_order": "",
+            "frame_id": "",
+            "height": 0,
+            "map_id": "",
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
+        "origin": {
+          "$ref": "#/$defs/Pose2d"
+        },
+        "resolution_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "width",
+        "height",
+        "resolution_m",
+        "origin",
+        "costs"
+      ],
+      "title": "CostmapFrame",
+      "type": "object"
+    },
+    "DetectionFrame": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "height_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "frame_id",
+        "id",
+        "label",
+        "confidence",
+        "x_m",
+        "y_m",
+        "width_m",
+        "height_m"
+      ],
+      "title": "DetectionFrame",
+      "type": "object"
+    },
+    "DriveOutcome": {
+      "$defs": {
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "left": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_speed": {
+          "format": "double",
+          "type": "number"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "right": {
+          "format": "double",
+          "type": "number"
+        },
+        "soft_odometry_limited": {
+          "type": "boolean"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "stopped_by_deadman": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "left",
+        "right",
+        "speed_mode",
+        "max_speed",
+        "stopped_by_deadman",
+        "soft_odometry_limited"
+      ],
+      "title": "DriveOutcome",
+      "type": "object"
+    },
+    "DroneCommandStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "command": {
+          "type": "string"
+        },
+        "mavlink_endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "command",
+        "profile",
+        "simulated",
+        "status",
+        "message"
+      ],
+      "title": "DroneCommandStatus",
+      "type": "object"
+    },
+    "Health": {
+      "$defs": {
+        "AcceleratorBackend": {
+          "enum": [
+            "none",
+            "cpu",
+            "cuda"
+          ],
+          "type": "string"
+        },
+        "AcceleratorProbe": {
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "backend": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "compiled": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "selected": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "backend",
+            "compiled",
+            "available",
+            "selected",
+            "message"
+          ],
+          "type": "object"
+        },
+        "AcceleratorStatus": {
+          "properties": {
+            "active": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "probes": {
+              "items": {
+                "$ref": "#/$defs/AcceleratorProbe"
+              },
+              "type": "array"
+            },
+            "requested": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requested",
+            "active",
+            "available",
+            "required",
+            "message",
+            "probes"
+          ],
+          "type": "object"
+        },
+        "ModuleHealth": {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "ok",
+            "state"
+          ],
+          "type": "object"
+        },
+        "ModuleInfo": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "health": {
+              "$ref": "#/$defs/ModuleHealth"
+            },
+            "id": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "inputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "module_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "outputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "physical": {
+              "type": "boolean"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "module_type",
+            "state",
+            "health",
+            "dependencies",
+            "inputs",
+            "outputs",
+            "capabilities",
+            "physical",
+            "required"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "StreamDescriptor": {
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/StreamDirection"
+            },
+            "message_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "direction",
+            "message_type",
+            "transport"
+          ],
+          "type": "object"
+        },
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "accelerator": {
+          "$ref": "#/$defs/AcceleratorStatus"
+        },
+        "deadman_ok": {
+          "type": "boolean"
+        },
+        "estop": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleInfo"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "physical_actuation_enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "uptime_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "mode",
+        "replay",
+        "role",
+        "profile",
+        "uptime_ms",
+        "estop",
+        "deadman_ok",
+        "physical_actuation_enabled",
+        "accelerator",
+        "modules"
+      ],
+      "title": "Health",
+      "type": "object"
+    },
+    "ImageObservation": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "byte_len": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "height_px": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width_px": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "source",
+        "width_px",
+        "height_px",
+        "content_type",
+        "byte_len"
+      ],
+      "title": "ImageObservation",
+      "type": "object"
+    },
+    "InvocationOrigin": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "runtime",
+        "cli",
+        "http",
+        "mcp",
+        "agent"
+      ],
+      "title": "InvocationOrigin",
+      "type": "string"
+    },
+    "ManipulatorCommandStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "command": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "command",
+        "profile",
+        "simulated",
+        "status",
+        "message"
+      ],
+      "title": "ManipulatorCommandStatus",
+      "type": "object"
+    },
+    "ManipulatorJoint": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "effort_nm": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "position_rad": {
+          "format": "double",
+          "type": "number"
+        },
+        "velocity_radps": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "position_rad",
+        "velocity_radps"
+      ],
+      "title": "ManipulatorJoint",
+      "type": "object"
+    },
+    "ManipulatorJointState": {
+      "$defs": {
+        "ManipulatorJoint": {
+          "properties": {
+            "effort_nm": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "position_rad": {
+              "format": "double",
+              "type": "number"
+            },
+            "velocity_radps": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "position_rad",
+            "velocity_radps"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "joints": {
+          "items": {
+            "$ref": "#/$defs/ManipulatorJoint"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "ok",
+        "profile",
+        "simulated",
+        "source",
+        "joints"
+      ],
+      "title": "ManipulatorJointState",
+      "type": "object"
+    },
+    "MapMetadata": {
+      "$defs": {
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cell_order": {
+          "type": "string"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "map_id": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/Pose2d"
+        },
+        "resolution_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "map_id",
+        "frame_id",
+        "width",
+        "height",
+        "resolution_m",
+        "origin",
+        "cell_order"
+      ],
+      "title": "MapMetadata",
+      "type": "object"
+    },
+    "McpCallResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "result": true,
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "tool",
+        "result"
+      ],
+      "title": "McpCallResponse",
+      "type": "object"
+    },
+    "McpModuleToolMap": {
+      "$defs": {
+        "McpModuleTools": {
+          "properties": {
+            "module": {
+              "type": "string"
+            },
+            "module_type": {
+              "type": "string"
+            },
+            "physical": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            },
+            "tools": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "module",
+            "module_type",
+            "state",
+            "physical",
+            "tools"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/McpModuleTools"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "modules"
+      ],
+      "title": "McpModuleToolMap",
+      "type": "object"
+    },
+    "McpStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "module_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "modules_healthy": {
+          "type": "boolean"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "physical": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "tool_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "transport",
+        "role",
+        "profile",
+        "replay",
+        "physical",
+        "modules_healthy",
+        "module_count",
+        "tool_count"
+      ],
+      "title": "McpStatus",
+      "type": "object"
+    },
+    "McpToolDescriptor": {
+      "$defs": {
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input_schema": true,
+        "module": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_schema": true,
+        "safety": {
+          "$ref": "#/$defs/SafetyClass"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "module",
+        "safety",
+        "input_schema",
+        "output_schema"
+      ],
+      "title": "McpToolDescriptor",
+      "type": "object"
+    },
+    "McpToolList": {
+      "$defs": {
+        "McpToolDescriptor": {
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "input_schema": true,
+            "module": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "output_schema": true,
+            "safety": {
+              "$ref": "#/$defs/SafetyClass"
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "module",
+            "safety",
+            "input_schema",
+            "output_schema"
+          ],
+          "type": "object"
+        },
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/McpToolDescriptor"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "tools"
+      ],
+      "title": "McpToolList",
+      "type": "object"
+    },
+    "ModuleGraph": {
+      "$defs": {
+        "ModuleHealth": {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "ok",
+            "state"
+          ],
+          "type": "object"
+        },
+        "ModuleInfo": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "health": {
+              "$ref": "#/$defs/ModuleHealth"
+            },
+            "id": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "inputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "module_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "outputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "physical": {
+              "type": "boolean"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "module_type",
+            "state",
+            "health",
+            "dependencies",
+            "inputs",
+            "outputs",
+            "capabilities",
+            "physical",
+            "required"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "StreamDescriptor": {
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/StreamDirection"
+            },
+            "message_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "direction",
+            "message_type",
+            "transport"
+          ],
+          "type": "object"
+        },
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "modules"
+      ],
+      "title": "ModuleGraph",
+      "type": "object"
+    },
+    "ModuleHealth": {
+      "$defs": {
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/ModuleState"
+        }
+      },
+      "required": [
+        "ok",
+        "state"
+      ],
+      "title": "ModuleHealth",
+      "type": "object"
+    },
+    "ModuleInfo": {
+      "$defs": {
+        "ModuleHealth": {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "ok",
+            "state"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "StreamDescriptor": {
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/StreamDirection"
+            },
+            "message_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "direction",
+            "message_type",
+            "transport"
+          ],
+          "type": "object"
+        },
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "health": {
+          "$ref": "#/$defs/ModuleHealth"
+        },
+        "id": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/StreamDescriptor"
+          },
+          "type": "array"
+        },
+        "module_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/StreamDescriptor"
+          },
+          "type": "array"
+        },
+        "physical": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/ModuleState"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "module_type",
+        "state",
+        "health",
+        "dependencies",
+        "inputs",
+        "outputs",
+        "capabilities",
+        "physical",
+        "required"
+      ],
+      "title": "ModuleInfo",
+      "type": "object"
+    },
+    "ModuleState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "planned",
+        "starting",
+        "running",
+        "stopped",
+        "failed"
+      ],
+      "title": "ModuleState",
+      "type": "string"
+    },
+    "NetworkStreamFrame": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "payload": true,
+        "schema_version": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "stream",
+        "payload"
+      ],
+      "title": "NetworkStreamFrame",
+      "type": "object"
+    },
+    "OccupancyGridFrame": {
+      "$defs": {
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cells": {
+          "items": {
+            "format": "int8",
+            "maximum": 127,
+            "minimum": -128,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "metadata": {
+          "$ref": "#/$defs/MapMetadata",
+          "default": {
+            "cell_order": "",
+            "frame_id": "",
+            "height": 0,
+            "map_id": "",
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
+        "origin": {
+          "$ref": "#/$defs/Pose2d"
+        },
+        "resolution_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "width",
+        "height",
+        "resolution_m",
+        "origin",
+        "cells"
+      ],
+      "title": "OccupancyGridFrame",
+      "type": "object"
+    },
+    "OdometryStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "left_m": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "right_m": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "OdometryStatus",
+      "type": "object"
+    },
+    "PatrolStatus": {
+      "$defs": {
+        "PatrolStrategy": {
+          "enum": [
+            "coverage",
+            "frontier",
+            "random"
+          ],
+          "type": "string"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannerGoal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "status": {
+          "type": "string"
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PatrolStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visited_cells": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "active",
+        "status",
+        "message",
+        "speed_mode",
+        "path",
+        "visited_cells"
+      ],
+      "title": "PatrolStatus",
+      "type": "object"
+    },
+    "PatrolStrategy": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "coverage",
+        "frontier",
+        "random"
+      ],
+      "title": "PatrolStrategy",
+      "type": "string"
+    },
+    "PlannerGoal": {
+      "$defs": {
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "tolerance_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "frame_id",
+        "x_m",
+        "y_m",
+        "tolerance_m",
+        "speed_mode"
+      ],
+      "title": "PlannerGoal",
+      "type": "object"
+    },
+    "PlannerStatus": {
+      "$defs": {
+        "DriveOutcome": {
+          "properties": {
+            "left": {
+              "format": "double",
+              "type": "number"
+            },
+            "max_speed": {
+              "format": "double",
+              "type": "number"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "right": {
+              "format": "double",
+              "type": "number"
+            },
+            "soft_odometry_limited": {
+              "type": "boolean"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "stopped_by_deadman": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok",
+            "left",
+            "right",
+            "speed_mode",
+            "max_speed",
+            "stopped_by_deadman",
+            "soft_odometry_limited"
+          ],
+          "type": "object"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannerGoal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_drive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DriveOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "active",
+        "status",
+        "message",
+        "path"
+      ],
+      "title": "PlannerStatus",
+      "type": "object"
+    },
+    "PointCloudMetadata": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "point_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "point_count",
+        "fields",
+        "source"
+      ],
+      "title": "PointCloudMetadata",
+      "type": "object"
+    },
+    "Pose2d": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "yaw_rad": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "frame_id",
+        "x_m",
+        "y_m",
+        "yaw_rad"
+      ],
+      "title": "Pose2d",
+      "type": "object"
+    },
+    "RawFrameStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "last_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "source"
+      ],
+      "title": "RawFrameStatus",
+      "type": "object"
+    },
+    "ResourceSample": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cpu_time_ticks": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memory_rss_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_id": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sampled_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sampled_at_ms",
+        "process_id"
+      ],
+      "title": "ResourceSample",
+      "type": "object"
+    },
+    "RunLogEntry": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "level": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "timestamp",
+        "run_id",
+        "module",
+        "event",
+        "level",
+        "fields"
+      ],
+      "title": "RunLogEntry",
+      "type": "object"
+    },
+    "SafetyClass": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "observe-only",
+        "sim-control",
+        "physical-stop",
+        "physical-motion",
+        "physical-high-risk"
+      ],
+      "title": "SafetyClass",
+      "type": "string"
+    },
+    "SafetyStreamState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deadman_ok": {
+          "type": "boolean"
+        },
+        "estop": {
+          "type": "boolean"
+        },
+        "physical_actuation_enabled": {
+          "type": "boolean"
+        },
+        "soft_odometry_limit_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "soft_odometry_limited": {
+          "type": "boolean"
+        },
+        "stopped_by_deadman": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "estop",
+        "deadman_ok",
+        "stopped_by_deadman",
+        "soft_odometry_limited",
+        "soft_odometry_limit_m",
+        "physical_actuation_enabled"
+      ],
+      "title": "SafetyStreamState",
+      "type": "object"
+    },
+    "SensorSnapshot": {
+      "$defs": {
+        "BatteryStatus": {
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "voltage_v": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "CameraStatus": {
+          "properties": {
+            "health": {
+              "type": "string"
+            },
+            "snapshot_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "stream_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "health"
+          ],
+          "type": "object"
+        },
+        "OdometryStatus": {
+          "properties": {
+            "left_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "right_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "RawFrameStatus": {
+          "properties": {
+            "last_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "battery": {
+          "$ref": "#/$defs/BatteryStatus"
+        },
+        "camera": {
+          "$ref": "#/$defs/CameraStatus"
+        },
+        "odometry": {
+          "$ref": "#/$defs/OdometryStatus"
+        },
+        "raw_frame": {
+          "$ref": "#/$defs/RawFrameStatus"
+        }
+      },
+      "required": [
+        "battery",
+        "odometry",
+        "camera",
+        "raw_frame"
+      ],
+      "title": "SensorSnapshot",
+      "type": "object"
+    },
+    "SpatialMemoryEntry": {
+      "$defs": {
+        "SpatialMemoryKind": {
+          "enum": [
+            "location",
+            "object"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "effective_confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SpatialMemoryKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "frame_id",
+        "x_m",
+        "y_m",
+        "observed_at_ms",
+        "updated_at_ms",
+        "confidence",
+        "effective_confidence",
+        "stale"
+      ],
+      "title": "SpatialMemoryEntry",
+      "type": "object"
+    },
+    "SpatialMemoryKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "location",
+        "object"
+      ],
+      "title": "SpatialMemoryKind",
+      "type": "string"
+    },
+    "SpatialMemoryStatus": {
+      "$defs": {
+        "SpatialMemoryEntry": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "effective_confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/SpatialMemoryKind"
+            },
+            "name": {
+              "type": "string"
+            },
+            "observed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stale": {
+              "type": "boolean"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "kind",
+            "frame_id",
+            "x_m",
+            "y_m",
+            "observed_at_ms",
+            "updated_at_ms",
+            "confidence",
+            "effective_confidence",
+            "stale"
+          ],
+          "type": "object"
+        },
+        "SpatialMemoryKind": {
+          "enum": [
+            "location",
+            "object"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/SpatialMemoryEntry"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "store_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "store_path",
+        "count",
+        "entries"
+      ],
+      "title": "SpatialMemoryStatus",
+      "type": "object"
+    },
+    "SpeedMode": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "SpeedMode",
+      "type": "string"
+    },
+    "StreamDescriptor": {
+      "$defs": {
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/StreamDirection"
+        },
+        "message_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction",
+        "message_type",
+        "transport"
+      ],
+      "title": "StreamDescriptor",
+      "type": "object"
+    },
+    "StreamDirection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "input",
+        "output"
+      ],
+      "title": "StreamDirection",
+      "type": "string"
+    },
+    "TelemetryFrame": {
+      "$defs": {
+        "BatteryStatus": {
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "voltage_v": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "CameraStatus": {
+          "properties": {
+            "health": {
+              "type": "string"
+            },
+            "snapshot_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "stream_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "health"
+          ],
+          "type": "object"
+        },
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        },
+        "OdometryStatus": {
+          "properties": {
+            "left_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "right_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "RawFrameStatus": {
+          "properties": {
+            "last_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
+        "ResourceSample": {
+          "properties": {
+            "cpu_time_ticks": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "memory_rss_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "process_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sampled_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "sampled_at_ms",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        "SensorSnapshot": {
+          "properties": {
+            "battery": {
+              "$ref": "#/$defs/BatteryStatus"
+            },
+            "camera": {
+              "$ref": "#/$defs/CameraStatus"
+            },
+            "odometry": {
+              "$ref": "#/$defs/OdometryStatus"
+            },
+            "raw_frame": {
+              "$ref": "#/$defs/RawFrameStatus"
+            }
+          },
+          "required": [
+            "battery",
+            "odometry",
+            "camera",
+            "raw_frame"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "VisionResult": {
+          "properties": {
+            "detections": {
+              "items": {
+                "$ref": "#/$defs/DetectionFrame"
+              },
+              "type": "array"
+            },
+            "duration_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "source",
+            "observed_at_ms",
+            "duration_ms",
+            "detections"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "battery_v": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "deadman_ok": {
+          "type": "boolean"
+        },
+        "estop": {
+          "type": "boolean"
+        },
+        "left_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_speed": {
+          "format": "double",
+          "type": "number"
+        },
+        "odometry_left": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "odometry_right": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceSample"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "right_cmd": {
+          "format": "double",
+          "type": "number"
+        },
+        "robot": {
+          "type": "string"
+        },
+        "sensors": {
+          "$ref": "#/$defs/SensorSnapshot"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "soft_odometry_limit_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "soft_odometry_limited": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "stopped_by_deadman": {
+          "type": "boolean"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "vision": {
+          "$ref": "#/$defs/VisionResult",
+          "default": {
+            "detections": [],
+            "duration_ms": 0,
+            "error": null,
+            "observed_at_ms": 0,
+            "ok": false,
+            "source": "none",
+            "status": "unavailable"
+          }
+        }
+      },
+      "required": [
+        "ts_ms",
+        "robot",
+        "profile",
+        "left_cmd",
+        "right_cmd",
+        "deadman_ok",
+        "estop",
+        "stopped_by_deadman",
+        "soft_odometry_limited",
+        "soft_odometry_limit_m",
+        "speed_mode",
+        "max_speed",
+        "sensors",
+        "source"
+      ],
+      "title": "TelemetryFrame",
+      "type": "object"
+    },
+    "TelemetryStreamFrame": {
+      "$defs": {
+        "AcceleratorBackend": {
+          "enum": [
+            "none",
+            "cpu",
+            "cuda"
+          ],
+          "type": "string"
+        },
+        "AcceleratorProbe": {
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "backend": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "compiled": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "selected": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "backend",
+            "compiled",
+            "available",
+            "selected",
+            "message"
+          ],
+          "type": "object"
+        },
+        "AcceleratorStatus": {
+          "properties": {
+            "active": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "probes": {
+              "items": {
+                "$ref": "#/$defs/AcceleratorProbe"
+              },
+              "type": "array"
+            },
+            "requested": {
+              "$ref": "#/$defs/AcceleratorBackend"
+            },
+            "required": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requested",
+            "active",
+            "available",
+            "required",
+            "message",
+            "probes"
+          ],
+          "type": "object"
+        },
+        "AutonomyOverlay": {
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "goal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlannerGoal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "strategy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PatrolStrategy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "visited_cells": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "mode",
+            "active",
+            "status",
+            "visited_cells"
+          ],
+          "type": "object"
+        },
+        "BatteryStatus": {
+          "properties": {
+            "status": {
+              "type": "string"
+            },
+            "voltage_v": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "CameraStatus": {
+          "properties": {
+            "health": {
+              "type": "string"
+            },
+            "snapshot_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "stream_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "health"
+          ],
+          "type": "object"
+        },
+        "CommandOverlay": {
+          "properties": {
+            "estop": {
+              "type": "boolean"
+            },
+            "left_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "max_speed": {
+              "format": "double",
+              "type": "number"
+            },
+            "right_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "left_cmd",
+            "right_cmd",
+            "speed_mode",
+            "max_speed",
+            "estop"
+          ],
+          "type": "object"
+        },
+        "CommandStreamState": {
+          "properties": {
+            "left_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "max_speed": {
+              "format": "double",
+              "type": "number"
+            },
+            "right_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            }
+          },
+          "required": [
+            "left_cmd",
+            "right_cmd",
+            "speed_mode",
+            "max_speed"
+          ],
+          "type": "object"
+        },
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        },
+        "Health": {
+          "properties": {
+            "accelerator": {
+              "$ref": "#/$defs/AcceleratorStatus"
+            },
+            "deadman_ok": {
+              "type": "boolean"
+            },
+            "estop": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "modules": {
+              "items": {
+                "$ref": "#/$defs/ModuleInfo"
+              },
+              "type": "array"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "physical_actuation_enabled": {
+              "type": "boolean"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "replay": {
+              "type": "boolean"
+            },
+            "role": {
+              "type": "string"
+            },
+            "uptime_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "mode",
+            "replay",
+            "role",
+            "profile",
+            "uptime_ms",
+            "estop",
+            "deadman_ok",
+            "physical_actuation_enabled",
+            "accelerator",
+            "modules"
+          ],
+          "type": "object"
+        },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "ModuleHealth": {
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "ok",
+            "state"
+          ],
+          "type": "object"
+        },
+        "ModuleInfo": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dependencies": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "health": {
+              "$ref": "#/$defs/ModuleHealth"
+            },
+            "id": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "inputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "module_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "outputs": {
+              "items": {
+                "$ref": "#/$defs/StreamDescriptor"
+              },
+              "type": "array"
+            },
+            "physical": {
+              "type": "boolean"
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "state": {
+              "$ref": "#/$defs/ModuleState"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "module_type",
+            "state",
+            "health",
+            "dependencies",
+            "inputs",
+            "outputs",
+            "capabilities",
+            "physical",
+            "required"
+          ],
+          "type": "object"
+        },
+        "ModuleState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "stopped",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
+        },
+        "OdometryStatus": {
+          "properties": {
+            "left_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "right_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        "PatrolStrategy": {
+          "enum": [
+            "coverage",
+            "frontier",
+            "random"
+          ],
+          "type": "string"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "PointCloudMetadata": {
+          "properties": {
+            "fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "point_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "point_count",
+            "fields",
+            "source"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "RawFrameStatus": {
+          "properties": {
+            "last_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
+        "ResourceSample": {
+          "properties": {
+            "cpu_time_ticks": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "memory_rss_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "process_id": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sampled_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "sampled_at_ms",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        "SafetyStreamState": {
+          "properties": {
+            "deadman_ok": {
+              "type": "boolean"
+            },
+            "estop": {
+              "type": "boolean"
+            },
+            "physical_actuation_enabled": {
+              "type": "boolean"
+            },
+            "soft_odometry_limit_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "soft_odometry_limited": {
+              "type": "boolean"
+            },
+            "stopped_by_deadman": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "estop",
+            "deadman_ok",
+            "stopped_by_deadman",
+            "soft_odometry_limited",
+            "soft_odometry_limit_m",
+            "physical_actuation_enabled"
+          ],
+          "type": "object"
+        },
+        "SensorSnapshot": {
+          "properties": {
+            "battery": {
+              "$ref": "#/$defs/BatteryStatus"
+            },
+            "camera": {
+              "$ref": "#/$defs/CameraStatus"
+            },
+            "odometry": {
+              "$ref": "#/$defs/OdometryStatus"
+            },
+            "raw_frame": {
+              "$ref": "#/$defs/RawFrameStatus"
+            }
+          },
+          "required": [
+            "battery",
+            "odometry",
+            "camera",
+            "raw_frame"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "StreamDescriptor": {
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/StreamDirection"
+            },
+            "message_type": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "direction",
+            "message_type",
+            "transport"
+          ],
+          "type": "object"
+        },
+        "StreamDirection": {
+          "enum": [
+            "input",
+            "output"
+          ],
+          "type": "string"
+        },
+        "TelemetryFrame": {
+          "properties": {
+            "battery_v": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "deadman_ok": {
+              "type": "boolean"
+            },
+            "estop": {
+              "type": "boolean"
+            },
+            "left_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "max_speed": {
+              "format": "double",
+              "type": "number"
+            },
+            "odometry_left": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "odometry_right": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "profile": {
+              "type": "string"
+            },
+            "resource": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ResourceSample"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "right_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "robot": {
+              "type": "string"
+            },
+            "sensors": {
+              "$ref": "#/$defs/SensorSnapshot"
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "soft_odometry_limit_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "soft_odometry_limited": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "stopped_by_deadman": {
+              "type": "boolean"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "vision": {
+              "$ref": "#/$defs/VisionResult",
+              "default": {
+                "detections": [],
+                "duration_ms": 0,
+                "error": null,
+                "observed_at_ms": 0,
+                "ok": false,
+                "source": "none",
+                "status": "unavailable"
+              }
+            }
+          },
+          "required": [
+            "ts_ms",
+            "robot",
+            "profile",
+            "left_cmd",
+            "right_cmd",
+            "deadman_ok",
+            "estop",
+            "stopped_by_deadman",
+            "soft_odometry_limited",
+            "soft_odometry_limit_m",
+            "speed_mode",
+            "max_speed",
+            "sensors",
+            "source"
+          ],
+          "type": "object"
+        },
+        "Twist2d": {
+          "properties": {
+            "angular_z_radps": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "linear_x_mps": {
+              "format": "double",
+              "type": "number"
+            },
+            "linear_y_mps": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "linear_x_mps",
+            "linear_y_mps",
+            "angular_z_radps"
+          ],
+          "type": "object"
+        },
+        "VisionResult": {
+          "properties": {
+            "detections": {
+              "items": {
+                "$ref": "#/$defs/DetectionFrame"
+              },
+              "type": "array"
+            },
+            "duration_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "source",
+            "observed_at_ms",
+            "duration_ms",
+            "detections"
+          ],
+          "type": "object"
+        },
+        "VisualizationFrame": {
+          "properties": {
+            "autonomy": {
+              "$ref": "#/$defs/AutonomyOverlay",
+              "default": {
+                "active": false,
+                "goal": null,
+                "mode": "idle",
+                "status": "idle",
+                "strategy": null,
+                "ts_ms": 0,
+                "visited_cells": []
+              }
+            },
+            "command": {
+              "$ref": "#/$defs/CommandOverlay"
+            },
+            "costmap": {
+              "$ref": "#/$defs/CostmapFrame",
+              "default": {
+                "costs": [],
+                "frame_id": "",
+                "height": 0,
+                "metadata": {
+                  "cell_order": "",
+                  "frame_id": "",
+                  "height": 0,
+                  "map_id": "",
+                  "origin": {
+                    "frame_id": "",
+                    "ts_ms": 0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_rad": 0.0
+                  },
+                  "resolution_m": 0.0,
+                  "ts_ms": 0,
+                  "width": 0
+                },
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "detections": {
+              "items": {
+                "$ref": "#/$defs/DetectionFrame"
+              },
+              "type": "array"
+            },
+            "map": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "occupancy_grid": {
+              "$ref": "#/$defs/OccupancyGridFrame"
+            },
+            "path": {
+              "$ref": "#/$defs/VisualizationPath"
+            },
+            "point_cloud": {
+              "$ref": "#/$defs/PointCloudMetadata"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "robot": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "twist": {
+              "$ref": "#/$defs/Twist2d",
+              "default": {
+                "angular_z_radps": 0.0,
+                "frame_id": "",
+                "linear_x_mps": 0.0,
+                "linear_y_mps": 0.0,
+                "ts_ms": 0
+              }
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "ts_ms",
+            "robot",
+            "profile",
+            "pose",
+            "path",
+            "occupancy_grid",
+            "point_cloud",
+            "detections",
+            "command"
+          ],
+          "type": "object"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/CommandStreamState"
+        },
+        "health": {
+          "$ref": "#/$defs/Health"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "safety": {
+          "$ref": "#/$defs/SafetyStreamState"
+        },
+        "telemetry": {
+          "$ref": "#/$defs/TelemetryFrame"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "visualization": {
+          "$ref": "#/$defs/VisualizationFrame",
+          "default": {
+            "autonomy": {
+              "active": false,
+              "goal": null,
+              "mode": "idle",
+              "status": "idle",
+              "strategy": null,
+              "ts_ms": 0,
+              "visited_cells": []
+            },
+            "command": {
+              "estop": false,
+              "left_cmd": 0.0,
+              "max_speed": 0.0,
+              "right_cmd": 0.0,
+              "speed_mode": "medium",
+              "ts_ms": 0
+            },
+            "costmap": {
+              "costs": [],
+              "frame_id": "",
+              "height": 0,
+              "metadata": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              },
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "detections": [],
+            "map": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "occupancy_grid": {
+              "cells": [],
+              "frame_id": "",
+              "height": 0,
+              "metadata": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              },
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "path": {
+              "frame_id": "",
+              "poses": [],
+              "ts_ms": 0
+            },
+            "point_cloud": {
+              "fields": [],
+              "frame_id": "",
+              "point_count": 0,
+              "source": "",
+              "ts_ms": 0
+            },
+            "pose": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "profile": "",
+            "robot": "",
+            "ts_ms": 0,
+            "twist": {
+              "angular_z_radps": 0.0,
+              "frame_id": "",
+              "linear_x_mps": 0.0,
+              "linear_y_mps": 0.0,
+              "ts_ms": 0
+            },
+            "version": "leash-visualization-v1"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "ts_ms",
+        "telemetry",
+        "health",
+        "command",
+        "safety"
+      ],
+      "title": "TelemetryStreamFrame",
+      "type": "object"
+    },
+    "Twist2d": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "angular_z_radps": {
+          "format": "double",
+          "type": "number"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "linear_x_mps": {
+          "format": "double",
+          "type": "number"
+        },
+        "linear_y_mps": {
+          "format": "double",
+          "type": "number"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "linear_x_mps",
+        "linear_y_mps",
+        "angular_z_radps"
+      ],
+      "title": "Twist2d",
+      "type": "object"
+    },
+    "VisionResult": {
+      "$defs": {
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "detections": {
+          "items": {
+            "$ref": "#/$defs/DetectionFrame"
+          },
+          "type": "array"
+        },
+        "duration_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "status",
+        "source",
+        "observed_at_ms",
+        "duration_ms",
+        "detections"
+      ],
+      "title": "VisionResult",
+      "type": "object"
+    },
+    "VisualizationFrame": {
+      "$defs": {
+        "AutonomyOverlay": {
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "goal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlannerGoal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "strategy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PatrolStrategy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "visited_cells": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "mode",
+            "active",
+            "status",
+            "visited_cells"
+          ],
+          "type": "object"
+        },
+        "CommandOverlay": {
+          "properties": {
+            "estop": {
+              "type": "boolean"
+            },
+            "left_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "max_speed": {
+              "format": "double",
+              "type": "number"
+            },
+            "right_cmd": {
+              "format": "double",
+              "type": "number"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "left_cmd",
+            "right_cmd",
+            "speed_mode",
+            "max_speed",
+            "estop"
+          ],
+          "type": "object"
+        },
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
+        },
+        "PatrolStrategy": {
+          "enum": [
+            "coverage",
+            "frontier",
+            "random"
+          ],
+          "type": "string"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "PointCloudMetadata": {
+          "properties": {
+            "fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "point_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "point_count",
+            "fields",
+            "source"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "Twist2d": {
+          "properties": {
+            "angular_z_radps": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "linear_x_mps": {
+              "format": "double",
+              "type": "number"
+            },
+            "linear_y_mps": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "linear_x_mps",
+            "linear_y_mps",
+            "angular_z_radps"
+          ],
+          "type": "object"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "autonomy": {
+          "$ref": "#/$defs/AutonomyOverlay",
+          "default": {
+            "active": false,
+            "goal": null,
+            "mode": "idle",
+            "status": "idle",
+            "strategy": null,
+            "ts_ms": 0,
+            "visited_cells": []
+          }
+        },
+        "command": {
+          "$ref": "#/$defs/CommandOverlay"
+        },
+        "costmap": {
+          "$ref": "#/$defs/CostmapFrame",
+          "default": {
+            "costs": [],
+            "frame_id": "",
+            "height": 0,
+            "metadata": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
+        "detections": {
+          "items": {
+            "$ref": "#/$defs/DetectionFrame"
+          },
+          "type": "array"
+        },
+        "map": {
+          "$ref": "#/$defs/MapMetadata",
+          "default": {
+            "cell_order": "",
+            "frame_id": "",
+            "height": 0,
+            "map_id": "",
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
+        "occupancy_grid": {
+          "$ref": "#/$defs/OccupancyGridFrame"
+        },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath"
+        },
+        "point_cloud": {
+          "$ref": "#/$defs/PointCloudMetadata"
+        },
+        "pose": {
+          "$ref": "#/$defs/Pose2d"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "robot": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "twist": {
+          "$ref": "#/$defs/Twist2d",
+          "default": {
+            "angular_z_radps": 0.0,
+            "frame_id": "",
+            "linear_x_mps": 0.0,
+            "linear_y_mps": 0.0,
+            "ts_ms": 0
+          }
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "ts_ms",
+        "robot",
+        "profile",
+        "pose",
+        "path",
+        "occupancy_grid",
+        "point_cloud",
+        "detections",
+        "command"
+      ],
+      "title": "VisualizationFrame",
+      "type": "object"
+    },
+    "VisualizationPath": {
+      "$defs": {
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "poses": {
+          "items": {
+            "$ref": "#/$defs/Pose2d"
+          },
+          "type": "array"
+        },
+        "ts_ms": {
+          "default": 0,
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame_id",
+        "poses"
+      ],
+      "title": "VisualizationPath",
+      "type": "object"
+    }
+  },
+  "title": "Leash message schemas"
+}

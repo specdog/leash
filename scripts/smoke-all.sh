@@ -20,6 +20,7 @@ for (const key of [
   "LEASH_ALLOW_UNTOKENED_DRIVE",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
+  "LEASH_MAVLINK_ENDPOINT",
   "LEASH_POLICY_MODE",
   "LEASH_PROFILE",
   "LEASH_REPLAY_SOURCE",
@@ -33,29 +34,44 @@ for (const key of [
 
 const checks = [
   {
+    name: "message-schemas-current",
+    argv: ["cargo", "run", "--quiet", "--features", "mcp", "--bin", "leash-schema", "--", "--check"],
+    proof: "checked-in JSON Schemas matched Rust wire message types",
+  },
+  {
     name: "http-routes-and-policy",
     argv: ["bash", "scripts/smoke-http.sh"],
-    proof: "HTTP routes, WebSocket/SSE telemetry, agent input, capture, authorized drive, and drive-denial policy passed",
+    proof: "HTTP routes, WebSocket/SSE telemetry with visualization map/costmap frames, external clients, agent input, capture, authorized drive, and drive-denial policy passed",
   },
   {
     name: "mcp-stdio",
     argv: ["bash", "scripts/smoke-mcp.sh"],
-    proof: "stdio MCP initialization, tool list, and health call passed",
+    proof: "stdio MCP initialization, tool list, health call, and fake-detection observe passed",
   },
   {
     name: "mcp-http-cli",
     argv: ["bash", "scripts/smoke-mcp-http.sh"],
-    proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, and key=value/JSON direct calls passed",
+    proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, key=value/JSON direct calls, planner, patrol, and spatial-memory calls passed",
+  },
+  {
+    name: "stream-hub",
+    argv: ["bash", "scripts/smoke-stream-hub.sh"],
+    proof: "TCP JSONL stream hub accepted valid frames and kept serving after an invalid peer",
+  },
+  {
+    name: "worker-supervision",
+    argv: ["bash", "scripts/smoke-worker.sh"],
+    proof: "external worker supervisor started, reported, and stopped a child process",
   },
   {
     name: "replay-http-observe",
     argv: ["bash", "scripts/smoke-replay-http.sh"],
-    proof: "HTTP replay health, capabilities, and telemetry observe paths passed",
+    proof: "HTTP replay health, capabilities, telemetry observe, and fake detections passed",
   },
   {
     name: "replay-mcp-observe",
     argv: ["bash", "scripts/smoke-replay-mcp.sh"],
-    proof: "MCP replay health and observe paths passed",
+    proof: "MCP replay health, observe, and fake detections passed",
   },
   {
     name: "physical-gate",
@@ -73,16 +89,90 @@ const checks = [
     validate: (stdout) => {
       const stacks = JSON.parse(stdout);
       const names = stacks.map((stack) => stack.name);
-      for (const required of ["sim-http", "sim-mcp", "bridge-compat-http", "waveshare-ugv-http"]) {
+      for (const required of ["sim-http", "sim-mcp", "sim-stream-hub", "bridge-compat-http", "waveshare-ugv-http"]) {
         if (!names.includes(required)) {
           throw new Error(`missing stack ${required}`);
         }
+      }
+      const streamHub = stacks.find((stack) => stack.name === "sim-stream-hub");
+      if (!streamHub || streamHub.transport.kind !== "stream-hub") {
+        throw new Error("sim-stream-hub stack did not declare stream-hub transport");
       }
       const physical = stacks.find((stack) => stack.name === "waveshare-ugv-http");
       if (!physical.hardware_required) {
         throw new Error("waveshare stack did not declare hardware_required");
       }
+      if (!physical.adapter || physical.adapter.category !== "mobile-base") {
+        throw new Error("waveshare stack did not declare mobile-base adapter metadata");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("waveshare stack did not declare physical-actuation gate");
+      }
       return `listed ${stacks.length} built-in stacks`;
+    },
+  },
+  {
+    name: "stack-catalog-mavlink-drone",
+    argv: ["cargo", "run", "--quiet", "--features", "mavlink-drone", "--", "list", "--format", "json"],
+    validate: (stdout) => {
+      const stacks = JSON.parse(stdout);
+      const byName = new Map(stacks.map((stack) => [stack.name, stack]));
+      for (const required of ["mavlink-drone-sim", "mavlink-drone-replay", "mavlink-drone-http"]) {
+        if (!byName.has(required)) {
+          throw new Error(`missing stack ${required}`);
+        }
+      }
+      const sim = byName.get("mavlink-drone-sim");
+      const replay = byName.get("mavlink-drone-replay");
+      const physical = byName.get("mavlink-drone-http");
+      if (sim.hardware_required || replay.hardware_required) {
+        throw new Error("mavlink sim/replay stacks should not require hardware");
+      }
+      if (!physical.hardware_required) {
+        throw new Error("mavlink physical stack did not declare hardware_required");
+      }
+      if (sim.adapter.category !== "drone" || replay.adapter.category !== "drone" || physical.adapter.category !== "drone") {
+        throw new Error("mavlink stacks did not declare drone adapter metadata");
+      }
+      if (!sim.adapter.capabilities.includes("drone_arm") || !replay.adapter.capabilities.includes("drone_fly_to")) {
+        throw new Error("mavlink sim/replay stacks did not expose drone capabilities");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("mavlink physical stack did not declare physical-actuation gate");
+      }
+      return "mavlink drone sim/replay/physical stack metadata resolved without hardware";
+    },
+  },
+  {
+    name: "stack-catalog-manipulator",
+    argv: ["cargo", "run", "--quiet", "--features", "manipulator", "--", "list", "--format", "json"],
+    validate: (stdout) => {
+      const stacks = JSON.parse(stdout);
+      const byName = new Map(stacks.map((stack) => [stack.name, stack]));
+      for (const required of ["manipulator-sim", "manipulator-replay", "manipulator-http"]) {
+        if (!byName.has(required)) {
+          throw new Error(`missing stack ${required}`);
+        }
+      }
+      const sim = byName.get("manipulator-sim");
+      const replay = byName.get("manipulator-replay");
+      const physical = byName.get("manipulator-http");
+      if (sim.hardware_required || replay.hardware_required) {
+        throw new Error("manipulator sim/replay stacks should not require hardware");
+      }
+      if (!physical.hardware_required) {
+        throw new Error("manipulator physical stack did not declare hardware_required");
+      }
+      if (sim.adapter.category !== "manipulator" || replay.adapter.category !== "manipulator" || physical.adapter.category !== "manipulator") {
+        throw new Error("manipulator stacks did not declare manipulator adapter metadata");
+      }
+      if (!sim.adapter.capabilities.includes("manipulator_joint_state") || !replay.adapter.capabilities.includes("manipulator_pose_command")) {
+        throw new Error("manipulator sim/replay stacks did not expose manipulator capabilities");
+      }
+      if (!physical.adapter.required_gates.includes("physical-actuation")) {
+        throw new Error("manipulator physical stack did not declare physical-actuation gate");
+      }
+      return "manipulator sim/replay/physical stack metadata resolved without hardware";
     },
   },
   {

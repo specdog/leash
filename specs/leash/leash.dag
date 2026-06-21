@@ -9,19 +9,17 @@
       "The core Rust runtime. Safety gates (deadman, estop, soft-odometry-limit, physical-actuation-gate), pilot token sessions, sim+physical drivers, telemetry broadcast, capability registry.",
       [
         "role",
-        "s!",
+        "robot",
         "profile",
-        "e!",
-        "safety_gates",
-        "s!",
+        "sim",
         "deadman_ms",
-        "n!",
+        "400",
         "soft_odometry_limit_m",
-        "n!",
+        "0.0",
         "allow_physical_actuation",
-        "b!",
+        "false",
         "allow_untokened_drive",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -150,16 +148,12 @@
       "entity",
       "Typed module runtime. Coordinator starts modules in dependency order, stops in reverse. Health aggregation. Introspection exports.",
       [
-        "module_count",
-        "n!",
-        "stream_count",
-        "n!",
         "isolation",
-        "e!",
+        "in_process",
         "coordinator",
-        "b!",
+        "false",
         "introspection",
-        "b!"
+        "false"
       ],
       [
         "planned",
@@ -213,14 +207,12 @@
       "entity",
       "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.",
       [
-        "catalog",
-        "s!",
         "composition",
-        "b!",
+        "false",
         "built_in",
-        "b!",
+        "false",
         "versioned",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -261,16 +253,14 @@
       "entity",
       "Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.",
       [
-        "backends",
-        "s!",
         "backpressure",
-        "b!",
+        "true",
         "quality_filtering",
-        "b!",
+        "true",
         "timestamp_pairing",
-        "b!",
+        "true",
         "default_backend",
-        "e!"
+        "local-pubsub"
       ],
       [
         "planned",
@@ -292,16 +282,12 @@
       4,
       "Telemetry",
       "entity",
-      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.",
+      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, safety state, and viewer-ready visualization data.",
       [
-        "outputs",
-        "s!",
         "websocket",
-        "b!",
+        "true",
         "sse",
-        "b!",
-        "views",
-        "s!"
+        "true"
       ],
       [
         "planned",
@@ -336,11 +322,11 @@
       "Deterministic sensor record + replay. `leash record` + `leash replay`.",
       [
         "buffer_format",
-        "s!",
+        "leash-replay-v1",
         "determinism",
-        "b!",
+        "true",
         "sensor_record",
-        "b!"
+        "true"
       ],
       [
         "implemented",
@@ -375,11 +361,7 @@
       "CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.",
       [
         "listen",
-        "s!",
-        "commands",
-        "s!",
-        "http_endpoints",
-        "s!"
+        "127.0.0.1:8000"
       ],
       [
         "planned",
@@ -419,12 +401,7 @@
       "MCPServer",
       "entity",
       "MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.",
-      [
-        "tools",
-        "s!",
-        "transport",
-        "e!"
-      ],
+      [],
       [
         "planned",
         "implemented",
@@ -459,17 +436,17 @@
       "Waveshare Ubuntu UGV. Feature-gated. Serial JSON-line protocol.",
       [
         "target",
-        "s!",
+        "Waveshare Ubuntu UGV",
         "feature_flag",
-        "s!",
+        "waveshare-ugv",
         "serial_port",
-        "s!",
+        "/dev/ttyTHS1",
         "serial_baud",
-        "n!",
+        "115200",
         "drive_invert",
-        "b!",
+        "false",
         "drive_swap",
-        "b!"
+        "false"
       ],
       [
         "planned",
@@ -501,12 +478,7 @@
       "Bridge",
       "entity",
       "Compatibility layer for existing robot bridge clients.",
-      [
-        "clients",
-        "s!",
-        "shim_layer",
-        "s!"
-      ],
+      [],
       [
         "planned",
         "mapped",
@@ -534,14 +506,10 @@
       "entity",
       "Runtime safety gates + smoke scripts + policy-gated capability invocation.",
       [
-        "gates",
-        "s!",
-        "smoke_scripts",
-        "s!",
         "policy",
-        "b!",
+        "true",
         "audit_events",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -591,12 +559,7 @@
       "ReleasePipeline",
       "entity",
       "Packages for crates.io + GitHub binaries.",
-      [
-        "targets",
-        "s!",
-        "platforms",
-        "s!"
-      ],
+      [],
       [
         "planned",
         "configured",
@@ -630,13 +593,11 @@
       "Crate skeleton, MIT license, CI, repo provenance.",
       [
         "license",
-        "s!",
+        "MIT",
         "ci_platform",
-        "s!",
+        "GitHub Actions",
         "crate_name",
-        "s!",
-        "features",
-        "s!"
+        "leash-harness"
       ],
       [
         "planned",
@@ -658,16 +619,8 @@
       "entity",
       "Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.",
       [
-        "providers",
-        "s!",
-        "channels",
-        "s!",
-        "message_stream",
-        "s!",
-        "config",
-        "s!",
         "ci_model",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -697,14 +650,8 @@
       "entity",
       "Shared registry with schema + safety metadata. Routes HTTP, MCP, agent calls.",
       [
-        "safety_classes",
-        "s!",
-        "policy_modes",
-        "s!",
-        "invocation_origins",
-        "s!",
         "schema_validation",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -731,6 +678,12 @@
           1
         ],
         [
+          15,
+          "exposes",
+          "1:1",
+          1
+        ],
+        [
           17,
           "routes_through",
           "1:1",
@@ -745,11 +698,11 @@
       "Detection/observation adapter. Spatial memory + object registry.",
       [
         "adapter",
-        "b!",
+        "false",
         "spatial_memory",
-        "b!",
+        "true",
         "store",
-        "e!"
+        "file_backed"
       ],
       [
         "planned",
@@ -757,6 +710,12 @@
         "active"
       ],
       [
+        [
+          14,
+          "exposes",
+          "1:1",
+          1
+        ],
         [
           0,
           "observes",
@@ -774,16 +733,14 @@
       16,
       "Navigation",
       "entity",
-      "Occupancy-grid + costmap primitives. Sim waypoint router + patrol.",
+      "Occupancy-grid + costmap primitives, sim waypoint router, and sim patrol.",
       [
-        "messages",
-        "s!",
         "planner",
-        "b!",
+        "true",
         "patrol",
-        "b!",
+        "true",
         "sim_only",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -809,14 +766,12 @@
       17,
       "CommandCenter",
       "entity",
-      "Localhost web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.",
+      "Localhost server-rendered web dashboard. Health, telemetry, modules, caps, logs, estop/stop controls.",
       [
         "feature_flag",
-        "s!",
+        "dashboard",
         "bind",
-        "s!",
-        "views",
-        "s!"
+        "localhost"
       ],
       [
         "planned",
@@ -845,13 +800,11 @@
       "MAVLink drone skeleton. Feature-gated. Sim/replay mode.",
       [
         "target",
-        "s!",
+        "MAVLink drone",
         "feature_flag",
-        "s!",
-        "capabilities",
-        "s!",
+        "mavlink-drone",
         "sim_replay",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -879,11 +832,11 @@
       "Manipulator arm + teleop skeleton. Feature-gated.",
       [
         "target",
-        "s!",
+        "robot arm manipulator",
         "feature_flag",
-        "s!",
+        "manipulator",
         "teleop",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -910,12 +863,8 @@
       "entity",
       "Adapter profile matrix + plugin boundary. Categories, maturity levels.",
       [
-        "categories",
-        "s!",
-        "maturity_levels",
-        "s!",
         "plugin_boundary",
-        "b!"
+        "false"
       ],
       [
         "planned",
@@ -949,12 +898,8 @@
       "entity",
       "Background run registry. XDG state dir. `leash run --daemon`, status, log, stop, restart.",
       [
-        "state_dir",
-        "s!",
-        "commands",
-        "s!",
         "graceful_stop",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -976,16 +921,10 @@
       "entity",
       "Resolved config precedence. `leash show-config`.",
       [
-        "precedence",
-        "s!",
         "show_config",
-        "b!",
-        "agent_provider",
-        "s!",
+        "true",
         "secret_redaction",
-        "b!",
-        "policy_mode",
-        "s!"
+        "true"
       ],
       [
         "planned",
@@ -1008,13 +947,13 @@
       "Structured JSONL logs. Lightweight resource monitor.",
       [
         "format",
-        "e!",
+        "jsonl",
         "resource_monitor",
-        "b!",
+        "false",
         "cli_json",
-        "b!",
+        "true",
         "module_filter",
-        "b!"
+        "true"
       ],
       [
         "planned",
@@ -1036,12 +975,10 @@
       "entity",
       "Feature tiers + dependency tiers + CI build matrix.",
       [
-        "tiers",
-        "s!",
         "default",
-        "s!",
+        "core+sim+http+mcp",
         "ci_matrix",
-        "b!"
+        "false"
       ],
       [
         "planned",
@@ -1062,12 +999,7 @@
       "CrossLanguage",
       "entity",
       "Cross-language message schemas + client examples.",
-      [
-        "schemas",
-        "s!",
-        "clients",
-        "s!"
-      ],
+      [],
       [
         "planned",
         "implemented",
@@ -1088,12 +1020,10 @@
       "entity",
       "Full no-hardware smoke suite for release proof.",
       [
-        "coverage",
-        "s!",
         "no_hardware",
-        "b!",
+        "true",
         "ci_integration",
-        "b!"
+        "false"
       ],
       [
         "planned",
@@ -1118,11 +1048,12 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 7913,
-    "ct": 7913,
-    "dt": 2053,
-    "sv": 74.1,
-    "cs": 74.1,
-    "saved": 5860
-  }
+    "st": 8999,
+    "ct": 8999,
+    "dt": 1983,
+    "sv": 78,
+    "cs": 78,
+    "saved": 7016
+  },
+  "compact": "[lea]\nHarness→Bootstrap:provi(11)>ModuleGraph:conta(11)>CLI:power(11)>MCPServer:power(11)>Bridge:expos(1m)>Stacks:targe(m1)>Telemetry:intro(11)>UGVAdapter:adapt(11)>Safety:gates(11)>ReleasePipeline:packa(11)>Agent:comma(11)>CapabilityRegistry:gates(11)>Perception:obser(11)>Navigation:contr(11)>CommandCenter:visua(11)>DroneAdapter:adapt(11)>ManipulatorAdapter:adapt(11)>Logging:monit(11)>SmokeSuite:verif(11)\nModuleGraph→Harness:conta(11)>Stacks:insta(1m)>Transport:conne(11)>Telemetry:obser(11)>Safety:gates(11)>MCPServer:expos(11)\nSafety→Harness:gates(11)>ModuleGraph:gates(11)>UGVAdapter:gates(11)>Replay:verif(11)>CapabilityRegistry:enfor(11)>SmokeSuite:prove(11)\nCapabilityRegistry→Agent:route(11)>Harness:gates(11)>Safety:enfor(11)>Perception:expos(11)>CommandCenter:route(11)\nStacks→ModuleGraph:insta(1m)>Harness:targe(m1)>Replay:exerc(1m)>MCPServer:launc(1m)\nCLI→Harness:power(11)>Bridge:docum(m1)>Daemon:exten(11)>Config:feeds(11)\nTelemetry→ModuleGraph:obser(11)>Harness:intro(11)>Replay:feeds(11)\nReplay→Stacks:exerc(1m)>Telemetry:feeds(11)>Safety:verif(11)\nMCPServer→Harness:power(11)>ModuleGraph:expos(11)>Stacks:launc(1m)\nUGVAdapter→Harness:adapt(11)>Safety:gates(11)>HardwareMatrix:class(11)\nReleasePipeline→Harness:packa(11)>ReleaseMatrix:gates(11)>CrossLanguage:docum(11)\nPerception→CapabilityRegistry:expos(11)>Harness:obser(11)>Navigation:depen(11)\nHardwareMatrix→UGVAdapter:class(11)>DroneAdapter:class(11)>ManipulatorAdapter:class(11)\nBridge→Harness:expos(1m)>CLI:docum(m1)\nAgent→Harness:comma(11)>CapabilityRegistry:route(11)\nNavigation→Harness:contr(11)>Perception:depen(11)\nCommandCenter→Harness:visua(11)>CapabilityRegistry:route(11)\nDroneAdapter→Harness:adapt(11)>HardwareMatrix:class(11)\nManipulatorAdapter→Harness:adapt(11)>HardwareMatrix:class(11)\nSmokeSuite→Safety:prove(11)>Harness:verif(11)"
 }

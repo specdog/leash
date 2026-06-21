@@ -15,6 +15,7 @@ use crate::{
 pub enum StackTransport {
     Http,
     Mcp,
+    StreamHub,
 }
 
 impl StackTransport {
@@ -22,6 +23,7 @@ impl StackTransport {
         match self {
             Self::Http => "http",
             Self::Mcp => "mcp",
+            Self::StreamHub => "stream-hub",
         }
     }
 }
@@ -42,6 +44,65 @@ pub struct StackModule {
     pub physical: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AdapterCategory {
+    Simulation,
+    Compatibility,
+    MobileBase,
+    Drone,
+    Manipulator,
+    Perception,
+    Sensor,
+}
+
+impl AdapterCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Simulation => "simulation",
+            Self::Compatibility => "compatibility",
+            Self::MobileBase => "mobile-base",
+            Self::Drone => "drone",
+            Self::Manipulator => "manipulator",
+            Self::Perception => "perception",
+            Self::Sensor => "sensor",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AdapterMaturity {
+    Stable,
+    Beta,
+    Alpha,
+    Experimental,
+}
+
+impl AdapterMaturity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+            Self::Alpha => "alpha",
+            Self::Experimental => "experimental",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AdapterProfile {
+    pub category: AdapterCategory,
+    pub maturity: AdapterMaturity,
+    pub capabilities: Vec<String>,
+    pub feature_flags: Vec<String>,
+    pub required_gates: Vec<String>,
+    pub boundary: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Stack {
@@ -51,6 +112,7 @@ pub struct Stack {
     pub transport: TransportBinding,
     pub required_features: Vec<String>,
     pub hardware_required: bool,
+    pub adapter: AdapterProfile,
     pub config_overrides: PartialHarnessConfig,
     pub modules: Vec<StackModule>,
     pub command: String,
@@ -63,6 +125,33 @@ impl Stack {
                 "stack '{}' hardware metadata does not match profile '{}'",
                 self.name,
                 self.profile.as_str()
+            );
+        }
+
+        for feature in &self.adapter.feature_flags {
+            if !self.required_features.contains(feature) {
+                bail!(
+                    "stack '{}' adapter feature '{}' is missing from required_features",
+                    self.name,
+                    feature
+                );
+            }
+        }
+
+        if self.adapter.capabilities.is_empty() {
+            bail!("stack '{}' adapter must declare capabilities", self.name);
+        }
+
+        if self.hardware_required
+            && !self
+                .adapter
+                .required_gates
+                .iter()
+                .any(|gate| gate == "physical-actuation")
+        {
+            bail!(
+                "stack '{}' physical adapter must declare physical-actuation gate",
+                self.name
             );
         }
 
@@ -97,12 +186,35 @@ impl Stack {
 }
 
 pub fn built_in_stacks() -> Vec<Stack> {
-    vec![
+    feature_stacks(vec![
         sim_http_stack(),
         sim_mcp_stack(),
+        sim_stream_hub_stack(),
         bridge_compat_http_stack(),
         waveshare_ugv_http_stack(),
-    ]
+    ])
+}
+
+#[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
+fn feature_stacks(mut stacks: Vec<Stack>) -> Vec<Stack> {
+    #[cfg(feature = "mavlink-drone")]
+    {
+        stacks.push(mavlink_drone_sim_stack());
+        stacks.push(mavlink_drone_replay_stack());
+        stacks.push(mavlink_drone_http_stack());
+    }
+    #[cfg(feature = "manipulator")]
+    {
+        stacks.push(manipulator_sim_stack());
+        stacks.push(manipulator_replay_stack());
+        stacks.push(manipulator_http_stack());
+    }
+    stacks
+}
+
+#[cfg(not(any(feature = "mavlink-drone", feature = "manipulator")))]
+fn feature_stacks(stacks: Vec<Stack>) -> Vec<Stack> {
+    stacks
 }
 
 pub fn find_stack(name: &str) -> Option<Stack> {
@@ -124,6 +236,16 @@ pub fn resolve_stack(name: &str) -> Result<Stack> {
     Ok(stack)
 }
 
+pub fn adapter_profile_for_profile(profile: Profile) -> AdapterProfile {
+    match profile {
+        Profile::Sim => simulation_adapter_profile(),
+        Profile::Replay => replay_adapter_profile(),
+        Profile::WaveshareUgv => waveshare_ugv_adapter_profile(),
+        Profile::MavlinkDrone => mavlink_drone_adapter_profile(),
+        Profile::Manipulator => manipulator_adapter_profile(),
+    }
+}
+
 fn sim_http_stack() -> Stack {
     Stack {
         name: "sim-http".to_string(),
@@ -135,6 +257,7 @@ fn sim_http_stack() -> Stack {
         },
         required_features: strings(&["sim", "http"]),
         hardware_required: false,
+        adapter: simulation_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("127.0.0.1:8000")),
             ..PartialHarnessConfig::default()
@@ -155,9 +278,31 @@ fn sim_mcp_stack() -> Stack {
         },
         required_features: strings(&["sim", "mcp"]),
         hardware_required: false,
+        adapter: simulation_adapter_profile(),
         config_overrides: PartialHarnessConfig::default(),
         modules: module_refs(Profile::Sim),
         command: "leash run sim-mcp".to_string(),
+    }
+}
+
+fn sim_stream_hub_stack() -> Stack {
+    Stack {
+        name: "sim-stream-hub".to_string(),
+        description: "Simulation TCP JSONL stream hub for external module links".to_string(),
+        profile: Profile::Sim,
+        transport: TransportBinding {
+            kind: StackTransport::StreamHub,
+            listen: Some(socket("127.0.0.1:9970")),
+        },
+        required_features: strings(&["sim"]),
+        hardware_required: false,
+        adapter: simulation_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("127.0.0.1:9970")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Sim),
+        command: "leash run sim-stream-hub".to_string(),
     }
 }
 
@@ -172,6 +317,7 @@ fn bridge_compat_http_stack() -> Stack {
         },
         required_features: strings(&["sim", "http", "bridge-compat"]),
         hardware_required: false,
+        adapter: bridge_compat_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("127.0.0.1:8001")),
             ..PartialHarnessConfig::default()
@@ -192,6 +338,7 @@ fn waveshare_ugv_http_stack() -> Stack {
         },
         required_features: strings(&["http", "waveshare-ugv"]),
         hardware_required: true,
+        adapter: waveshare_ugv_adapter_profile(),
         config_overrides: PartialHarnessConfig {
             listen: Some(socket("0.0.0.0:8000")),
             ..PartialHarnessConfig::default()
@@ -203,11 +350,288 @@ fn waveshare_ugv_http_stack() -> Stack {
     }
 }
 
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_sim_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-sim".to_string(),
+        description: "No-hardware MAVLink drone adapter skeleton in simulation".to_string(),
+        profile: Profile::Sim,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("127.0.0.1:8010")),
+        },
+        required_features: strings(&["sim", "http", "mavlink-drone"]),
+        hardware_required: false,
+        adapter: mavlink_drone_sim_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("127.0.0.1:8010")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Sim),
+        command: "leash run mavlink-drone-sim".to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_replay_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-replay".to_string(),
+        description: "Fixture-backed MAVLink drone adapter skeleton for replay proof".to_string(),
+        profile: Profile::Replay,
+        transport: TransportBinding {
+            kind: StackTransport::Mcp,
+            listen: None,
+        },
+        required_features: strings(&["mcp", "mavlink-drone"]),
+        hardware_required: false,
+        adapter: mavlink_drone_replay_adapter_profile(),
+        config_overrides: PartialHarnessConfig::default(),
+        modules: module_refs(Profile::Replay),
+        command: "leash run mavlink-drone-replay --replay-source examples/replay/sim-basic.jsonl"
+            .to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_http_stack() -> Stack {
+    Stack {
+        name: "mavlink-drone-http".to_string(),
+        description: "Gated MAVLink drone HTTP runtime skeleton".to_string(),
+        profile: Profile::MavlinkDrone,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("0.0.0.0:8010")),
+        },
+        required_features: strings(&["http", "mavlink-drone"]),
+        hardware_required: true,
+        adapter: mavlink_drone_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("0.0.0.0:8010")),
+            mavlink_endpoint: Some("udp://127.0.0.1:14550".to_string()),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::MavlinkDrone),
+        command:
+            "LEASH_ALLOW_PHYSICAL_ACTUATION=1 LEASH_MAVLINK_ENDPOINT=udp://127.0.0.1:14550 leash run mavlink-drone-http --allow-physical-actuation"
+                .to_string(),
+    }
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_sim_stack() -> Stack {
+    Stack {
+        name: "manipulator-sim".to_string(),
+        description: "No-hardware manipulator teleop skeleton with mock joint state".to_string(),
+        profile: Profile::Sim,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("127.0.0.1:8020")),
+        },
+        required_features: strings(&["sim", "http", "manipulator"]),
+        hardware_required: false,
+        adapter: manipulator_sim_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("127.0.0.1:8020")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Sim),
+        command: "leash run manipulator-sim".to_string(),
+    }
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_replay_stack() -> Stack {
+    Stack {
+        name: "manipulator-replay".to_string(),
+        description: "Fixture-backed manipulator skeleton for replay proof".to_string(),
+        profile: Profile::Replay,
+        transport: TransportBinding {
+            kind: StackTransport::Mcp,
+            listen: None,
+        },
+        required_features: strings(&["mcp", "manipulator"]),
+        hardware_required: false,
+        adapter: manipulator_replay_adapter_profile(),
+        config_overrides: PartialHarnessConfig::default(),
+        modules: module_refs(Profile::Replay),
+        command: "leash run manipulator-replay --replay-source examples/replay/sim-basic.jsonl"
+            .to_string(),
+    }
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_http_stack() -> Stack {
+    Stack {
+        name: "manipulator-http".to_string(),
+        description: "Gated physical manipulator HTTP runtime skeleton".to_string(),
+        profile: Profile::Manipulator,
+        transport: TransportBinding {
+            kind: StackTransport::Http,
+            listen: Some(socket("0.0.0.0:8020")),
+        },
+        required_features: strings(&["http", "manipulator"]),
+        hardware_required: true,
+        adapter: manipulator_adapter_profile(),
+        config_overrides: PartialHarnessConfig {
+            listen: Some(socket("0.0.0.0:8020")),
+            ..PartialHarnessConfig::default()
+        },
+        modules: module_refs(Profile::Manipulator),
+        command:
+            "LEASH_ALLOW_PHYSICAL_ACTUATION=1 leash run manipulator-http --allow-physical-actuation"
+                .to_string(),
+    }
+}
+
+fn simulation_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Simulation,
+        maturity: AdapterMaturity::Stable,
+        capabilities: strings(&[
+            "drive",
+            "speed_mode",
+            "stop",
+            "estop",
+            "estop_reset",
+            "observe",
+            "capture",
+        ]),
+        feature_flags: strings(&["sim"]),
+        required_gates: Vec::new(),
+        boundary: "in-crate simulation driver; no hardware or external process boundary"
+            .to_string(),
+    }
+}
+
+fn replay_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Simulation,
+        maturity: AdapterMaturity::Beta,
+        capabilities: strings(&["observe", "capture"]),
+        feature_flags: Vec::new(),
+        required_gates: Vec::new(),
+        boundary: "fixture-backed replay source; deterministic and non-physical".to_string(),
+    }
+}
+
+fn bridge_compat_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Compatibility,
+        maturity: AdapterMaturity::Beta,
+        capabilities: strings(&["drive", "stop", "estop", "observe"]),
+        feature_flags: strings(&["sim", "bridge-compat"]),
+        required_gates: Vec::new(),
+        boundary: "HTTP compatibility shim over the simulation adapter".to_string(),
+    }
+}
+
+fn waveshare_ugv_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::MobileBase,
+        maturity: AdapterMaturity::Alpha,
+        capabilities: strings(&["drive", "speed_mode", "stop", "estop", "observe", "capture"]),
+        feature_flags: strings(&["waveshare-ugv"]),
+        required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
+        boundary: "feature-gated RobotDriver implementation; serial I/O isolated from core policy"
+            .to_string(),
+    }
+}
+
+fn mavlink_drone_capabilities() -> Vec<String> {
+    strings(&[
+        "drone_arm",
+        "drone_disarm",
+        "drone_takeoff",
+        "drone_land",
+        "drone_move_velocity",
+        "drone_fly_to",
+        "observe",
+        "stop",
+    ])
+}
+
+fn mavlink_drone_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Drone,
+        maturity: AdapterMaturity::Experimental,
+        capabilities: mavlink_drone_capabilities(),
+        feature_flags: strings(&["mavlink-drone"]),
+        required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
+        boundary: "feature-gated MAVLink adapter skeleton; network endpoint is configured but flight I/O is intentionally externalized".to_string(),
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_sim_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Alpha,
+        required_gates: Vec::new(),
+        boundary: "simulated MAVLink drone capability surface; no flight hardware or network I/O"
+            .to_string(),
+        ..mavlink_drone_adapter_profile()
+    }
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn mavlink_drone_replay_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Beta,
+        required_gates: Vec::new(),
+        boundary: "replay-backed MAVLink drone capability surface; deterministic and non-physical"
+            .to_string(),
+        ..mavlink_drone_adapter_profile()
+    }
+}
+
+fn manipulator_capabilities() -> Vec<String> {
+    strings(&[
+        "manipulator_joint_state",
+        "manipulator_joint_command",
+        "manipulator_pose_command",
+        "manipulator_home",
+        "stop",
+    ])
+}
+
+fn manipulator_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        category: AdapterCategory::Manipulator,
+        maturity: AdapterMaturity::Experimental,
+        capabilities: manipulator_capabilities(),
+        feature_flags: strings(&["manipulator"]),
+        required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
+        boundary: "feature-gated manipulator skeleton; IK, planning, and hardware SDK bindings stay out-of-process or in a future adapter crate".to_string(),
+    }
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_sim_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Alpha,
+        required_gates: Vec::new(),
+        boundary: "mock manipulator teleop adapter; no hardware or IK process required".to_string(),
+        ..manipulator_adapter_profile()
+    }
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_replay_adapter_profile() -> AdapterProfile {
+    AdapterProfile {
+        maturity: AdapterMaturity::Beta,
+        required_gates: Vec::new(),
+        boundary: "replay-backed manipulator capability surface; deterministic and non-physical"
+            .to_string(),
+        ..manipulator_adapter_profile()
+    }
+}
+
 fn module_refs(profile: Profile) -> Vec<StackModule> {
     let driver = match profile {
         Profile::Sim => ("sim-driver", false),
         Profile::Replay => ("replay-driver", false),
         Profile::WaveshareUgv => ("waveshare-ugv-driver", true),
+        Profile::MavlinkDrone => ("mavlink-drone-driver", true),
+        Profile::Manipulator => ("manipulator-driver", true),
     };
     vec![
         stack_module("harness-runtime", "runtime", true, false),
@@ -245,15 +669,121 @@ mod tests {
         let stacks = built_in_stacks();
         assert!(stacks.iter().any(|stack| stack.name == "sim-http"));
         assert!(stacks.iter().any(|stack| stack.name == "sim-mcp"));
+        assert!(stacks.iter().any(|stack| stack.name == "sim-stream-hub"));
         assert!(stacks
             .iter()
             .any(|stack| stack.name == "bridge-compat-http"));
         assert!(stacks
             .iter()
             .any(|stack| stack.name == "waveshare-ugv-http"));
+        #[cfg(feature = "mavlink-drone")]
+        {
+            assert!(stacks.iter().any(|stack| stack.name == "mavlink-drone-sim"));
+            assert!(stacks
+                .iter()
+                .any(|stack| stack.name == "mavlink-drone-replay"));
+            assert!(stacks
+                .iter()
+                .any(|stack| stack.name == "mavlink-drone-http"));
+        }
+        #[cfg(feature = "manipulator")]
+        {
+            assert!(stacks.iter().any(|stack| stack.name == "manipulator-sim"));
+            assert!(stacks
+                .iter()
+                .any(|stack| stack.name == "manipulator-replay"));
+            assert!(stacks.iter().any(|stack| stack.name == "manipulator-http"));
+        }
 
         for stack in stacks {
             stack.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn stack_adapter_profiles_form_the_hardware_matrix() {
+        let stacks = built_in_stacks();
+        let physical = stacks
+            .iter()
+            .find(|stack| stack.name == "waveshare-ugv-http")
+            .unwrap();
+        assert_eq!(physical.adapter.category, AdapterCategory::MobileBase);
+        assert_eq!(physical.adapter.maturity, AdapterMaturity::Alpha);
+        assert!(physical
+            .adapter
+            .feature_flags
+            .contains(&"waveshare-ugv".to_string()));
+        assert!(physical
+            .adapter
+            .required_gates
+            .contains(&"physical-actuation".to_string()));
+        assert!(physical.adapter.capabilities.contains(&"drive".to_string()));
+
+        let sim = adapter_profile_for_profile(Profile::Sim);
+        assert_eq!(sim.category, AdapterCategory::Simulation);
+        assert!(sim.required_gates.is_empty());
+
+        let stream_hub = stacks
+            .iter()
+            .find(|stack| stack.name == "sim-stream-hub")
+            .unwrap();
+        assert_eq!(stream_hub.transport.kind, StackTransport::StreamHub);
+        assert!(!stream_hub.hardware_required);
+        assert_eq!(stream_hub.transport.listen, Some(socket("127.0.0.1:9970")));
+
+        #[cfg(feature = "mavlink-drone")]
+        {
+            let drone = stacks
+                .iter()
+                .find(|stack| stack.name == "mavlink-drone-http")
+                .unwrap();
+            assert_eq!(drone.adapter.category, AdapterCategory::Drone);
+            assert_eq!(drone.adapter.maturity, AdapterMaturity::Experimental);
+            assert!(drone
+                .adapter
+                .capabilities
+                .contains(&"drone_arm".to_string()));
+            assert!(drone
+                .adapter
+                .required_gates
+                .contains(&"physical-actuation".to_string()));
+
+            let drone_sim = stacks
+                .iter()
+                .find(|stack| stack.name == "mavlink-drone-sim")
+                .unwrap();
+            assert_eq!(drone_sim.adapter.category, AdapterCategory::Drone);
+            assert!(!drone_sim.hardware_required);
+            assert!(drone_sim.adapter.required_gates.is_empty());
+        }
+
+        #[cfg(feature = "manipulator")]
+        {
+            let manipulator = stacks
+                .iter()
+                .find(|stack| stack.name == "manipulator-http")
+                .unwrap();
+            assert_eq!(manipulator.adapter.category, AdapterCategory::Manipulator);
+            assert_eq!(manipulator.adapter.maturity, AdapterMaturity::Experimental);
+            assert!(manipulator
+                .adapter
+                .capabilities
+                .contains(&"manipulator_joint_command".to_string()));
+            assert!(manipulator
+                .adapter
+                .required_gates
+                .contains(&"physical-actuation".to_string()));
+
+            let manipulator_sim = stacks
+                .iter()
+                .find(|stack| stack.name == "manipulator-sim")
+                .unwrap();
+            assert_eq!(
+                manipulator_sim.adapter.category,
+                AdapterCategory::Manipulator
+            );
+            assert!(!manipulator_sim.hardware_required);
+            assert!(manipulator_sim.adapter.required_gates.is_empty());
         }
     }
 
@@ -279,5 +809,42 @@ mod tests {
 
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("physical profile 'waveshare-ugv' refuses to start"));
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[test]
+    fn mavlink_drone_stack_resolves_before_refusing_without_gate() {
+        let stack = resolve_stack("mavlink-drone-http").unwrap();
+        let config = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: Some(stack.profile),
+            stack_defaults: stack.config_overrides,
+            env: BTreeMap::new(),
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap()
+        .config;
+
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("physical profile 'mavlink-drone' refuses to start"));
+        assert_eq!(config.mavlink_endpoint, "udp://127.0.0.1:14550");
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[test]
+    fn manipulator_stack_resolves_before_refusing_without_gate() {
+        let stack = resolve_stack("manipulator-http").unwrap();
+        let config = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: Some(stack.profile),
+            stack_defaults: stack.config_overrides,
+            env: BTreeMap::new(),
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap()
+        .config;
+
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("physical profile 'manipulator' refuses to start"));
     }
 }

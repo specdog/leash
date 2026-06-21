@@ -2,7 +2,12 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{config::PolicyMode, runtime::Harness, types::SpeedMode};
+use crate::{
+    config::PolicyMode,
+    memory::{SpatialMemoryQuery, SpatialMemoryTag},
+    runtime::Harness,
+    types::{PatrolStrategy, PlannerGoal, SpatialMemoryKind, SpeedMode},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -232,6 +237,220 @@ impl CapabilityRegistry {
                 self.harness.reset_estop(token.as_deref())?;
                 Ok(json!({ "ok": true, "estop": false }))
             }
+            "planner_set_goal" => {
+                ensure_fields(
+                    &args,
+                    &["frame_id", "x_m", "y_m", "tolerance_m", "speed_mode"],
+                )?;
+                let goal = PlannerGoal {
+                    frame_id: optional_string(&args, "frame_id")?
+                        .unwrap_or_else(|| "map".to_string()),
+                    x_m: required_f64(&args, "x_m")?,
+                    y_m: required_f64(&args, "y_m")?,
+                    tolerance_m: optional_f64(&args, "tolerance_m")?.unwrap_or(0.1),
+                    speed_mode: optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low),
+                };
+                serde_json::to_value(self.harness.set_planner_goal(goal)?).map_err(Into::into)
+            }
+            "planner_cancel" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.cancel_planner_goal()?).map_err(Into::into)
+            }
+            "planner_status" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.planner_status()).map_err(Into::into)
+            }
+            "start_patrol" => {
+                ensure_fields(&args, &["strategy", "speed_mode"])?;
+                let strategy = optional_patrol_strategy(&args, "strategy")?.unwrap_or_default();
+                let speed_mode =
+                    optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low);
+                serde_json::to_value(self.harness.start_patrol(strategy, speed_mode)?)
+                    .map_err(Into::into)
+            }
+            "stop_patrol" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.stop_patrol()?).map_err(Into::into)
+            }
+            "patrol_status" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.patrol_status()).map_err(Into::into)
+            }
+            "memory_tag_location" => {
+                ensure_fields(
+                    &args,
+                    &["name", "kind", "frame_id", "x_m", "y_m", "confidence"],
+                )?;
+                let tag = SpatialMemoryTag {
+                    name: required_string(&args, "name")?,
+                    kind: optional_spatial_memory_kind(&args, "kind")?.unwrap_or_default(),
+                    frame_id: optional_string(&args, "frame_id")?
+                        .unwrap_or_else(|| "map".to_string()),
+                    x_m: required_f64(&args, "x_m")?,
+                    y_m: required_f64(&args, "y_m")?,
+                    confidence: optional_f64(&args, "confidence")?.unwrap_or(1.0),
+                };
+                serde_json::to_value(self.harness.tag_spatial_memory(tag)?).map_err(Into::into)
+            }
+            "memory_list" => {
+                ensure_fields(&args, &["include_stale"])?;
+                let include_stale = optional_bool(&args, "include_stale")?.unwrap_or(true);
+                serde_json::to_value(self.harness.query_spatial_memory(SpatialMemoryQuery {
+                    include_stale,
+                    ..SpatialMemoryQuery::default()
+                })?)
+                .map_err(Into::into)
+            }
+            "memory_query" => {
+                ensure_fields(&args, &["query", "kind", "min_confidence", "include_stale"])?;
+                let query = optional_string(&args, "query")?;
+                let kind = optional_spatial_memory_kind(&args, "kind")?;
+                let min_confidence = optional_f64(&args, "min_confidence")?;
+                let include_stale = optional_bool(&args, "include_stale")?.unwrap_or(true);
+                serde_json::to_value(self.harness.query_spatial_memory(SpatialMemoryQuery {
+                    query,
+                    kind,
+                    min_confidence,
+                    include_stale,
+                })?)
+                .map_err(Into::into)
+            }
+            "memory_clear" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.clear_spatial_memory()?).map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_arm" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "arm",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_disarm" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "disarm",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_takeoff" => {
+                ensure_fields(&args, &["token", "altitude_m"])?;
+                let token = optional_string(&args, "token")?;
+                let altitude_m = optional_f64(&args, "altitude_m")?.unwrap_or(2.0);
+                serde_json::to_value(self.harness.drone_command(
+                    "takeoff",
+                    token.as_deref(),
+                    json!({ "altitude_m": altitude_m }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_land" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "land",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_move_velocity" => {
+                ensure_fields(
+                    &args,
+                    &["token", "vx_mps", "vy_mps", "vz_mps", "yaw_rate_radps"],
+                )?;
+                let token = optional_string(&args, "token")?;
+                let vx_mps = optional_f64(&args, "vx_mps")?.unwrap_or(0.0);
+                let vy_mps = optional_f64(&args, "vy_mps")?.unwrap_or(0.0);
+                let vz_mps = optional_f64(&args, "vz_mps")?.unwrap_or(0.0);
+                let yaw_rate_radps = optional_f64(&args, "yaw_rate_radps")?.unwrap_or(0.0);
+                serde_json::to_value(self.harness.drone_command(
+                    "move_velocity",
+                    token.as_deref(),
+                    json!({
+                        "vx_mps": vx_mps,
+                        "vy_mps": vy_mps,
+                        "vz_mps": vz_mps,
+                        "yaw_rate_radps": yaw_rate_radps
+                    }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "mavlink-drone")]
+            "drone_fly_to" => {
+                ensure_fields(&args, &["token", "lat_deg", "lon_deg", "altitude_m"])?;
+                let token = optional_string(&args, "token")?;
+                let lat_deg = required_f64(&args, "lat_deg")?;
+                let lon_deg = required_f64(&args, "lon_deg")?;
+                let altitude_m = required_f64(&args, "altitude_m")?;
+                serde_json::to_value(self.harness.drone_command(
+                    "fly_to",
+                    token.as_deref(),
+                    json!({
+                        "lat_deg": lat_deg,
+                        "lon_deg": lon_deg,
+                        "altitude_m": altitude_m
+                    }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_joint_state" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.manipulator_joint_state()).map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_joint_command" => {
+                ensure_fields(&args, &["token", "joints"])?;
+                let token = optional_string(&args, "token")?;
+                let joints = args
+                    .get("joints")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("joints is required"))?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "joint_command",
+                    token.as_deref(),
+                    json!({ "joints": joints }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_pose_command" => {
+                ensure_fields(&args, &["token", "pose"])?;
+                let token = optional_string(&args, "token")?;
+                let pose = args
+                    .get("pose")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("pose is required"))?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "pose_command",
+                    token.as_deref(),
+                    json!({ "pose": pose }),
+                )?)
+                .map_err(Into::into)
+            }
+            #[cfg(feature = "manipulator")]
+            "manipulator_home" => {
+                ensure_fields(&args, &["token"])?;
+                let token = optional_string(&args, "token")?;
+                serde_json::to_value(self.harness.manipulator_command(
+                    "home",
+                    token.as_deref(),
+                    json!({}),
+                )?)
+                .map_err(Into::into)
+            }
             other => Err(anyhow!("unknown capability '{other}'")),
         }
     }
@@ -346,7 +565,7 @@ impl CapabilityRegistry {
 }
 
 pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
-    vec![
+    let descriptors = vec![
         descriptor(
             "health",
             "Read harness health and safety state",
@@ -430,6 +649,223 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
             "EstopResp",
         ),
+        descriptor(
+            "planner_set_goal",
+            "Set a sim-only waypoint goal and begin local planner drive commands",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("frame_id", "string", false),
+                ("x_m", "number", true),
+                ("y_m", "number", true),
+                ("tolerance_m", "number", false),
+                ("speed_mode", "SpeedMode", false),
+            ]),
+            "PlannerStatus",
+        ),
+        descriptor(
+            "planner_cancel",
+            "Cancel the active sim planner goal and stop movement",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "PlannerStatus",
+        ),
+        descriptor(
+            "planner_status",
+            "Report the current sim planner goal, path, and last drive command",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "PlannerStatus",
+        ),
+        descriptor(
+            "start_patrol",
+            "Start a sim-only patrol using coverage, frontier, or random goal selection",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("strategy", "PatrolStrategy", false),
+                ("speed_mode", "SpeedMode", false),
+            ]),
+            "PatrolStatus",
+        ),
+        descriptor(
+            "stop_patrol",
+            "Stop the active sim patrol and cancel planner movement",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "PatrolStatus",
+        ),
+        descriptor(
+            "patrol_status",
+            "Report active sim patrol strategy, goal, path, and visited cells",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "PatrolStatus",
+        ),
+        descriptor(
+            "memory_tag_location",
+            "Tag or update a named map-frame location or observed object in the local spatial memory store",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("name", "string", true),
+                ("kind", "SpatialMemoryKind", false),
+                ("frame_id", "string", false),
+                ("x_m", "number", true),
+                ("y_m", "number", true),
+                ("confidence", "number", false),
+            ]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_list",
+            "List local spatial memory entries for this run/profile store",
+            SafetyClass::ObserveOnly,
+            object_schema(&[("include_stale", "boolean", false)]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_query",
+            "Query local spatial memory entries by name, kind, and effective confidence",
+            SafetyClass::ObserveOnly,
+            object_schema(&[
+                ("query", "string", false),
+                ("kind", "SpatialMemoryKind", false),
+                ("min_confidence", "number", false),
+                ("include_stale", "boolean", false),
+            ]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
+            "memory_clear",
+            "Clear local spatial memory for this run/profile store",
+            SafetyClass::SimControl,
+            object_schema(&[]),
+            "SpatialMemoryStatus",
+        ),
+    ];
+    feature_capability_descriptors(descriptors)
+}
+
+#[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
+fn feature_capability_descriptors(
+    mut descriptors: Vec<CapabilityDescriptor>,
+) -> Vec<CapabilityDescriptor> {
+    #[cfg(feature = "mavlink-drone")]
+    descriptors.extend(drone_capability_descriptors());
+    #[cfg(feature = "manipulator")]
+    descriptors.extend(manipulator_capability_descriptors());
+    descriptors
+}
+
+#[cfg(not(any(feature = "mavlink-drone", feature = "manipulator")))]
+fn feature_capability_descriptors(
+    descriptors: Vec<CapabilityDescriptor>,
+) -> Vec<CapabilityDescriptor> {
+    descriptors
+}
+
+#[cfg(feature = "mavlink-drone")]
+fn drone_capability_descriptors() -> Vec<CapabilityDescriptor> {
+    vec![
+        descriptor(
+            "drone_arm",
+            "Arm a MAVLink drone adapter after policy and operator gates",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_disarm",
+            "Disarm a MAVLink drone adapter after policy and operator gates",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_takeoff",
+            "Request a MAVLink drone takeoff altitude",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("altitude_m", "number", false),
+            ]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_land",
+            "Request a MAVLink drone landing sequence",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_move_velocity",
+            "Request MAVLink drone local-frame velocity movement",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("vx_mps", "number", false),
+                ("vy_mps", "number", false),
+                ("vz_mps", "number", false),
+                ("yaw_rate_radps", "number", false),
+            ]),
+            "DroneCommandStatus",
+        ),
+        descriptor(
+            "drone_fly_to",
+            "Request a MAVLink drone global fly-to target",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("lat_deg", "number", true),
+                ("lon_deg", "number", true),
+                ("altitude_m", "number", true),
+            ]),
+            "DroneCommandStatus",
+        ),
+    ]
+}
+
+#[cfg(feature = "manipulator")]
+fn manipulator_capability_descriptors() -> Vec<CapabilityDescriptor> {
+    vec![
+        descriptor(
+            "manipulator_joint_state",
+            "Read the versioned manipulator joint state",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "ManipulatorJointState",
+        ),
+        descriptor(
+            "manipulator_joint_command",
+            "Send a versioned manipulator joint command",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("joints", "ManipulatorJointCommandV1", true),
+            ]),
+            "ManipulatorCommandStatus",
+        ),
+        descriptor(
+            "manipulator_pose_command",
+            "Send a versioned manipulator end-effector pose command",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[
+                ("token", "string", false),
+                ("approval", "boolean", false),
+                ("pose", "ManipulatorPoseCommandV1", true),
+            ]),
+            "ManipulatorCommandStatus",
+        ),
+        descriptor(
+            "manipulator_home",
+            "Move the manipulator to its configured home pose",
+            SafetyClass::PhysicalHighRisk,
+            object_schema(&[("token", "string", false), ("approval", "boolean", false)]),
+            "ManipulatorCommandStatus",
+        ),
     ]
 }
 
@@ -471,6 +907,46 @@ fn canonical_name(name: &str) -> &str {
     match name {
         "motors.stop" | "motors/stop" => "stop",
         "estop/reset" | "estop.reset" => "estop_reset",
+        "planner.set_goal" | "planner/set_goal" => "planner_set_goal",
+        "planner.cancel" | "planner/cancel" => "planner_cancel",
+        "planner.status" | "planner/status" => "planner_status",
+        "patrol.start" | "patrol/start" | "patrol_start" => "start_patrol",
+        "patrol.stop" | "patrol/stop" | "patrol_stop" => "stop_patrol",
+        "patrol.status" | "patrol/status" => "patrol_status",
+        "memory.tag"
+        | "memory/tag"
+        | "memory.tag_location"
+        | "memory/tag_location"
+        | "memory.tag-location"
+        | "memory/tag-location"
+        | "memory_tag"
+        | "tag_location"
+        | "tag-location" => "memory_tag_location",
+        "memory.list" | "memory/list" | "list_memory" | "list-memory" => "memory_list",
+        "memory.query" | "memory/query" | "query_memory" | "query-memory" => "memory_query",
+        "memory.clear" | "memory/clear" | "clear_memory" | "clear-memory" => "memory_clear",
+        "drone.arm" | "drone/arm" => "drone_arm",
+        "drone.disarm" | "drone/disarm" => "drone_disarm",
+        "drone.takeoff" | "drone/takeoff" => "drone_takeoff",
+        "drone.land" | "drone/land" => "drone_land",
+        "drone.move_velocity"
+        | "drone/move_velocity"
+        | "drone.move-velocity"
+        | "drone/move-velocity" => "drone_move_velocity",
+        "drone.fly_to" | "drone/fly_to" | "drone.fly-to" | "drone/fly-to" => "drone_fly_to",
+        "manipulator.joint_state"
+        | "manipulator/joint_state"
+        | "manipulator.joint-state"
+        | "manipulator/joint-state" => "manipulator_joint_state",
+        "manipulator.joint_command"
+        | "manipulator/joint_command"
+        | "manipulator.joint-command"
+        | "manipulator/joint-command" => "manipulator_joint_command",
+        "manipulator.pose_command"
+        | "manipulator/pose_command"
+        | "manipulator.pose-command"
+        | "manipulator/pose-command" => "manipulator_pose_command",
+        "manipulator.home" | "manipulator/home" => "manipulator_home",
         other => other,
     }
 }
@@ -512,6 +988,14 @@ fn optional_bool_removed(args: &mut Map<String, Value>, key: &str) -> Result<Opt
     }
 }
 
+fn optional_bool(args: &Map<String, Value>, key: &str) -> Result<Option<bool>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => bail!("{key} must be a boolean"),
+    }
+}
+
 fn token_satisfied(args: &Map<String, Value>) -> bool {
     args.get("token")
         .and_then(Value::as_str)
@@ -539,6 +1023,17 @@ fn required_f64(args: &Map<String, Value>, key: &str) -> Result<f64> {
     }
 }
 
+fn optional_f64(args: &Map<String, Value>, key: &str) -> Result<Option<f64>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => value
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| anyhow!("{key} must be a finite number")),
+        Some(_) => bail!("{key} must be a number"),
+    }
+}
+
 fn required_speed_mode(args: &Map<String, Value>, key: &str) -> Result<SpeedMode> {
     optional_speed_mode(args, key)?.ok_or_else(|| anyhow!("{key} is required"))
 }
@@ -552,9 +1047,35 @@ fn optional_speed_mode(args: &Map<String, Value>, key: &str) -> Result<Option<Sp
     }
 }
 
+fn optional_patrol_strategy(
+    args: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<PatrolStrategy>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|err| anyhow!("{key} must be a valid patrol strategy: {err}")),
+    }
+}
+
+fn optional_spatial_memory_kind(
+    args: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<SpatialMemoryKind>> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|err| anyhow!("{key} must be a valid spatial memory kind: {err}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
+    use crate::config::Profile;
     use crate::{config::PolicyMode, types::TelemetryFrame, HarnessConfig};
 
     #[tokio::test]
@@ -610,6 +1131,237 @@ mod tests {
         let value = registry.invoke_value("observe", json!({})).unwrap();
         let telemetry: TelemetryFrame = serde_json::from_value(value).unwrap();
         assert_eq!(telemetry.robot, "robot");
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[tokio::test]
+    async fn drone_capabilities_are_simulated_and_policy_gated() {
+        let harness = Harness::new(HarnessConfig {
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let err = registry
+            .invoke_value("drone_arm", json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("policy require-approval"));
+
+        let armed = registry
+            .invoke_value("drone.arm", json!({ "approval": true }))
+            .unwrap();
+        assert_eq!(armed["ok"], true);
+        assert_eq!(armed["command"], "arm");
+        assert_eq!(armed["profile"], "sim");
+        assert_eq!(armed["simulated"], true);
+
+        let fly_to = registry
+            .invoke_value(
+                "drone_fly_to",
+                json!({
+                    "approval": true,
+                    "lat_deg": 40.0,
+                    "lon_deg": -73.0,
+                    "altitude_m": 12.5
+                }),
+            )
+            .unwrap();
+        assert_eq!(fly_to["command"], "fly_to");
+        assert_eq!(fly_to["args"]["altitude_m"], 12.5);
+    }
+
+    #[cfg(feature = "mavlink-drone")]
+    #[tokio::test]
+    async fn physical_drone_profile_stays_a_gated_skeleton() {
+        let err = match Harness::new(HarnessConfig {
+            profile: Profile::MavlinkDrone,
+            ..HarnessConfig::default()
+        }) {
+            Ok(_) => panic!("expected mavlink-drone profile to require the physical gate"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("LEASH_ALLOW_PHYSICAL_ACTUATION"));
+
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::MavlinkDrone,
+            allow_physical_actuation: true,
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+        let err = registry
+            .invoke_value("drone_land", json!({ "approval": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("gated skeleton"));
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[tokio::test]
+    async fn manipulator_capabilities_are_simulated_and_policy_gated() {
+        let harness = Harness::new(HarnessConfig {
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let state = registry
+            .invoke_value("manipulator.joint-state", json!({}))
+            .unwrap();
+        assert_eq!(state["version"], "leash-manipulator-v1");
+        assert_eq!(state["simulated"], true);
+        assert_eq!(state["joints"][0]["name"], "shoulder_pan");
+
+        let err = registry
+            .invoke_value(
+                "manipulator_joint_command",
+                json!({ "joints": [{ "name": "elbow", "position_rad": 0.4 }] }),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("policy require-approval"));
+
+        let commanded = registry
+            .invoke_value(
+                "manipulator.joint-command",
+                json!({
+                    "approval": true,
+                    "joints": [{ "name": "elbow", "position_rad": 0.4 }]
+                }),
+            )
+            .unwrap();
+        assert_eq!(commanded["version"], "leash-manipulator-v1");
+        assert_eq!(commanded["command"], "joint_command");
+        assert_eq!(commanded["simulated"], true);
+
+        let homed = registry
+            .invoke_value("manipulator_home", json!({ "approval": true }))
+            .unwrap();
+        assert_eq!(homed["command"], "home");
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[tokio::test]
+    async fn physical_manipulator_profile_stays_a_gated_skeleton() {
+        let err = match Harness::new(HarnessConfig {
+            profile: Profile::Manipulator,
+            ..HarnessConfig::default()
+        }) {
+            Ok(_) => panic!("expected manipulator profile to require the physical gate"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("LEASH_ALLOW_PHYSICAL_ACTUATION"));
+
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::Manipulator,
+            allow_physical_actuation: true,
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = CapabilityRegistry::new(harness);
+        let err = registry
+            .invoke_value("manipulator_home", json!({ "approval": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("gated skeleton"));
+    }
+
+    #[tokio::test]
+    async fn patrol_capabilities_start_stop_and_report_status() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let registry = CapabilityRegistry::new(harness.clone());
+
+        let started = registry
+            .invoke_value_with_origin(
+                "start_patrol",
+                json!({ "strategy": "frontier", "speed_mode": "low" }),
+                InvocationOrigin::Agent,
+            )
+            .unwrap();
+
+        assert_eq!(started["ok"], true);
+        assert_eq!(started["active"], true);
+        assert_eq!(started["strategy"], "frontier");
+        assert!(harness.planner_status().active);
+
+        let status = registry.invoke_value("patrol_status", json!({})).unwrap();
+        assert_eq!(status["active"], true);
+        assert_eq!(status["visited_cells"][0], "2,2");
+
+        let stopped = registry.invoke_value("stop_patrol", json!({})).unwrap();
+        assert_eq!(stopped["active"], false);
+        assert_eq!(stopped["status"], "stopped");
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn memory_capabilities_tag_query_list_and_clear() {
+        let path = std::env::temp_dir().join(format!(
+            "leash-memory-capability-{}-{}.json",
+            std::process::id(),
+            crate::runtime::now_ms()
+        ));
+        let harness =
+            Harness::new_with_memory_path(HarnessConfig::default(), path.clone()).unwrap();
+        let registry = CapabilityRegistry::new(harness);
+
+        let tagged = registry
+            .invoke_value_with_origin(
+                "tag_location",
+                json!({
+                    "name": "dock",
+                    "frame_id": "map",
+                    "x_m": 0.25,
+                    "y_m": 0.0,
+                    "confidence": 0.95
+                }),
+                InvocationOrigin::Mcp,
+            )
+            .unwrap();
+        assert_eq!(tagged["ok"], true);
+        assert_eq!(tagged["count"], 1);
+        assert_eq!(tagged["entries"][0]["name"], "dock");
+        assert_eq!(tagged["entries"][0]["kind"], "location");
+        assert!(path.exists());
+
+        registry
+            .invoke_value(
+                "memory_tag_location",
+                json!({
+                    "name": "cone",
+                    "kind": "object",
+                    "frame_id": "map",
+                    "x_m": 0.4,
+                    "y_m": 0.5,
+                    "confidence": 0.8
+                }),
+            )
+            .unwrap();
+        let queried = registry
+            .invoke_value(
+                "query_memory",
+                json!({ "query": "co", "kind": "object", "min_confidence": 0.7 }),
+            )
+            .unwrap();
+        assert_eq!(queried["count"], 1);
+        assert_eq!(queried["entries"][0]["name"], "cone");
+
+        let listed = registry.invoke_value("memory_list", json!({})).unwrap();
+        assert_eq!(listed["count"], 2);
+        assert!(listed["store_path"]
+            .as_str()
+            .unwrap()
+            .ends_with(path.file_name().unwrap().to_str().unwrap()));
+
+        let cleared = registry.invoke_value("memory_clear", json!({})).unwrap();
+        assert_eq!(cleared["count"], 0);
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

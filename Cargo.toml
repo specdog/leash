@@ -1,7 +1,8 @@
 [package]
 name = "leash-harness"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+default-run = "leash"
 license = "MIT"
 description = "Composable local-LLM and robotics harness with MCP, CLI, and safe robot adapters"
 repository = "https://github.com/specdog/leash"
@@ -17,6 +18,7 @@ include = [
   "README.md",
   "docs/**",
   "examples/**",
+  "schemas/**",
   "scripts/**",
   "src/**",
 ]
@@ -25,12 +27,19 @@ include = [
 name = "leash"
 path = "src/bin/leash.rs"
 
+[[bin]]
+name = "leash-schema"
+path = "src/bin/leash-schema.rs"
+required-features = ["mcp"]
+
 [features]
 default = ["sim", "http", "mcp"]
 sim = []
 http = ["dep:axum", "dep:futures-util", "dep:tower-http"]
 mcp = ["dep:rmcp", "dep:schemars"]
 waveshare-ugv = ["dep:serialport"]
+mavlink-drone = []
+manipulator = []
 bridge-compat = ["http"]
 cuda = []
 
@@ -42,7 +51,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-tokio = { version = "1.43", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.43", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

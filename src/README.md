@@ -8,12 +8,14 @@ flowchart TB
   lib --> capability["capability.rs\nCapabilityRegistry and safety classes"]
   lib --> config["config.rs\nprofiles, env, config precedence"]
   lib --> module["module.rs\nmodule graph and lifecycle"]
+  lib --> memory["memory.rs\nfile-backed spatial memory"]
   lib --> stack["stack.rs\nbuilt-in runnable stacks"]
   lib --> http["http.rs\nHTTP, SSE, WebSocket routes"]
   lib --> mcp["mcp.rs\nMCP tools and transport"]
   lib --> replay["replay.rs\nrecord/playback JSONL"]
   lib --> daemon["daemon.rs\nbackground runs and logs"]
   lib --> transport["transport.rs\nmemory and local-pubsub streams"]
+  lib --> worker["worker.rs\nexternal worker supervision"]
   lib --> types["types.rs\nshared API structs"]
   lib --> accelerator["accelerator.rs\nCPU/CUDA probe model"]
   lib --> agent["agent.rs\nagent model provider glue"]
@@ -30,12 +32,15 @@ flowchart TB
 - `daemon.rs`: daemon registry, process lifecycle, and structured log tailing.
 - `http.rs`: HTTP API, SSE/WebSocket telemetry, agent message routes, MCP HTTP routes.
 - `lib.rs`: public module declarations and re-exports.
+- `memory.rs`: file-backed spatial memory/object registry with stale confidence handling.
 - `mcp.rs`: MCP stdio server, tool schemas, and tool handlers.
 - `module.rs`: module graph, states, health, dependencies, and graph export.
+- `perception.rs`: pluggable perception adapter boundary, fake detector, and provider isolation.
 - `replay.rs`: replay recording format and playback timing.
-- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman.
+- `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, sim planner, sim patrol, perception, and spatial memory ownership.
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
+- `worker.rs`: explicit external worker specs, process lifecycle supervision, status, and restart policy.
 - `bin/`: CLI entrypoint crate target.

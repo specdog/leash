@@ -1,4 +1,3 @@
-#[cfg(feature = "http")]
 use std::io::{self, Write};
 use std::{collections::BTreeMap, fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -17,8 +16,12 @@ use leash_harness::{
     module::default_module_graph,
     replay::{scaled_delay, ReplayEvent, ReplayEventKind, ReplayRecording, REPLAY_FORMAT_VERSION},
     stack::{built_in_stacks, find_stack, Stack, StackTransport},
-    transport::StreamTransportBackend,
+    transport::{spawn_tcp_jsonl_stream_hub, StreamTransportBackend},
     types::RunLogEntry,
+    worker::{
+        ExternalWorkerSpec, ExternalWorkerState, ExternalWorkerStatus, WorkerRestartPolicy,
+        WorkerSupervisor,
+    },
     Harness, HarnessConfig, Profile, TelemetryStreamFrame,
 };
 use serde::Serialize;
@@ -66,6 +69,7 @@ enum Command {
     Status(StatusArgs),
     Log(LogArgs),
     Restart(RestartArgs),
+    Worker(WorkerArgs),
     Graph(GraphArgs),
     ShowConfig(ShowConfigArgs),
     Health(HttpTarget),
@@ -98,6 +102,7 @@ enum Transport {
     McpHttp(McpHttpServeArgs),
     #[cfg(feature = "http")]
     Http(HttpServeArgs),
+    StreamHub(StreamHubServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -143,6 +148,9 @@ struct RuntimeArgs {
 
     #[arg(long, action = ArgAction::SetTrue)]
     drive_swap: bool,
+
+    #[arg(long)]
+    mavlink_endpoint: Option<String>,
 
     #[arg(long, value_enum)]
     accelerator: Option<AcceleratorBackend>,
@@ -190,6 +198,15 @@ struct McpHttpServeArgs {
     runtime: RuntimeArgs,
 
     #[arg(long, default_value = "127.0.0.1:9990")]
+    listen: SocketAddr,
+}
+
+#[derive(Debug, Args)]
+struct StreamHubServeArgs {
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+
+    #[arg(long, default_value = "127.0.0.1:9970")]
     listen: SocketAddr,
 }
 
@@ -343,6 +360,53 @@ struct RestartArgs {
 }
 
 #[derive(Debug, Args)]
+struct WorkerArgs {
+    #[command(subcommand)]
+    command: WorkerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkerCommand {
+    Run(WorkerRunArgs),
+}
+
+#[derive(Debug, Args)]
+struct WorkerRunArgs {
+    #[arg(long, default_value = "external-worker")]
+    name: String,
+
+    #[arg(long, value_enum, default_value_t = WorkerRestartArg::Never)]
+    restart: WorkerRestartArg,
+
+    #[arg(long, default_value_t = 0)]
+    max_restarts: u32,
+
+    #[arg(long, default_value_t = 100)]
+    hold_ms: u64,
+
+    #[arg(long = "optional", action = ArgAction::SetFalse)]
+    required: bool,
+
+    #[arg(required = true, trailing_var_arg = true, value_name = "COMMAND")]
+    argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum WorkerRestartArg {
+    Never,
+    OnFailure,
+}
+
+impl From<WorkerRestartArg> for WorkerRestartPolicy {
+    fn from(value: WorkerRestartArg) -> Self {
+        match value {
+            WorkerRestartArg::Never => Self::Never,
+            WorkerRestartArg::OnFailure => Self::OnFailure,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 struct GraphArgs {
     #[arg(default_value = "sim")]
     stack: String,
@@ -405,6 +469,11 @@ async fn main() -> Result<()> {
                 let harness = Harness::new(config)?;
                 leash_harness::http::serve_http(harness, listen).await?;
             }
+            Transport::StreamHub(args) => {
+                let config =
+                    config_from_args(args.runtime, Some(args.listen), cli.config.clone(), None)?;
+                serve_stream_hub(config).await?;
+            }
         },
         Command::Record(args) => {
             let output = record_stream(args, cli.config.clone()).await?;
@@ -452,6 +521,9 @@ async fn main() -> Result<()> {
             let record =
                 restart_daemon_run(&args.name, Duration::from_millis(args.graceful_timeout_ms))?;
             println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+        Command::Worker(args) => {
+            run_worker_command(args).await?;
         }
         Command::Graph(args) => {
             let graph = graph_from_args(&args)?;
@@ -510,24 +582,80 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Serialize)]
+struct WorkerRunOutput {
+    ok: bool,
+    statuses: Vec<ExternalWorkerStatus>,
+}
+
+async fn run_worker_command(args: WorkerArgs) -> Result<()> {
+    match args.command {
+        WorkerCommand::Run(args) => run_worker(args).await,
+    }
+}
+
+async fn run_worker(args: WorkerRunArgs) -> Result<()> {
+    let Some((command, command_args)) = args.argv.split_first() else {
+        bail!("worker command is required");
+    };
+    let mut spec = ExternalWorkerSpec::new(args.name, command.clone());
+    spec.args = command_args.to_vec();
+    spec.restart_policy = args.restart.into();
+    spec.max_restarts = args.max_restarts;
+    spec.required = args.required;
+
+    let mut supervisor = WorkerSupervisor::new();
+    supervisor.add(spec)?;
+    supervisor.start_all()?;
+    tokio::time::sleep(Duration::from_millis(args.hold_ms)).await;
+    supervisor.poll_all()?;
+
+    let statuses = supervisor.statuses();
+    let output = WorkerRunOutput {
+        ok: statuses
+            .iter()
+            .all(|status| status.state == ExternalWorkerState::Running),
+        statuses,
+    };
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    io::stdout().flush()?;
+    supervisor.stop_all()?;
+    Ok(())
+}
+
 fn print_stack_list(format: ListFormat) -> Result<()> {
     let stacks = built_in_stacks();
     match format {
         ListFormat::Json => println!("{}", serde_json::to_string_pretty(&stacks)?),
         ListFormat::Table => {
             println!(
-                "{:<22} {:<13} {:<9} {:<8} {:<28} COMMAND",
-                "NAME", "PROFILE", "TRANSPORT", "HARDWARE", "FEATURES"
+                "{:<22} {:<13} {:<9} {:<8} {:<14} {:<12} {:<28} {:<43} COMMAND",
+                "NAME",
+                "PROFILE",
+                "TRANSPORT",
+                "HARDWARE",
+                "ADAPTER",
+                "MATURITY",
+                "FEATURES",
+                "GATES"
             );
             for stack in stacks {
                 let features = stack.required_features.join(",");
+                let gates = if stack.adapter.required_gates.is_empty() {
+                    "-".to_string()
+                } else {
+                    stack.adapter.required_gates.join(",")
+                };
                 println!(
-                    "{:<22} {:<13} {:<9} {:<8} {:<28} {}",
+                    "{:<22} {:<13} {:<9} {:<8} {:<14} {:<12} {:<28} {:<43} {}",
                     stack.name,
                     stack.profile.as_str(),
                     stack.transport.kind.as_str(),
                     if stack.hardware_required { "yes" } else { "no" },
+                    stack.adapter.category.as_str(),
+                    stack.adapter.maturity.as_str(),
                     features,
+                    gates,
                     stack.command
                 );
             }
@@ -708,7 +836,40 @@ async fn run_stack(args: RunArgs, config_path: Option<PathBuf>) -> Result<()> {
                 bail!("MCP stacks require the 'mcp' feature");
             }
         }
+        StackTransport::StreamHub => {
+            if args.daemon {
+                bail!("daemon mode is only supported for HTTP stacks");
+            }
+            serve_stream_hub(config).await?;
+        }
     }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct StreamHubServeOutput {
+    ok: bool,
+    transport: &'static str,
+    profile: String,
+    listen: String,
+    stream_transport: String,
+}
+
+async fn serve_stream_hub(config: HarnessConfig) -> Result<()> {
+    let listen = config.listen;
+    let output = StreamHubServeOutput {
+        ok: true,
+        transport: "stream-hub",
+        profile: config.profile.as_str().to_string(),
+        listen: listen.to_string(),
+        stream_transport: config.stream_transport.as_str().to_string(),
+    };
+    let harness = Harness::new(config)?;
+    let hub = spawn_tcp_jsonl_stream_hub(listen, harness.stream_transport()).await?;
+    println!("{}", serde_json::to_string(&output)?);
+    io::stdout().flush()?;
+    tokio::signal::ctrl_c().await?;
+    hub.shutdown().await?;
     Ok(())
 }
 
@@ -769,6 +930,8 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
         "sim" => Profile::Sim,
         "replay" => Profile::Replay,
         "waveshare-ugv" => Profile::WaveshareUgv,
+        "mavlink-drone" => Profile::MavlinkDrone,
+        "manipulator" => Profile::Manipulator,
         other => {
             let stacks = built_in_stacks()
                 .into_iter()
@@ -776,7 +939,7 @@ fn resolve_config_stack(name: &str) -> Result<ConfigStack> {
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!(
-                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, or one of: {stacks}"
+                "unknown stack or profile '{other}'; expected sim, replay, waveshare-ugv, mavlink-drone, manipulator, or one of: {stacks}"
             );
         }
     };
@@ -819,6 +982,7 @@ impl RuntimeArgs {
             serial_baud: self.serial_baud,
             drive_invert: self.drive_invert.then_some(true),
             drive_swap: self.drive_swap.then_some(true),
+            mavlink_endpoint: self.mavlink_endpoint,
             accelerator: self.accelerator,
             require_accelerator: self.require_accelerator.then_some(true),
             resource_sampling: if self.resource_sampling {

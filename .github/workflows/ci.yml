@@ -15,6 +15,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-targets --all-features
       - run: cargo test --no-default-features --features sim,mcp
+      - run: cargo run --features mcp --bin leash-schema -- --check
       - run: cargo package --locked
       - run: scripts/smoke-all.sh
 
@@ -34,7 +35,7 @@ jobs:
           - name: http-sim
             command: cargo check --no-default-features --features sim,http
           - name: hardware-adapter
-            command: cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,bridge-compat
+            command: cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,mavlink-drone,manipulator,bridge-compat
           - name: all-features
             command: cargo check --all-features
     steps:

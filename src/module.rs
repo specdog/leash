@@ -317,6 +317,39 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
         Profile::Sim => "sim-driver",
         Profile::Replay => "replay-driver",
         Profile::WaveshareUgv => "waveshare-ugv-driver",
+        Profile::MavlinkDrone => "mavlink-drone-driver",
+        Profile::Manipulator => "manipulator-driver",
+    };
+    let driver_capabilities = match config.profile {
+        Profile::MavlinkDrone => vec![
+            "drone_arm".to_string(),
+            "drone_disarm".to_string(),
+            "drone_takeoff".to_string(),
+            "drone_land".to_string(),
+            "drone_move_velocity".to_string(),
+            "drone_fly_to".to_string(),
+            "stop".to_string(),
+            "estop".to_string(),
+        ],
+        Profile::Manipulator => vec![
+            "manipulator_joint_state".to_string(),
+            "manipulator_joint_command".to_string(),
+            "manipulator_pose_command".to_string(),
+            "manipulator_home".to_string(),
+            "stop".to_string(),
+            "estop".to_string(),
+        ],
+        _ => vec!["drive".to_string(), "stop".to_string(), "estop".to_string()],
+    };
+    let driver_input = match config.profile {
+        Profile::MavlinkDrone => "FlightCommand",
+        Profile::Manipulator => "ManipulatorCommand",
+        _ => "DriveReq",
+    };
+    let driver_output = match config.profile {
+        Profile::MavlinkDrone => "DroneCommandStatus",
+        Profile::Manipulator => "ManipulatorCommandStatus",
+        _ => "OdometryStatus",
     };
     let transport = config.stream_transport;
     ModuleGraph::new(vec![
@@ -354,18 +387,30 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             health: planned_health(),
             dependencies: vec!["harness-runtime".to_string()],
             inputs: vec![stream(
-                "drive_command",
+                if config.profile == Profile::MavlinkDrone {
+                    "flight_command"
+                } else if config.profile == Profile::Manipulator {
+                    "manipulator_command"
+                } else {
+                    "drive_command"
+                },
                 StreamDirection::Input,
-                "DriveReq",
+                driver_input,
                 transport,
             )],
             outputs: vec![stream(
-                "odometry",
+                if config.profile == Profile::MavlinkDrone {
+                    "flight_status"
+                } else if config.profile == Profile::Manipulator {
+                    "manipulator_status"
+                } else {
+                    "odometry"
+                },
                 StreamDirection::Output,
-                "OdometryStatus",
+                driver_output,
                 transport,
             )],
-            capabilities: vec!["drive".to_string(), "stop".to_string(), "estop".to_string()],
+            capabilities: driver_capabilities,
             physical: config.profile.is_physical(),
             required: true,
         },

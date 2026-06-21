@@ -12,10 +12,10 @@ use crate::{
     capability::{InvocationOrigin, SafetyClass},
     module::ModuleState,
     runtime::Harness,
-    types::SpeedMode,
+    types::{PatrolStrategy, SpatialMemoryKind, SpeedMode},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpToolDescriptor {
     pub name: String,
     pub description: String,
@@ -25,20 +25,20 @@ pub struct McpToolDescriptor {
     pub output_schema: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpToolList {
     pub ok: bool,
     pub tools: Vec<McpToolDescriptor>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpCallResponse {
     pub ok: bool,
     pub tool: String,
     pub result: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpStatus {
     pub ok: bool,
     pub transport: String,
@@ -51,13 +51,13 @@ pub struct McpStatus {
     pub tool_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpModuleToolMap {
     pub ok: bool,
     pub modules: Vec<McpModuleTools>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpModuleTools {
     pub module: String,
     pub module_type: String,
@@ -115,7 +115,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, or speed_mode"
+        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear"
     )]
     pub async fn invoke_capability(
         &self,
@@ -193,6 +193,28 @@ pub struct InvokeCapabilityParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub right: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tolerance_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<SpatialMemoryKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<PatrolStrategy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed_mode: Option<SpeedMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval: Option<bool>,
@@ -247,7 +269,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, or speed_mode",
+            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[
@@ -256,6 +278,17 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("ttl_secs", "integer", false),
                 ("left", "number", false),
                 ("right", "number", false),
+                ("frame_id", "string", false),
+                ("x_m", "number", false),
+                ("y_m", "number", false),
+                ("tolerance_m", "number", false),
+                ("name", "string", false),
+                ("kind", "SpatialMemoryKind", false),
+                ("query", "string", false),
+                ("confidence", "number", false),
+                ("min_confidence", "number", false),
+                ("include_stale", "boolean", false),
+                ("strategy", "PatrolStrategy", false),
                 ("speed_mode", "SpeedMode", false),
                 ("approval", "boolean", false),
             ]),
@@ -554,9 +587,11 @@ mod tests {
     #[tokio::test]
     async fn typed_outputs_stay_deserializable() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
-        let _: TelemetryFrame =
+        let telemetry: TelemetryFrame =
             serde_json::from_value(call_tool_value(&harness, "observe", json!({})).unwrap())
                 .unwrap();
+        assert_eq!(telemetry.vision.status, "ok");
+        assert_eq!(telemetry.vision.detections[0].label, "sim-fixture");
         let _: CaptureResult =
             serde_json::from_value(call_tool_value(&harness, "capture", json!({})).unwrap())
                 .unwrap();

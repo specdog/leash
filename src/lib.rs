@@ -13,35 +13,58 @@ pub mod daemon;
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod memory;
 pub mod module;
+pub mod perception;
 pub mod replay;
 pub mod runtime;
 pub mod stack;
 pub mod stream_processing;
 pub mod transport;
 pub mod types;
+pub mod worker;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
 pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
+pub use memory::{
+    default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
+    SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
+};
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
+pub use perception::{FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime};
 pub use replay::{
     scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,
     ReplayRecording, REPLAY_FORMAT_VERSION,
 };
 pub use runtime::Harness;
-pub use stack::{Stack, StackModule, StackTransport, TransportBinding};
+pub use stack::{
+    adapter_profile_for_profile, AdapterCategory, AdapterMaturity, AdapterProfile, Stack,
+    StackModule, StackTransport, TransportBinding,
+};
 pub use stream_processing::{
     pair_by_timestamp, select_best_frame, FrameQuality, LatestValue, QualityDecision,
     QualityFilter, RateLimiter, TimestampPair, Timestamped,
 };
 pub use transport::{
-    new_stream_transport, StreamMessage, StreamRecvError, StreamSubscriber, StreamTransport,
-    StreamTransportBackend,
+    accept_tcp_jsonl_stream_message, new_stream_transport, read_network_stream_frame,
+    read_network_stream_message, send_tcp_jsonl_stream_message, spawn_tcp_jsonl_stream_hub,
+    write_network_stream_frame, write_network_stream_message, NetworkStreamFrame, StreamMessage,
+    StreamRecvError, StreamSubscriber, StreamTransport, StreamTransportBackend, TcpJsonlStreamHub,
+    TcpJsonlStreamHubStatus, NETWORK_STREAM_FRAME_VERSION,
 };
 pub use types::{
-    AgentModelResponse, Capabilities, CaptureResult, Health, ResourceSample, RunLogEntry,
-    SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+    AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,
+    DetectionFrame, Health, ImageObservation, MapMetadata, OccupancyGridFrame, PatrolStatus,
+    PatrolStrategy, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample,
+    RunLogEntry, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
+    TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
+    VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
+};
+pub use worker::{
+    ExternalWorkerSpec, ExternalWorkerState, ExternalWorkerStatus, WorkerHealthCheck,
+    WorkerRestartPolicy, WorkerSupervisor,
 };

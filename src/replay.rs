@@ -363,6 +363,7 @@ mod tests {
                     last_ms: Some(ts_ms),
                 },
             },
+            vision: Default::default(),
             resource: None,
             source: "replay".to_string(),
         };
@@ -402,6 +403,7 @@ mod tests {
                 soft_odometry_limit_m: 0.0,
                 physical_actuation_enabled: false,
             },
+            visualization: Default::default(),
         }
     }
 }
