@@ -9,6 +9,7 @@ flowchart TB
   all --> mcp["smoke-mcp.sh\nstdio MCP initialize, tools, health"]
   all --> mcphttp["smoke-mcp-http.sh\nlocalhost MCP HTTP, CLI, planner, and patrol calls"]
   all --> streamhub["smoke-stream-hub.sh\nTCP JSONL stream hub"]
+  all --> worker["smoke-worker.sh\nexternal worker lifecycle"]
   all --> replayhttp["smoke-replay-http.sh\nHTTP replay observe"]
   all --> replaymcp["smoke-replay-mcp.sh\nMCP replay observe"]
   all --> physical["smoke-physical-gate.sh\nphysical profile refuses without gate"]
@@ -24,6 +25,7 @@ flowchart TB
 - `smoke-mcp.sh`: stdio MCP initialization and tool calls.
 - `smoke-mcp-http.sh`: localhost MCP HTTP routes, `leash mcp` CLI calls, sim planner set/status calls, and sim patrol start/status/stop calls.
 - `smoke-stream-hub.sh`: starts the localhost TCP JSONL stream hub, sends valid frames, and proves an invalid peer does not kill the listener.
+- `smoke-worker.sh`: starts an explicit child process through the worker supervisor, verifies JSON status, and lets the supervisor stop it.
 - `smoke-replay-http.sh`: replay mode over HTTP.
 - `smoke-replay-mcp.sh`: replay mode over MCP.
 - `smoke-physical-gate.sh`: proves physical startup fails without explicit actuation.
