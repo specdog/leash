@@ -11,6 +11,7 @@ leash run sim-mcp        # MCP stdio for LLM agents
 leash run sim-http       # localhost HTTP + WebSocket
 leash run sim-stream-hub # localhost TCP JSONL stream hub
 leash serve mcp-http     # localhost MCP JSON control surface
+leash worker run -- node -e 'setInterval(() => {}, 1000)'
 ```
 
 ## Why Leash
@@ -81,6 +82,9 @@ leash agent-interactive
 
 # Run a TCP JSONL stream hub for external module processes
 leash run sim-stream-hub
+
+# Start and supervise an explicit external worker process
+leash worker run --name demo-worker -- node -e 'setInterval(() => {}, 1000)'
 
 # Run as a daemon and inspect JSONL logs
 leash run sim-http --daemon
@@ -477,6 +481,23 @@ leash serve stream-hub --profile sim --listen 127.0.0.1:9970
 leash run sim-stream-hub
 ```
 
+## External Workers
+
+External workers are opt-in child processes. Leash does not start any external
+process unless a caller provides the command explicitly. The supervisor records
+the worker name, command, restart policy, process-health check, PID, exit code,
+restart count, and required/optional metadata.
+
+Run a one-shot supervised worker check:
+
+```bash
+leash worker run --name demo-worker --hold-ms 150 -- node -e 'setInterval(() => {}, 1000)'
+```
+
+The command prints JSON status while the worker is running, then stops and reaps
+the child process before exiting. Restart policy is deliberately small today:
+`never` by default, or `on-failure` with `--max-restarts N`.
+
 ## Run Logs and Resource Samples
 
 Daemon runs write structured JSONL logs under the Leash state directory. Each
@@ -547,7 +568,7 @@ See [issues](https://github.com/specdog/leash/issues) for the full plan. Highlig
 - [x] Agent input channels: one-shot CLI, interactive CLI, and localhost web input
 - [x] TCP JSONL stream framing for cross-process modules
 - [x] Runnable TCP JSONL stream hub for cross-process module links
-- [ ] External worker lifecycle and supervision
+- [x] External worker lifecycle and supervision
 - [ ] MAVLink drone + manipulator adapters
 - [x] Localhost command center dashboard
 - [x] Viewer-ready visualization frames
