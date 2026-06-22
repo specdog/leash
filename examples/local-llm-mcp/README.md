@@ -2,6 +2,16 @@
 
 Configure your MCP-capable local LLM client to launch:
 
+```mermaid
+flowchart LR
+  llm["MCP-capable local LLM client"] --> stdio["stdio MCP transport"]
+  stdio --> leash["leash serve mcp --profile sim"]
+  leash --> tools["health, capabilities, observe, invoke_capability, stop, estop, capture"]
+  tools --> sim["simulation-safe harness"]
+```
+
+Launch command:
+
 ```bash
 leash serve mcp --profile sim
 ```
@@ -17,4 +27,3 @@ Useful tool calls:
 - `invoke_capability`: call `authorize`, `drive`, `speed_mode`, `stop`,
   `estop`, or `estop_reset`.
 - `capture`: return deterministic capture metadata.
-

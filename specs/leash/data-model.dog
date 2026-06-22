@@ -74,11 +74,11 @@ states: [planned, designed, implemented, tested, active]
 lifecycle: planned → designed → implemented → tested → active
 ```
 
-### Entity: Blueprints
-Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <blueprint>`.
+### Entity: Stacks
+Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.
 
 ```yaml
-entity: Blueprints
+entity: Stacks
 type: entity
 properties:
   catalog:
@@ -102,7 +102,7 @@ lifecycle: planned → cataloged → implemented → tested
 ```
 
 ### Entity: Transport
-Pub/sub abstraction. In-memory + local async backends. Stream backpressure, quality filtering.
+Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.
 
 ```yaml
 entity: Transport
@@ -111,26 +111,33 @@ properties:
   backends:
     type: string
     required: true
-    description: in-memory, local-async-pubsub
+    description: memory, local-pubsub
   backpressure:
     type: boolean
     required: true
-    default: false
+    default: true
+    description: local-pubsub drops oldest messages under receiver lag and reports skipped count
   quality_filtering:
     type: boolean
     required: true
-    default: false
+    default: true
+    description: generic hook for camera/replay frame selection
+  timestamp_pairing:
+    type: boolean
+    required: true
+    default: true
+    description: pair stream items within a tolerance window
   default_backend:
     type: enum
     required: true
-    values: [in_memory, local_async]
-    default: in_memory
-states: [planned, designed, implemented, tested]
-lifecycle: planned → designed → implemented → tested
+    values: [memory, local-pubsub]
+    default: local-pubsub
+states: [planned, designed, implemented, tested, active]
+lifecycle: planned → designed → implemented → tested → active
 ```
 
 ### Entity: Telemetry
-Live telemetry streaming. Broadcast channel, WebSocket, SSE. TelemetryFrame with full sensor snapshot.
+Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.
 
 ```yaml
 entity: Telemetry
@@ -139,7 +146,7 @@ properties:
   outputs:
     type: string
     required: true
-    description: broadcast, ws, sse, json_stream
+    description: transport, ws, sse, json_stream
   websocket:
     type: boolean
     required: true
@@ -147,7 +154,7 @@ properties:
   sse:
     type: boolean
     required: true
-    default: false
+    default: true
   views:
     type: string
     required: true
@@ -174,13 +181,13 @@ properties:
   sensor_record:
     type: boolean
     required: true
-    default: false
-states: [planned, implemented, verified]
-lifecycle: planned → implemented → verified
+    default: true
+states: [implemented, verified, active]
+lifecycle: implemented → verified → active
 ```
 
 ### Entity: CLI
-CLI + HTTP server. Subcommands: serve (mcp|http), health, stop. 16 REST + WS endpoints.
+CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.
 
 ```yaml
 entity: CLI
@@ -193,17 +200,17 @@ properties:
   commands:
     type: string
     required: true
-    description: serve (mcp|http), health, stop
+    description: serve, agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop
   http_endpoints:
     type: string
     required: true
-    description: health, capabilities, telemetry, drive, estop, ws/telemetry, ...
+    description: health, capabilities, telemetry, agent/messages, drive, estop, ws/telemetry, mcp/tools, mcp/call, ...
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
 
 ### Entity: MCPServer
-MCP stdio server (rmcp). 7 tools.
+MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.
 
 ```yaml
 entity: MCPServer
@@ -212,11 +219,11 @@ properties:
   tools:
     type: string
     required: true
-    description: health, capabilities, observe, invoke_capability, stop, estop, capture
+    description: health, capabilities, modules, observe, invoke_capability, stop, estop, capture
   transport:
     type: enum
     required: true
-    values: [stdio]
+    values: [stdio, mcp-http]
 states: [planned, implemented, tested, released]
 lifecycle: planned → implemented → tested → released
 ```
@@ -287,12 +294,17 @@ properties:
   smoke_scripts:
     type: string
     required: true
-    description: smoke-http.sh, smoke-mcp.py, smoke-physical-gate.sh
+    description: smoke-http.sh, smoke-mcp.sh, smoke-mcp-http.sh, smoke-physical-gate.sh
   policy:
     type: boolean
     required: true
-    default: false
-    description: safety classes + approval gates
+    default: true
+    description: safety classes + dry-run/require-token/require-approval/deny gates
+  audit_events:
+    type: boolean
+    required: true
+    default: true
+    description: approved and denied physical actions are structured log events
 states: [planned, implemented, verified]
 lifecycle: planned → implemented → verified
 ```
@@ -344,7 +356,7 @@ lifecycle: planned → bootstrapped → ci_green
 ```
 
 ### Entity: Agent
-Model-provider config + input channels. One-shot, interactive, web commands.
+Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.
 
 ```yaml
 entity: Agent
@@ -357,13 +369,21 @@ properties:
   channels:
     type: string
     required: true
-    description: one-shot, interactive, web
+    description: implemented one-shot CLI, interactive CLI, HTTP POST /agent/messages, web form /agent
+  message_stream:
+    type: string
+    required: true
+    description: bounded runtime inbox plus agent stream publication
+  config:
+    type: string
+    required: true
+    description: agent_provider, agent_model, agent_base_url, agent_api_key redacted, agent_timeout_ms
   ci_model:
     type: boolean
     required: true
-    default: false
-states: [planned, configured, active]
-lifecycle: planned → configured → active
+    default: true
+states: [planned, input_channels_implemented, provider_configured, provider_tested, active]
+lifecycle: planned → input_channels_implemented → provider_configured → provider_tested → active
 ```
 
 ### Entity: CapabilityRegistry
@@ -381,6 +401,10 @@ properties:
     type: string
     required: true
     description: dry-run, require-token, require-approval, deny
+  invocation_origins:
+    type: string
+    required: true
+    description: runtime, cli, http, mcp, agent
   schema_validation:
     type: boolean
     required: true
@@ -574,6 +598,18 @@ properties:
     type: boolean
     required: true
     default: true
+  agent_provider:
+    type: string
+    required: true
+    description: deterministic-test, openai-compatible-http, local-http
+  secret_redaction:
+    type: boolean
+    required: true
+    default: true
+  policy_mode:
+    type: string
+    required: true
+    description: LEASH_POLICY_MODE / --policy-mode
 states: [planned, implemented, tested]
 lifecycle: planned → implemented → tested
 ```
@@ -594,6 +630,14 @@ properties:
     type: boolean
     required: true
     default: false
+  cli_json:
+    type: boolean
+    required: true
+    default: true
+  module_filter:
+    type: boolean
+    required: true
+    default: true
 states: [planned, implemented, tested]
 lifecycle: planned → implemented → tested
 ```
@@ -650,7 +694,7 @@ properties:
   coverage:
     type: string
     required: true
-    description: blueprint-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
+    description: stack-run, daemon-lifecycle, mcp-http, dashboard, replay, graph-export, safety-policy
   no_hardware:
     type: boolean
     required: true
@@ -705,17 +749,17 @@ cardinality: 1:many
 required: true
 ```
 
-### Relationship: Blueprints → ModuleGraph
+### Relationship: Stacks → ModuleGraph
 ```yaml
-relationship: Blueprints → ModuleGraph
+relationship: Stacks → ModuleGraph
 verb: instantiates
 cardinality: 1:many
 required: true
 ```
 
-### Relationship: Blueprints → Harness
+### Relationship: Stacks → Harness
 ```yaml
-relationship: Blueprints → Harness
+relationship: Stacks → Harness
 verb: targets
 cardinality: many:1
 required: true
@@ -745,9 +789,9 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: Replay → Blueprints
+### Relationship: Replay → Stacks
 ```yaml
-relationship: Replay → Blueprints
+relationship: Replay → Stacks
 verb: exercises
 cardinality: 1:many
 required: true
@@ -825,9 +869,9 @@ cardinality: 1:1
 required: true
 ```
 
-### Relationship: MCPServer → Blueprints
+### Relationship: MCPServer → Stacks
 ```yaml
-relationship: MCPServer → Blueprints
+relationship: MCPServer → Stacks
 verb: launches
 cardinality: 1:many
 required: true

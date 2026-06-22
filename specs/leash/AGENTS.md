@@ -20,8 +20,8 @@ leash/
   specs/leash/          dotdog specs
     SPEC.dog            Project overview + user stories
     constitution.dog    Safety + feature-gating rules
-    data-model.dog      8 entities, 9 edges
-    leash.dag           Compiled (agent reads this)
+    data-model.dog      human-authored entity + relationship source
+    leash.dag           Compiled (27 nodes, 42 edges; agent reads this)
   crates/               Rust workspace (planned)
 ```
 
@@ -30,8 +30,8 @@ leash/
 | Entity | States | Description |
 |--------|--------|-------------|
 | Harness | planned→mapped→extracted→stabilized→released | Core runtime |
-| CLI | planned→implemented→tested→released | CLI + HTTP server |
-| MCPServer | planned→implemented→tested→released | MCP stdio for LLM agents |
+| CLI | planned→implemented→tested→released | CLI + HTTP + MCP HTTP server |
+| MCPServer | planned→implemented→tested→released | MCP stdio and localhost MCP HTTP for LLM agents |
 | UGVAdapter | planned→implemented→feature_gated→documented | Waveshare UGV |
 | Bridge | planned→mapped→documented→tested | Robot bridge compat |
 | Safety | planned→implemented→verified | Smoke tests + gates |

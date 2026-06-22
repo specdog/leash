@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{HarnessConfig, Profile};
+use crate::{
+    config::{HarnessConfig, Profile},
+    transport::StreamTransportBackend,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -312,8 +315,10 @@ impl ModuleCoordinator {
 pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -> ModuleGraph {
     let driver_name = match config.profile {
         Profile::Sim => "sim-driver",
+        Profile::Replay => "replay-driver",
         Profile::WaveshareUgv => "waveshare-ugv-driver",
     };
+    let transport = config.stream_transport;
     ModuleGraph::new(vec![
         ModuleInfo {
             id: 0,
@@ -322,10 +327,20 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             state: ModuleState::Planned,
             health: planned_health(),
             dependencies: Vec::new(),
-            inputs: vec![stream("capability_request", StreamDirection::Input, "json")],
+            inputs: vec![stream(
+                "capability_request",
+                StreamDirection::Input,
+                "json",
+                transport,
+            )],
             outputs: vec![
-                stream("health", StreamDirection::Output, "Health"),
-                stream("capabilities", StreamDirection::Output, "Capabilities"),
+                stream("health", StreamDirection::Output, "Health", transport),
+                stream(
+                    "capabilities",
+                    StreamDirection::Output,
+                    "Capabilities",
+                    transport,
+                ),
             ],
             capabilities,
             physical: false,
@@ -338,11 +353,17 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             state: ModuleState::Planned,
             health: planned_health(),
             dependencies: vec!["harness-runtime".to_string()],
-            inputs: vec![stream("drive_command", StreamDirection::Input, "DriveReq")],
+            inputs: vec![stream(
+                "drive_command",
+                StreamDirection::Input,
+                "DriveReq",
+                transport,
+            )],
             outputs: vec![stream(
                 "odometry",
                 StreamDirection::Output,
                 "OdometryStatus",
+                transport,
             )],
             capabilities: vec!["drive".to_string(), "stop".to_string(), "estop".to_string()],
             physical: config.profile.is_physical(),
@@ -355,10 +376,25 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             state: ModuleState::Planned,
             health: planned_health(),
             dependencies: vec![driver_name.to_string()],
-            inputs: vec![stream("odometry", StreamDirection::Input, "OdometryStatus")],
+            inputs: vec![stream(
+                "odometry",
+                StreamDirection::Input,
+                "OdometryStatus",
+                transport,
+            )],
             outputs: vec![
-                stream("telemetry", StreamDirection::Output, "TelemetryFrame"),
-                stream("sensors", StreamDirection::Output, "SensorSnapshot"),
+                stream(
+                    "telemetry",
+                    StreamDirection::Output,
+                    "TelemetryFrame",
+                    transport,
+                ),
+                stream(
+                    "sensors",
+                    StreamDirection::Output,
+                    "SensorSnapshot",
+                    transport,
+                ),
             ],
             capabilities: vec!["observe".to_string(), "capture".to_string()],
             physical: false,
@@ -376,12 +412,17 @@ fn escape_dot(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn stream(name: &str, direction: StreamDirection, message_type: &str) -> StreamDescriptor {
+fn stream(
+    name: &str,
+    direction: StreamDirection,
+    message_type: &str,
+    transport: StreamTransportBackend,
+) -> StreamDescriptor {
     StreamDescriptor {
         name: name.to_string(),
         direction,
         message_type: message_type.to_string(),
-        transport: "in-process".to_string(),
+        transport: transport.as_str().to_string(),
     }
 }
 
@@ -454,7 +495,24 @@ mod tests {
         assert!(dot.contains("waveshare-ugv-driver"));
         assert!(dot.contains("physical"));
         assert!(dot.contains("module_1 -> module_2"));
-        assert!(dot.contains("odometry:OdometryStatus via in-process"));
+        assert!(dot.contains("odometry:OdometryStatus via local-pubsub"));
+    }
+
+    #[test]
+    fn graph_stream_transport_can_switch_backends() {
+        let graph = default_module_graph(
+            &HarnessConfig {
+                stream_transport: StreamTransportBackend::Memory,
+                ..HarnessConfig::default()
+            },
+            vec!["observe".to_string()],
+        );
+
+        assert!(graph
+            .modules()
+            .iter()
+            .flat_map(|module| module.inputs.iter().chain(module.outputs.iter()))
+            .all(|stream| stream.transport == "memory"));
     }
 
     #[test]

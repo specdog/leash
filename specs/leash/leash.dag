@@ -209,9 +209,9 @@
     ],
     [
       2,
-      "Blueprints",
+      "Stacks",
       "entity",
-      "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <blueprint>`.",
+      "Runnable catalog. Composition model for reusable stacks. `leash list` + `leash run <stack>`.",
       [
         "catalog",
         "s!",
@@ -259,13 +259,15 @@
       3,
       "Transport",
       "entity",
-      "Pub/sub abstraction. In-memory + local async backends. Stream backpressure, quality filtering.",
+      "Pub/sub abstraction and stream processing helpers. Memory + local async backends, latest-value backpressure, quality filtering, and timestamp pairing.",
       [
         "backends",
         "s!",
         "backpressure",
         "b!",
         "quality_filtering",
+        "b!",
+        "timestamp_pairing",
         "b!",
         "default_backend",
         "e!"
@@ -274,7 +276,8 @@
         "planned",
         "designed",
         "implemented",
-        "tested"
+        "tested",
+        "active"
       ],
       [
         [
@@ -289,7 +292,7 @@
       4,
       "Telemetry",
       "entity",
-      "Live telemetry streaming. Broadcast channel, WebSocket, SSE. TelemetryFrame with full sensor snapshot.",
+      "Live telemetry streaming. Transport-backed WebSocket and SSE streams. TelemetryStreamFrame includes telemetry, module health, command state, and safety state.",
       [
         "outputs",
         "s!",
@@ -340,9 +343,9 @@
         "b!"
       ],
       [
-        "planned",
         "implemented",
-        "verified"
+        "verified",
+        "active"
       ],
       [
         [
@@ -369,7 +372,7 @@
       6,
       "CLI",
       "entity",
-      "CLI + HTTP server. Subcommands: serve (mcp|http), health, stop. 16 REST + WS endpoints.",
+      "CLI + HTTP server. Subcommands: serve (mcp|mcp-http|http), agent-send, agent-interactive, mcp list-tools/call/status/modules, record, replay, health, stop. REST + WS endpoints plus MCP HTTP JSON endpoints and agent message input.",
       [
         "listen",
         "s!",
@@ -415,7 +418,7 @@
       7,
       "MCPServer",
       "entity",
-      "MCP stdio server (rmcp). 7 tools.",
+      "MCP stdio server (rmcp) and localhost MCP HTTP JSON control surface. 8 tools.",
       [
         "tools",
         "s!",
@@ -536,6 +539,8 @@
         "smoke_scripts",
         "s!",
         "policy",
+        "b!",
+        "audit_events",
         "b!"
       ],
       [
@@ -651,18 +656,24 @@
       13,
       "Agent",
       "entity",
-      "Model-provider config + input channels. One-shot, interactive, web commands.",
+      "Model-provider config and input channels. Deterministic no-network CI provider plus validated hosted/local HTTP provider settings.",
       [
         "providers",
         "s!",
         "channels",
+        "s!",
+        "message_stream",
+        "s!",
+        "config",
         "s!",
         "ci_model",
         "b!"
       ],
       [
         "planned",
-        "configured",
+        "input_channels_implemented",
+        "provider_configured",
+        "provider_tested",
         "active"
       ],
       [
@@ -689,6 +700,8 @@
         "safety_classes",
         "s!",
         "policy_modes",
+        "s!",
+        "invocation_origins",
         "s!",
         "schema_validation",
         "b!"
@@ -966,7 +979,13 @@
         "precedence",
         "s!",
         "show_config",
-        "b!"
+        "b!",
+        "agent_provider",
+        "s!",
+        "secret_redaction",
+        "b!",
+        "policy_mode",
+        "s!"
       ],
       [
         "planned",
@@ -991,6 +1010,10 @@
         "format",
         "e!",
         "resource_monitor",
+        "b!",
+        "cli_json",
+        "b!",
+        "module_filter",
         "b!"
       ],
       [
@@ -1095,11 +1118,11 @@
   ],
   "tk": {
     "m": "chars/4",
-    "st": 6809,
-    "ct": 6809,
-    "dt": 1899,
-    "sv": 72.1,
-    "cs": 72.1,
-    "saved": 4910
+    "st": 7913,
+    "ct": 7913,
+    "dt": 2053,
+    "sv": 74.1,
+    "cs": 74.1,
+    "saved": 5860
   }
 }

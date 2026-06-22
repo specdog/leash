@@ -21,10 +21,15 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo test --no-default-features --features sim,mcp
 cargo package --locked
-scripts/smoke-http.sh
-scripts/smoke-mcp.sh
-scripts/smoke-physical-gate.sh
+scripts/smoke-all.sh
 ```
+
+Use `scripts/smoke-http.sh` when isolating HTTP telemetry, require-token policy
+denial, approved drive, and agent input channels. Use
+`scripts/smoke-mcp-http.sh` when isolating the localhost MCP HTTP and
+`leash mcp ...` CLI tool-call surface. `scripts/smoke-all.sh` also verifies
+hosted agent-provider config redacts `LEASH_AGENT_API_KEY` and policy mode
+resolves in `show-config` output.
 
 Verify the feature matrix before tagging:
 
