@@ -18,6 +18,11 @@ leash serve http         # localhost HTTP + WebSocket
 - **Feature-gated hardware.** Waveshare UGV today, MAVLink drone + manipulator planned. No hardware compiles without explicit `--features`.
 - **Blueprint catalog.** Runnable sim, MCP, HTTP, and compatibility demos. `leash list` + `leash run <blueprint>`.
 - **Module graph with typed streams.** Modules declare inputs, outputs, lifecycle, and health. Coordinator manages startup/shutdown order.
+- **Control boundary.** Leash provides the hardware and runtime-control adapter layer: typed capabilities, safety gates, simulation defaults, telemetry, and explicit physical-actuation authority.
+
+## Product primitive
+
+Leash is a control adapter, not the top-level doctrine. It exposes physical and runtime capabilities through typed commands, safety gates, telemetry, replay, and explicit authority checks. Higher-level products can use it as an execution surface while keeping planning, context, and durable software state outside the hardware boundary.
 
 ## Quick Start
 
