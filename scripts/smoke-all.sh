@@ -46,6 +46,11 @@ const checks = [
     proof: "private fleet schema and errors, operator token/history/zone surfaces, landscape layout, and fixed mobile e-stop passed",
   },
   {
+    name: "operator-session-record-and-replay",
+    argv: ["bash", "scripts/smoke-operator-session.sh"],
+    proof: "safe ownership, joystick, camera, and telemetry recording plus offline GUI replay passed",
+  },
+  {
     name: "adapter-contracts-and-checklist",
     argv: ["bash", "scripts/smoke-adapter-contracts.sh"],
     proof: "mobile-base, Waveshare, gimbal, and camera contracts plus the reusable pre-fleet checklist passed",

@@ -19,6 +19,7 @@ pub mod mcp_bridge;
 pub mod memory;
 pub mod module;
 pub mod navigation;
+pub mod operator_session;
 pub mod perception;
 pub mod replay;
 pub mod runtime;
@@ -49,6 +50,7 @@ pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackB
 pub use navigation::{
     default_navigation_path, NavigationStore, PatrolZoneSpec, WaypointSpec, NAVIGATION_FORMAT,
 };
+pub use operator_session::{validate_operator_session, OPERATOR_SESSION_FORMAT};
 pub use perception::{
     FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime, SimulatedPerceptionWorker,
 };
@@ -76,6 +78,7 @@ pub use types::{
     AgentModelResponse, AutonomyOverlay, CameraRecoveryResponse, CameraStreamFailure,
     CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
     Health, ImageObservation, MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame,
+    OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording, OperatorSessionRobot,
     PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal, PlannerStatus,
     PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry, SavedWaypoint, SavedWaypointList,
     SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,

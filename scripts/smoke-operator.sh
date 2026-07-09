@@ -6,6 +6,7 @@ cd "$repo_root"
 
 node --check operator/server.js
 node --check operator/public/app.js
+node --check operator/public/session.js
 node operator/server.js --check-config operator/fleet.example.json >/dev/null
 
 REPO_ROOT="$repo_root" node <<'EOF'
@@ -67,6 +68,8 @@ assert.match(html, /class="patrol-zone"/);
 assert.match(html, /class="patrol-start"/);
 assert.match(html, /class="patrol-stop"/);
 assert.match(html, /metric-motion-events/);
+assert.match(html, /id="debug-session"[^>]*hidden/);
+assert.match(html, /src="\/session\.js"/);
 assert.match(css, /orientation: landscape/);
 assert.match(css, /body\.single-operator button\.mobile-estop/);
 assert.match(css, /position: fixed/);
