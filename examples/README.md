@@ -24,5 +24,5 @@ flowchart TB
 - `local-llm-mcp/`: how to connect an MCP-capable local LLM client.
 - `network-transport/`: TCP JSONL stream frame contract for external module processes.
 - `replay/`: checked-in replay fixtures for deterministic observe paths and memory demos.
-- `workers/`: versioned no-hardware input fixtures for external worker contracts.
+- `workers/`: versioned no-hardware perception input and passive motion-event output fixtures.
 - `waveshare-ugv/`: physical adapter notes for the Jetson/Waveshare UGV.

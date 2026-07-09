@@ -17,6 +17,7 @@ pub mod mcp;
 pub mod mcp_bridge;
 pub mod memory;
 pub mod module;
+pub mod navigation;
 pub mod perception;
 pub mod replay;
 pub mod runtime;
@@ -40,6 +41,9 @@ pub use memory::{
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
 };
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackBlueprintMetadata};
+pub use navigation::{
+    default_navigation_path, NavigationStore, PatrolZoneSpec, WaypointSpec, NAVIGATION_FORMAT,
+};
 pub use perception::{
     FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime, SimulatedPerceptionWorker,
 };
@@ -66,12 +70,13 @@ pub use transport::{
 pub use types::{
     AgentModelResponse, AutonomyOverlay, CameraRecoveryResponse, CameraStreamFailure,
     CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
-    Health, ImageObservation, MapMetadata, OccupancyGridFrame, PatrolStatus, PatrolStrategy,
-    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry,
+    Health, ImageObservation, MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame,
+    PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal, PlannerStatus,
+    PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry, SavedWaypoint, SavedWaypointList,
     SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-    TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE,
-    COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
-    VISUALIZATION_FRAME_VERSION,
+    TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
+    ZoneBoundaryPoint, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
 };
 pub use worker::{
     simulated_perception_worker_status, ExternalWorkerSpec, ExternalWorkerState,

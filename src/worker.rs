@@ -6,7 +6,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{ImageObservation, VisionResult};
+use crate::types::{ImageObservation, MotionEvent, VisionResult};
 
 pub const WORKER_FRAME_VERSION: &str = "leash-worker-frame-v1";
 
@@ -121,6 +121,16 @@ impl WorkerInputFrame {
         }
     }
 
+    pub fn motion(worker: impl Into<String>, sequence: u64, observation: ImageObservation) -> Self {
+        Self {
+            schema_version: WORKER_FRAME_VERSION.to_string(),
+            worker: worker.into(),
+            sequence,
+            ts_ms: observation.ts_ms,
+            payload: WorkerInputPayload::Motion { observation },
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         validate_frame_identity(&self.schema_version, &self.worker)
     }
@@ -131,6 +141,7 @@ impl WorkerInputFrame {
 #[serde(rename_all = "kebab-case")]
 pub enum WorkerInputPayload {
     Perception { observation: ImageObservation },
+    Motion { observation: ImageObservation },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -154,8 +165,24 @@ impl WorkerOutputFrame {
         }
     }
 
+    pub fn motion_events(input: &WorkerInputFrame, events: Vec<MotionEvent>) -> Self {
+        Self {
+            schema_version: WORKER_FRAME_VERSION.to_string(),
+            worker: input.worker.clone(),
+            sequence: input.sequence,
+            ts_ms: input.ts_ms,
+            payload: WorkerOutputPayload::MotionEvents { events },
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
-        validate_frame_identity(&self.schema_version, &self.worker)
+        validate_frame_identity(&self.schema_version, &self.worker)?;
+        if let WorkerOutputPayload::MotionEvents { events } = &self.payload {
+            for event in events {
+                validate_motion_event(event)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -165,6 +192,9 @@ impl WorkerOutputFrame {
 pub enum WorkerOutputPayload {
     Vision {
         result: VisionResult,
+    },
+    MotionEvents {
+        events: Vec<MotionEvent>,
     },
     Error {
         code: String,
@@ -420,6 +450,24 @@ fn validate_frame_identity(schema_version: &str, worker: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_motion_event(event: &MotionEvent) -> Result<()> {
+    if event.event_id.trim().is_empty() {
+        bail!("motion event id cannot be empty");
+    }
+    if event.source.trim().is_empty() || event.frame_id.trim().is_empty() {
+        bail!("motion event source and frame_id cannot be empty");
+    }
+    if !event.confidence.is_finite() || !(0.0..=1.0).contains(&event.confidence) {
+        bail!("motion event confidence must be from 0 through 1");
+    }
+    if event.x_m.is_some_and(|value| !value.is_finite())
+        || event.y_m.is_some_and(|value| !value.is_finite())
+    {
+        bail!("motion event coordinates must be finite");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,6 +534,20 @@ mod tests {
         input.validate().unwrap();
         assert_eq!(input.worker, "simulated-perception");
         assert_eq!(input.sequence, 42);
+    }
+
+    #[test]
+    fn bundled_motion_output_is_valid_and_observe_only() {
+        let output: WorkerOutputFrame =
+            serde_json::from_str(include_str!("../examples/workers/sim-motion-output.json"))
+                .unwrap();
+
+        output.validate().unwrap();
+        let WorkerOutputPayload::MotionEvents { events } = output.payload else {
+            panic!("expected motion events payload");
+        };
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].source, "simulated-motion");
     }
 
     #[test]

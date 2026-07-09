@@ -136,7 +136,9 @@ pub struct SimulatedPerceptionWorker;
 impl SimulatedPerceptionWorker {
     pub fn process(&self, input: WorkerInputFrame) -> Result<WorkerOutputFrame> {
         input.validate()?;
-        let WorkerInputPayload::Perception { observation } = input.payload.clone();
+        let WorkerInputPayload::Perception { observation } = input.payload.clone() else {
+            bail!("simulated perception worker requires a perception input frame");
+        };
         let result = FakePerceptionAdapter.detect(observation)?;
         Ok(WorkerOutputFrame::vision(&input, result))
     }
@@ -153,6 +155,9 @@ impl PerceptionAdapter for SimulatedPerceptionWorker {
         match output.payload {
             WorkerOutputPayload::Vision { result } => Ok(result),
             WorkerOutputPayload::Error { message, .. } => bail!(message),
+            WorkerOutputPayload::MotionEvents { .. } => {
+                bail!("simulated perception worker returned motion events")
+            }
         }
     }
 }
