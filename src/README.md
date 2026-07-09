@@ -12,6 +12,7 @@ flowchart TB
   lib --> stack["stack.rs\nbuilt-in runnable stacks"]
   lib --> http["http.rs\nHTTP, SSE, WebSocket routes"]
   lib --> mcp["mcp.rs\nMCP tools and transport"]
+  lib --> mcpbridge["mcp_bridge.rs\nremote bot stdio bridge"]
   lib --> replay["replay.rs\nrecord/playback JSONL"]
   lib --> daemon["daemon.rs\nbackground runs and logs"]
   lib --> transport["transport.rs\nmemory and local-pubsub streams"]
@@ -34,6 +35,7 @@ flowchart TB
 - `lib.rs`: public module declarations and re-exports.
 - `memory.rs`: file-backed spatial memory/object registry with stale confidence handling.
 - `mcp.rs`: MCP stdio server, tool schemas, and tool handlers.
+- `mcp_bridge.rs`: stdio MCP bridge that proxies local agent tools to a remote Leash `/mcp/call` surface.
 - `module.rs`: module graph, states, health, dependencies, and graph export.
 - `perception.rs`: pluggable perception adapter boundary, fake detector, and provider isolation.
 - `replay.rs`: replay recording format and playback timing.

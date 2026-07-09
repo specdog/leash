@@ -9,7 +9,9 @@ use std::{
 };
 
 #[cfg(feature = "waveshare-ugv")]
-use std::io::Write;
+use std::io::{BufRead, BufReader, ErrorKind, Write};
+#[cfg(feature = "waveshare-ugv")]
+use std::thread;
 
 #[cfg(feature = "waveshare-ugv")]
 use anyhow::Context;
@@ -17,7 +19,6 @@ use anyhow::{anyhow, Result};
 use parking_lot::{Mutex, RwLock};
 #[cfg(feature = "waveshare-ugv")]
 use serde_json::json;
-#[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
@@ -41,13 +42,14 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        AgentMessage, AgentModelResponse, BatteryStatus, CameraStatus, Capabilities, CaptureResult,
-        CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, ImageObservation,
-        MapMetadata, OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
-        PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
-        SafetyStreamState, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-        COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
+        Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
+        DriveOutcome, Health, ImageObservation, MapMetadata, OccupancyGridFrame, OdometryStatus,
+        PatrolStatus, PatrolStrategy, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot, SpatialMemoryStatus,
+        SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
+        VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+        VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -61,6 +63,10 @@ const PLANNER_ORIGIN_X_M: f64 = -0.5;
 const PLANNER_ORIGIN_Y_M: f64 = -0.5;
 const PLANNER_BLOCKED_CELLS: &[(usize, usize)] = &[(1, 1)];
 const PLANNER_STEP_CMD: f64 = 0.2;
+pub const CAMERA_PAN_MIN_DEG: f64 = -180.0;
+pub const CAMERA_PAN_MAX_DEG: f64 = 180.0;
+pub const CAMERA_TILT_MIN_DEG: f64 = -30.0;
+pub const CAMERA_TILT_MAX_DEG: f64 = 90.0;
 static HARNESS_INSTANCE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
@@ -94,8 +100,28 @@ impl PatrolState {
 trait RobotDriver: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
 
+    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
+        let _ = (pan_deg, tilt_deg, speed, accel);
+        Err(anyhow!("camera aim is unavailable for this profile"))
+    }
+
     fn stop(&self) -> Result<()> {
         self.drive(0.0, 0.0)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
+        Ok(None)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn enable_telemetry(&self) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn request_telemetry(&self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -107,6 +133,11 @@ impl RobotDriver for SimDriver {
         debug!(left, right, "sim drive");
         Ok(())
     }
+
+    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
+        debug!(pan_deg, tilt_deg, speed, accel, "sim camera aim");
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -115,6 +146,11 @@ struct ReplayDriver;
 impl RobotDriver for ReplayDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "replay drive ignored");
+        Ok(())
+    }
+
+    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
+        debug!(pan_deg, tilt_deg, speed, accel, "replay camera aim ignored");
         Ok(())
     }
 }
@@ -192,6 +228,14 @@ impl WaveshareUgvDriver {
             drive_swap: config.drive_swap,
         })
     }
+
+    fn write_json(&self, payload: Value, context: &'static str) -> Result<()> {
+        let line = payload.to_string() + "\n";
+        let mut writer = self.writer.lock();
+        writer.write_all(line.as_bytes()).context(context)?;
+        writer.flush().context(context)?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "waveshare-ugv")]
@@ -206,15 +250,47 @@ impl RobotDriver for WaveshareUgvDriver {
             left = -left;
             right = -right;
         }
-        let line = json!({"T": 1, "L": left, "R": right}).to_string() + "\n";
-        let mut writer = self.writer.lock();
+        self.write_json(
+            json!({"T": 1, "L": left, "R": right}),
+            "write Waveshare UGV drive command",
+        )
+    }
+
+    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
+        self.write_json(
+            json!({
+                "T": 133,
+                "X": pan_deg,
+                "Y": tilt_deg,
+                "SPD": speed,
+                "ACC": accel
+            }),
+            "write Waveshare UGV camera gimbal command",
+        )
+    }
+
+    fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
+        let writer = self.writer.lock();
         writer
-            .write_all(line.as_bytes())
-            .context("write Waveshare UGV drive command")?;
-        writer
-            .flush()
-            .context("flush Waveshare UGV drive command")?;
-        Ok(())
+            .try_clone()
+            .map(Some)
+            .context("clone Waveshare UGV serial port for telemetry")
+    }
+
+    fn enable_telemetry(&self) -> Result<()> {
+        self.write_json(
+            json!({"T": 142, "cmd": 100}),
+            "set Waveshare UGV telemetry interval",
+        )?;
+        self.write_json(
+            json!({"T": 131, "cmd": 1}),
+            "enable Waveshare UGV telemetry flow",
+        )?;
+        self.request_telemetry()
+    }
+
+    fn request_telemetry(&self) -> Result<()> {
+        self.write_json(json!({"T": 130}), "request Waveshare UGV base telemetry")
     }
 }
 
@@ -254,40 +330,48 @@ impl Default for CommandState {
 #[derive(Debug, Clone)]
 struct RawTelemetry {
     battery_v: Option<f64>,
+    battery_pct: Option<f64>,
     odometry_left: Option<f64>,
     odometry_right: Option<f64>,
     source: String,
     last_raw_frame_ms: Option<u128>,
+    last_raw_payload: Option<Value>,
 }
 
 impl RawTelemetry {
     fn sim() -> Self {
         Self {
             battery_v: Some(12.3),
+            battery_pct: battery_percent_from_voltage(12.3),
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
             source: "sim".to_string(),
             last_raw_frame_ms: Some(now_ms()),
+            last_raw_payload: None,
         }
     }
 
     fn physical(source: &str) -> Self {
         Self {
             battery_v: None,
+            battery_pct: None,
             odometry_left: None,
             odometry_right: None,
             source: source.to_string(),
             last_raw_frame_ms: None,
+            last_raw_payload: None,
         }
     }
 
     fn replay() -> Self {
         Self {
             battery_v: None,
+            battery_pct: None,
             odometry_left: None,
             odometry_right: None,
             source: "replay".to_string(),
             last_raw_frame_ms: None,
+            last_raw_payload: None,
         }
     }
 }
@@ -386,6 +470,8 @@ impl Harness {
         harness.spawn_deadman();
         harness.spawn_planner_loop();
         harness.spawn_patrol_loop();
+        #[cfg(feature = "waveshare-ugv")]
+        harness.spawn_waveshare_telemetry();
         harness.spawn_telemetry_loop();
         Ok(harness)
     }
@@ -700,6 +786,8 @@ impl Harness {
                 "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
                 "GET /camera/status".to_string(),
+                "GET /camera/snapshot".to_string(),
+                "GET /camera/stream.mjpg".to_string(),
                 "GET /agent".to_string(),
                 "GET /agent/messages".to_string(),
                 "POST /agent/messages".to_string(),
@@ -742,6 +830,7 @@ impl Harness {
             robot: self.config.role.clone(),
             profile: self.config.profile.as_str().to_string(),
             battery_v: raw.battery_v,
+            battery_pct: raw.battery_pct,
             left_cmd: command.left_cmd,
             right_cmd: command.right_cmd,
             odometry_left: raw.odometry_left,
@@ -934,16 +1023,40 @@ impl Harness {
     }
 
     pub fn authorize(&self, token: String, ttl_secs: u64, speed_mode: SpeedMode) -> Result<()> {
-        if token.trim().is_empty() {
+        let token = token.trim().to_string();
+        if token.is_empty() {
             return Err(anyhow!("token cannot be empty"));
         }
-        self.sessions.lock().insert(
-            token,
+
+        let should_stop_previous_owner = {
+            let command = self.command.lock();
+            command
+                .active_session_id
+                .as_deref()
+                .is_some_and(|active| active != token)
+                && (command.left_cmd != 0.0 || command.right_cmd != 0.0)
+        };
+        if should_stop_previous_owner {
+            self.driver.stop()?;
+            let mut command = self.command.lock();
+            command.left_cmd = 0.0;
+            command.right_cmd = 0.0;
+            command.last_cmd_at = None;
+        }
+
+        let mut sessions = self.sessions.lock();
+        sessions.clear();
+        sessions.insert(
+            token.clone(),
             PilotSession {
                 expires_at: Instant::now() + Duration::from_secs(ttl_secs.max(1)),
                 speed_mode,
             },
         );
+        let mut command = self.command.lock();
+        if command.active_session_id.as_deref() != Some(token.as_str()) {
+            command.active_session_id = None;
+        }
         Ok(())
     }
 
@@ -999,6 +1112,38 @@ impl Harness {
             max_speed,
             stopped_by_deadman: command.stopped_by_deadman,
             soft_odometry_limited: command.soft_odometry_limited,
+        })
+    }
+
+    pub fn camera_aim(
+        &self,
+        token: Option<&str>,
+        pan_deg: f64,
+        tilt_deg: f64,
+        speed: Option<u32>,
+        accel: Option<u32>,
+    ) -> Result<CameraAimOutcome> {
+        self.validate_session(token)?;
+        {
+            let command = self.command.lock();
+            if command.estop {
+                return Err(anyhow!(
+                    "estop is latched; call estop/reset before camera aim"
+                ));
+            }
+        }
+
+        let pan_deg = clamp(pan_deg, CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG);
+        let tilt_deg = clamp(tilt_deg, CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG);
+        let speed = speed.unwrap_or(0);
+        let accel = accel.unwrap_or(0);
+        self.driver.aim_camera(pan_deg, tilt_deg, speed, accel)?;
+        Ok(CameraAimOutcome {
+            ok: true,
+            pan_deg,
+            tilt_deg,
+            speed,
+            accel,
         })
     }
 
@@ -1449,6 +1594,42 @@ impl Harness {
         });
     }
 
+    #[cfg(feature = "waveshare-ugv")]
+    fn spawn_waveshare_telemetry(&self) {
+        if self.config.profile != Profile::WaveshareUgv {
+            return;
+        }
+
+        match self.driver.telemetry_reader() {
+            Ok(Some(port)) => {
+                let raw = self.raw.clone();
+                thread::spawn(move || read_waveshare_telemetry_loop(port, raw));
+            }
+            Ok(None) => {}
+            Err(err) => warn!(?err, "waveshare telemetry reader unavailable"),
+        }
+
+        let driver = self.driver.clone();
+        tokio::spawn(async move {
+            let mut failures = 0_u64;
+            if let Err(err) = driver.enable_telemetry() {
+                warn!(?err, "enable Waveshare telemetry failed");
+            }
+            let mut interval = time::interval(Duration::from_millis(500));
+            loop {
+                interval.tick().await;
+                if let Err(err) = driver.request_telemetry() {
+                    failures += 1;
+                    if failures == 1 || failures.is_multiple_of(20) {
+                        warn!(?err, "request Waveshare telemetry failed");
+                    }
+                } else {
+                    failures = 0;
+                }
+            }
+        });
+    }
+
     fn spawn_telemetry_loop(&self) {
         let harness = self.clone();
         tokio::spawn(async move {
@@ -1463,6 +1644,153 @@ impl Harness {
             }
         });
     }
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn read_waveshare_telemetry_loop(
+    port: Box<dyn serialport::SerialPort>,
+    raw: Arc<RwLock<RawTelemetry>>,
+) {
+    let mut reader = BufReader::new(port);
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => continue,
+            Ok(_) => {
+                let Some(frame) = parse_waveshare_frame(&line) else {
+                    continue;
+                };
+                if apply_waveshare_frame(&raw, frame) {
+                    continue;
+                }
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::Interrupted
+                ) =>
+            {
+                continue;
+            }
+            Err(err) => {
+                warn!(?err, "read Waveshare telemetry failed");
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+    }
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn parse_waveshare_frame(line: &str) -> Option<Value> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Some(value);
+    }
+    let start = trimmed.find('{')?;
+    let end = trimmed.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str::<Value>(&trimmed[start..=end]).ok()
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn apply_waveshare_frame(raw: &Arc<RwLock<RawTelemetry>>, frame: Value) -> bool {
+    if !is_waveshare_base_feedback(&frame) {
+        return false;
+    }
+
+    let mut next = raw.write();
+    if let Some(voltage) = waveshare_voltage(&frame) {
+        next.battery_v = Some(round3(voltage));
+        next.battery_pct = battery_percent_from_voltage(voltage);
+    }
+    if let Some(left_m) = waveshare_odometry_m(&frame, "odl", &["odometry_left", "left_m"]) {
+        next.odometry_left = Some(round3(left_m));
+    }
+    if let Some(right_m) = waveshare_odometry_m(&frame, "odr", &["odometry_right", "right_m"]) {
+        next.odometry_right = Some(round3(right_m));
+    }
+    next.last_raw_frame_ms = Some(now_ms());
+    next.last_raw_payload = Some(frame);
+    true
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn is_waveshare_base_feedback(frame: &Value) -> bool {
+    frame
+        .get("T")
+        .and_then(json_number)
+        .is_some_and(|kind| (kind - 1001.0).abs() < f64::EPSILON)
+        || frame.get("v").is_some()
+        || frame.get("odl").is_some()
+        || frame.get("odr").is_some()
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn waveshare_voltage(frame: &Value) -> Option<f64> {
+    const DIRECT_KEYS: &[&str] = &[
+        "battery_v",
+        "voltage_v",
+        "loadVoltage_V",
+        "load_voltage_v",
+        "busVoltage_V",
+        "bus_voltage_v",
+        "vbat",
+        "VBAT",
+        "voltage",
+    ];
+    for key in DIRECT_KEYS {
+        if let Some(value) = frame.get(*key).and_then(json_number) {
+            return normalize_voltage(value);
+        }
+    }
+    frame
+        .get("v")
+        .and_then(json_number)
+        .and_then(normalize_voltage)
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn normalize_voltage(value: f64) -> Option<f64> {
+    let voltage = if value > 100.0 { value / 100.0 } else { value };
+    (voltage > 3.0 && voltage < 30.0).then_some(voltage)
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn waveshare_odometry_m(frame: &Value, centimeters_key: &str, meter_keys: &[&str]) -> Option<f64> {
+    for key in meter_keys {
+        if let Some(value) = frame.get(*key).and_then(json_number) {
+            return Some(value);
+        }
+    }
+    frame
+        .get(centimeters_key)
+        .and_then(json_number)
+        .map(|centimeters| centimeters / 100.0)
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn json_number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn battery_percent_from_voltage(voltage: f64) -> Option<f64> {
+    if !(3.0..=30.0).contains(&voltage) {
+        return None;
+    }
+    Some(round1(clamp(
+        (voltage - 9.0) / (12.6 - 9.0) * 100.0,
+        0.0,
+        100.0,
+    )))
 }
 
 fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> {
@@ -1511,16 +1839,42 @@ fn open_physical_driver(config: &HarnessConfig) -> Result<Arc<dyn RobotDriver>> 
     }
 }
 
+fn configured_camera_device_exists() -> bool {
+    let device = std::env::var("LEASH_CAMERA_DEVICE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/dev/video0".to_string());
+    std::path::Path::new(&device).exists()
+}
+
 fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
+    let camera = if configured_camera_device_exists() {
+        CameraStatus {
+            status: "available".to_string(),
+            health: "healthy".to_string(),
+            stream_url: Some("/camera/stream.mjpg".to_string()),
+            snapshot_url: Some("/camera/snapshot".to_string()),
+        }
+    } else {
+        CameraStatus {
+            status: "simulated".to_string(),
+            health: "healthy".to_string(),
+            stream_url: None,
+            snapshot_url: None,
+        }
+    };
+
     SensorSnapshot {
         battery: BatteryStatus {
-            status: if raw.battery_v.is_some() {
+            status: if raw.battery_v.is_some() || raw.battery_pct.is_some() {
                 "available"
             } else {
                 "unavailable"
             }
             .to_string(),
             voltage_v: raw.battery_v,
+            level_pct: raw.battery_pct,
         },
         odometry: OdometryStatus {
             status: if raw.odometry_left.is_some() || raw.odometry_right.is_some() {
@@ -1532,12 +1886,7 @@ fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
             left_m: raw.odometry_left,
             right_m: raw.odometry_right,
         },
-        camera: CameraStatus {
-            status: "simulated".to_string(),
-            health: "healthy".to_string(),
-            stream_url: None,
-            snapshot_url: None,
-        },
+        camera,
         raw_frame: RawFrameStatus {
             status: if raw.last_raw_frame_ms.is_some() {
                 "available"
@@ -1547,6 +1896,7 @@ fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
             .to_string(),
             source: raw.source.clone(),
             last_ms: raw.last_raw_frame_ms,
+            payload: raw.last_raw_payload.clone(),
         },
     }
 }
@@ -1557,6 +1907,10 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
 
 fn round3(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
+}
+
+fn round1(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

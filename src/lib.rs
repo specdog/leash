@@ -13,6 +13,8 @@ pub mod daemon;
 pub mod http;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+#[cfg(feature = "mcp")]
+pub mod mcp_bridge;
 pub mod memory;
 pub mod module;
 pub mod perception;
@@ -22,6 +24,10 @@ pub mod stack;
 pub mod stream_processing;
 pub mod transport;
 pub mod types;
+#[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+pub mod v4l2_camera;
+#[cfg(feature = "webrtc")]
+pub mod webrtc_camera;
 pub mod worker;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};

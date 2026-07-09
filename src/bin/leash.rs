@@ -264,10 +264,21 @@ struct McpArgs {
 
 #[derive(Debug, Subcommand)]
 enum McpCommand {
+    Bridge(McpBridgeArgs),
     ListTools(McpTargetArgs),
     Call(McpCallArgs),
     Status(McpTargetArgs),
     Modules(McpTargetArgs),
+}
+
+#[derive(Debug, Args)]
+struct McpBridgeArgs {
+    #[arg(
+        long,
+        env = "LEASH_BRIDGE_URL",
+        default_value = "http://127.0.0.1:9990"
+    )]
+    url: String,
 }
 
 #[derive(Debug, Args)]
@@ -667,6 +678,9 @@ fn print_stack_list(format: ListFormat) -> Result<()> {
 #[cfg(feature = "mcp")]
 async fn run_mcp_command(args: McpArgs, config_path: Option<PathBuf>) -> Result<()> {
     match args.command {
+        McpCommand::Bridge(args) => {
+            leash_harness::mcp_bridge::serve_stdio(args.url).await?;
+        }
         McpCommand::ListTools(args) => {
             if let Some(url) = args.url {
                 print_json(&mcp_get(&url, "tools").await?)?;

@@ -1,0 +1,9 @@
+services:
+  operator:
+    build:
+      context: ./operator
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./operator/fleet.example.json:/app/config/fleet.json:ro
+    restart: unless-stopped
