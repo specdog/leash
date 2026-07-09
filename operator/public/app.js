@@ -8,11 +8,25 @@ const refreshAll = document.querySelector("#refresh-all");
 const stopAll = document.querySelector("#stop-all");
 const selectorOptions = document.querySelector("#selector-options");
 const selectorStatus = document.querySelector("#selector-status");
+const debugSession = document.querySelector("#debug-session");
+const sessionStatus = document.querySelector("#session-status");
+const sessionRecord = document.querySelector("#session-record");
+const sessionExport = document.querySelector("#session-export");
+const sessionFile = document.querySelector("#session-file");
+const sessionPlay = document.querySelector("#session-play");
+const sessionTimeline = document.querySelector("#session-timeline");
+const sessionTime = document.querySelector("#session-time");
 
 const state = new Map();
 let fleet = { robots: [], pollMs: 2500, snapshotMs: 3000 };
 let selectedRobotId = localStorage.getItem("leash.operator.selection") || "fleet";
 let ownerFingerprintCache = { token: "", id: null };
+let sessionRecorder = null;
+let loadedSession = null;
+let sessionPlaybackTimer = null;
+let debugReplayActive = false;
+const recordedTransitions = new Map();
+const recordedAt = new Map();
 
 const OPERATOR_TOKEN_KEY = "leash.operator.token";
 const DRIVE_LOOP_MS = 33;
@@ -30,6 +44,23 @@ const AIM_SERVO_SPEED = 150;
 const AIM_SERVO_ACCEL = 16;
 const AUTH_REFRESH_MS = 60_000;
 const AUTH_TTL_SECS = 180;
+
+function recordOperatorEvent(kind, robot, data, options = {}) {
+  if (!sessionRecorder || debugReplayActive) return;
+  const key = `${robot.id}:${options.key || kind}`;
+  const serialized = JSON.stringify(data);
+  if (options.transition && recordedTransitions.get(key) === serialized) return;
+  const now = Date.now();
+  if (options.throttleMs && now - (recordedAt.get(key) || 0) < options.throttleMs) return;
+  try {
+    sessionRecorder.record(kind, robot.id, data, now);
+    recordedTransitions.set(key, serialized);
+    recordedAt.set(key, now);
+    sessionStatus.textContent = `recording ${sessionRecorder.snapshot().events.length} events`;
+  } catch (error) {
+    sessionStatus.textContent = error.message;
+  }
+}
 
 function newOperatorToken() {
   if (globalThis.crypto?.randomUUID) {
@@ -55,6 +86,9 @@ tokenInput.addEventListener("change", () => {
 });
 
 function api(robot, route, options = {}) {
+  if (debugReplayActive) {
+    return Promise.reject(new Error("offline replay disables live robot requests"));
+  }
   return fetch(`/api/robots/${encodeURIComponent(robot.id)}/${route}`, {
     ...options,
     headers: {
@@ -377,10 +411,41 @@ function renderFleet() {
 }
 
 async function refreshRobot(robot) {
+  if (debugReplayActive) return;
   const card = document.querySelector(`[data-robot-id="${robot.id}"]`);
   if (!card) return;
   try {
     const { health, telemetry, camera, zones, patrol } = await jsonApi(robot, "summary");
+    recordOperatorEvent(
+      "summary",
+      robot,
+      { health, telemetry, camera, zones, patrol },
+      { throttleMs: 250 },
+    );
+    recordOperatorEvent("telemetry", robot, telemetry, { throttleMs: 250 });
+    recordOperatorEvent("operator-ownership", robot, health.operator_token || { active: false }, {
+      transition: true,
+    });
+    const streamHealth = camera.stream_health || {};
+    recordOperatorEvent(
+      "frame-health",
+      robot,
+      {
+        status: streamHealth.status || camera.camera?.status || "unknown",
+        ok: Boolean(streamHealth.ok),
+        recovery_count: streamHealth.recovery_count || 0,
+      },
+      { transition: true },
+    );
+    for (const failure of streamHealth.recent_failures || []) {
+      recordOperatorEvent("camera-failure", robot, {
+        owner: failure.owner,
+        reason: failure.reason,
+      }, {
+        key: `camera-failure:${failure.ts_ms}:${failure.owner}:${failure.reason}`,
+        transition: true,
+      });
+    }
     const current = robotState(robot);
     current.health = health;
     current.telemetry = telemetry;
@@ -429,6 +494,7 @@ async function refreshRobot(robot) {
 }
 
 function maybeStartStream(robot, camera) {
+  if (debugReplayActive) return;
   const current = robotState(robot);
   current.streamCapable = camera?.status === "available" && Boolean(camera?.stream_url);
   if (!current.streamCapable) {
@@ -632,6 +698,7 @@ function logStreamReconnect(robot, delayMs) {
 }
 
 function scheduleStreamReconnect(robot, delayMs = 750) {
+  if (debugReplayActive) return;
   const current = robotState(robot);
   if (current.streamReconnectTimer) return;
   current.streamReconnectTimer = setTimeout(() => {
@@ -668,7 +735,8 @@ function resetCameraStream(robot, reason = "camera refresh") {
 async function refreshCamera(robot) {
   resetCameraStream(robot);
   try {
-    await jsonApi(robot, "camera-refresh", { method: "POST", body: "{}" });
+    const recovery = await jsonApi(robot, "camera-refresh", { method: "POST", body: "{}" });
+    recordOperatorEvent("camera-recovery", robot, recovery);
   } catch (error) {
     log(robot, error.message);
   }
@@ -707,6 +775,7 @@ async function stopPatrol(robot) {
 }
 
 function refreshSnapshot(robot, options = {}) {
+  if (debugReplayActive) return;
   const image = document.querySelector(`[data-robot-id="${robot.id}"] .snapshot`);
   const current = robotState(robot);
   if (
@@ -725,10 +794,16 @@ function refreshSnapshot(robot, options = {}) {
   };
   image.onload = () => {
     current.cameraStatus = "snapshot";
+    recordOperatorEvent("frame-health", robot, { status: "snapshot", ok: true }, {
+      transition: true,
+    });
     done();
   };
   image.onerror = () => {
     current.cameraStatus = "fault";
+    recordOperatorEvent("frame-health", robot, { status: "fault", ok: false }, {
+      transition: true,
+    });
     done();
   };
   const params = new URLSearchParams({ t: String(Date.now()) });
@@ -737,12 +812,13 @@ function refreshSnapshot(robot, options = {}) {
 }
 
 async function authorize(robot, options = {}) {
+  if (debugReplayActive) return;
   const current = robotState(robot);
   if (current.authInFlight) return current.authPromise;
   current.authInFlight = true;
   current.authPromise = (async () => {
     try {
-      await jsonApi(robot, "authorize", {
+      const authorization = await jsonApi(robot, "authorize", {
         method: "POST",
         body: JSON.stringify({
           token: token(),
@@ -752,6 +828,11 @@ async function authorize(robot, options = {}) {
       });
       current.tokenReady = true;
       current.authorizedAt = Date.now();
+      if (authorization.operator_token) {
+        recordOperatorEvent("operator-ownership", robot, authorization.operator_token, {
+          transition: true,
+        });
+      }
       if (!options.silent) {
         log(robot, `authorized ${speedMode.value}`);
       }
@@ -901,6 +982,16 @@ async function sendJoystickDrive(robot) {
         speed_mode: speedMode.value,
       }),
     });
+    recordOperatorEvent(
+      "joystick-drive",
+      robot,
+      {
+        left: Number(command.left.toFixed(3)),
+        right: Number(command.right.toFixed(3)),
+        speed_mode: speedMode.value,
+      },
+      { throttleMs: 100 },
+    );
   } catch (error) {
     log(robot, error.message);
   } finally {
@@ -965,6 +1056,12 @@ async function sendJoystickAim(robot) {
         accel: AIM_SERVO_ACCEL,
       }),
     });
+    recordOperatorEvent(
+      "joystick-camera",
+      robot,
+      { pan_deg: current.pan, tilt_deg: current.tilt },
+      { throttleMs: 100 },
+    );
     if (current.aimLocalRev === localRev) {
       current.pan = result.pan_deg ?? current.pan;
       current.tilt = result.tilt_deg ?? current.tilt;
@@ -1008,6 +1105,10 @@ async function aimRobot(robot, panDelta, tiltDelta, absolute) {
         accel: AIM_SERVO_ACCEL,
       }),
     });
+    recordOperatorEvent("joystick-camera", robot, {
+      pan_deg: current.pan,
+      tilt_deg: current.tilt,
+    });
     log(robot, `aim pan=${result.pan_deg} tilt=${result.tilt_deg}`);
     updateHud(robot);
   } catch (error) {
@@ -1030,6 +1131,7 @@ async function driveRobot(robot, left, right) {
         speed_mode: speedMode.value,
       }),
     });
+    recordOperatorEvent("joystick-drive", robot, { left, right, speed_mode: speedMode.value });
     log(robot, `drive ${left}, ${right}`);
   } catch (error) {
     log(robot, error.message);
@@ -1058,6 +1160,7 @@ async function estopRobot(robot) {
 }
 
 async function refreshEverything(options = {}) {
+  if (debugReplayActive) return;
   if (options.resetStreams) {
     await Promise.allSettled(
       fleet.robots.map((robot) =>
@@ -1070,6 +1173,189 @@ async function refreshEverything(options = {}) {
   }
   await Promise.all(fleet.robots.map(refreshRobot));
   for (const robot of fleet.robots) refreshSnapshot(robot);
+}
+
+function startSessionRecording() {
+  if (debugReplayActive) {
+    sessionStatus.textContent = "reload without a session to record live activity";
+    return;
+  }
+  sessionRecorder = LeashSession.createRecorder(fleet);
+  recordedTransitions.clear();
+  recordedAt.clear();
+  sessionRecord.disabled = true;
+  sessionExport.disabled = false;
+  sessionStatus.textContent = "recording 0 events";
+}
+
+function stopAndExportSession() {
+  if (!sessionRecorder) return;
+  try {
+    const recording = sessionRecorder.finish();
+    const blob = new Blob([`${JSON.stringify(recording, null, 2)}\n`], {
+      type: "application/json",
+    });
+    const link = document.createElement("a");
+    const stamp = new Date(recording.started_at_ms).toISOString().replaceAll(":", "-");
+    link.href = URL.createObjectURL(blob);
+    link.download = `leash-operator-session-${stamp}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    sessionStatus.textContent = `exported ${recording.events.length} events`;
+  } catch (error) {
+    sessionStatus.textContent = error.message;
+  } finally {
+    sessionRecorder = null;
+    sessionRecord.disabled = false;
+    sessionExport.disabled = true;
+  }
+}
+
+function stopSessionPlayback() {
+  if (sessionPlaybackTimer) clearInterval(sessionPlaybackTimer);
+  sessionPlaybackTimer = null;
+  sessionPlay.textContent = "Play";
+}
+
+function replayEventLabel(event) {
+  const labels = {
+    "operator-ownership": "operator ownership updated",
+    "joystick-drive": "recorded drive command",
+    "joystick-camera": "recorded camera command",
+    "camera-failure": `camera failure: ${event.data.reason || "unknown"}`,
+    "camera-recovery": "camera recovery requested",
+    "frame-health": `frame health: ${event.data.status || "unknown"}`,
+    telemetry: "telemetry updated",
+    summary: "robot summary updated",
+  };
+  return labels[event.kind] || event.kind;
+}
+
+async function applyRecordedSummary(robot, replayState) {
+  const card = document.querySelector(`[data-robot-id="${robot.id}"]`);
+  if (!card) return;
+  const summary = replayState.summary || {};
+  const health = summary.health || null;
+  const telemetry = summary.telemetry || replayState.telemetry || null;
+  const camera = summary.camera || {};
+  const zones = summary.zones || {};
+  const current = robotState(robot);
+
+  current.health = health;
+  current.telemetry = telemetry;
+  current.motionEvents = Array.isArray(telemetry?.motion_events) ? telemetry.motion_events : [];
+  current.zones = Array.isArray(zones?.zones) ? zones.zones : [];
+  current.patrol = summary.patrol || null;
+  current.lastCamera = camera.camera || null;
+  current.cameraStatus = replayState.frame_health?.status || camera.camera?.status || "recorded";
+  current.streamStatus = `offline replay · ${current.cameraStatus}`;
+  current.cameraFailures = replayState.camera_failures || camera.stream_health?.recent_failures || [];
+  if (replayState.joystick_drive) {
+    current.driveLast = {
+      left: replayState.joystick_drive.left || 0,
+      right: replayState.joystick_drive.right || 0,
+    };
+  } else if (telemetry) {
+    current.driveLast = {
+      left: telemetry.left_cmd || 0,
+      right: telemetry.right_cmd || 0,
+    };
+  }
+  if (replayState.joystick_camera) {
+    current.pan = replayState.joystick_camera.pan_deg || 0;
+    current.tilt = replayState.joystick_camera.tilt_deg || 0;
+  }
+  current.healthHistory = [];
+  if (health) recordHealth(current, Boolean(health.ok), health.ok ? "recorded online" : "recorded attention");
+  current.lastLog = replayState.events.slice(-5).reverse().map((event) =>
+    `${clockLabel(event.ts_ms)} ${replayEventLabel(event)}`,
+  );
+
+  setRobotClass(card, health?.ok ? "ok" : health ? "warn" : "down");
+  card.querySelector(".state-text").textContent = health?.ok ? "recorded online" : "recorded";
+  card.querySelector(".metric-health").textContent = health?.ok ? "ok" : health ? "attention" : "-";
+  card.querySelector(".metric-battery").textContent = batteryLabel(telemetry).replace("battery ", "");
+  card.querySelector(".metric-estop").textContent = health?.estop == null ? "-" : String(health.estop);
+  card.querySelector(".metric-profile").textContent = health?.profile || "-";
+  card.querySelector(".log").textContent = current.lastLog.join("\n");
+  const image = card.querySelector(".snapshot");
+  image.onload = null;
+  image.onerror = null;
+  image.removeAttribute("src");
+  card.querySelector(".viewer-empty").textContent = current.streamStatus;
+  closeWebRtc(robot);
+  await renderOperatorToken(card, replayState.operator_token || health?.operator_token);
+  renderHistories(card, current);
+  renderPatrol(card, current);
+  updateHud(robot);
+}
+
+async function renderSessionAt(requestedOffset) {
+  if (!loadedSession) return;
+  const replay = LeashSession.snapshotAt(loadedSession, requestedOffset);
+  sessionTimeline.value = String(replay.offset_ms);
+  sessionTime.value = `${(replay.offset_ms / 1000).toFixed(1)}s / ${(replay.duration_ms / 1000).toFixed(1)}s`;
+  await Promise.all(
+    fleet.robots.map((robot) => applyRecordedSummary(robot, replay.robots[robot.id])),
+  );
+  updateSelectorStatus();
+}
+
+async function loadSessionFile(file) {
+  stopSessionPlayback();
+  sessionRecorder = null;
+  sessionRecord.disabled = true;
+  sessionExport.disabled = true;
+  const recording = LeashSession.parse(await file.text());
+  loadedSession = recording;
+  debugReplayActive = true;
+  document.body.classList.add("debug-replay");
+  tokenInput.disabled = true;
+  speedMode.disabled = true;
+  refreshAll.disabled = true;
+  stopAll.disabled = true;
+  for (const robot of fleet.robots) closeWebRtc(robot);
+  state.clear();
+  fleet = {
+    fleetName: `${recording.fleet_name} (offline replay)`,
+    pollMs: 2500,
+    snapshotMs: 3000,
+    robots: recording.robots.map((robot) => ({
+      id: robot.id,
+      name: robot.name,
+      role: robot.role,
+      location: robot.location,
+      videoTransport: robot.video_transport,
+      baseUrl: "",
+    })),
+  };
+  selectedRobotId = "fleet";
+  fleetName.textContent = fleet.fleetName;
+  fleetStatus.textContent = `${fleet.robots.length} recorded robots · no live connection`;
+  renderFleet();
+  renderSelector();
+  const duration = recording.ended_at_ms - recording.started_at_ms;
+  sessionTimeline.max = String(duration);
+  sessionTimeline.value = "0";
+  sessionTimeline.disabled = false;
+  sessionPlay.disabled = duration === 0;
+  sessionStatus.textContent = `loaded ${recording.events.length} events`;
+  await renderSessionAt(0);
+}
+
+function toggleSessionPlayback() {
+  if (!loadedSession) return;
+  if (sessionPlaybackTimer) {
+    stopSessionPlayback();
+    return;
+  }
+  if (Number(sessionTimeline.value) >= Number(sessionTimeline.max)) sessionTimeline.value = "0";
+  sessionPlay.textContent = "Pause";
+  sessionPlaybackTimer = setInterval(async () => {
+    const next = Math.min(Number(sessionTimeline.max), Number(sessionTimeline.value) + 100);
+    await renderSessionAt(next);
+    if (next >= Number(sessionTimeline.max)) stopSessionPlayback();
+  }, 100);
 }
 
 async function boot() {
@@ -1092,6 +1378,23 @@ async function boot() {
 
 refreshAll.addEventListener("click", () => refreshEverything({ resetStreams: true }));
 stopAll.addEventListener("click", () => fleet.robots.forEach(stopRobot));
+sessionRecord.addEventListener("click", startSessionRecording);
+sessionExport.addEventListener("click", stopAndExportSession);
+sessionPlay.addEventListener("click", toggleSessionPlayback);
+sessionTimeline.addEventListener("input", () => renderSessionAt(Number(sessionTimeline.value)));
+sessionFile.addEventListener("change", async () => {
+  const [file] = sessionFile.files;
+  if (!file) return;
+  try {
+    await loadSessionFile(file);
+  } catch (error) {
+    sessionStatus.textContent = error.message;
+  } finally {
+    sessionFile.value = "";
+  }
+});
+
+debugSession.hidden = new URLSearchParams(window.location.search).get("debug") !== "1";
 
 boot().catch((error) => {
   fleetStatus.textContent = error.message;

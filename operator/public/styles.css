@@ -161,6 +161,57 @@ input {
   white-space: nowrap;
 }
 
+.debug-session {
+  position: sticky;
+  top: 70px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: auto auto auto auto auto minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #d3dbdf;
+  background: #fff7d6;
+  color: #342c00;
+}
+
+.debug-session[hidden] {
+  display: none;
+}
+
+.session-load {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid #b8c4ca;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.session-load input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+#session-timeline {
+  width: 100%;
+}
+
+body.debug-replay .toolbar,
+body.debug-replay .controls,
+body.debug-replay .joystick,
+body.debug-replay .mobile-estop {
+  pointer-events: none;
+  opacity: 0.52;
+}
+
 main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
@@ -500,6 +551,15 @@ main.single-view {
     position: static;
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .debug-session {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #session-timeline {
+    grid-column: 1 / -1;
   }
 
   main {
