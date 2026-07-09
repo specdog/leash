@@ -39,7 +39,7 @@ pub use memory::{
     default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
 };
-pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState};
+pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackBlueprintMetadata};
 pub use perception::{FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime};
 pub use replay::{
     scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,

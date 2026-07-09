@@ -15,7 +15,7 @@ use axum::{
         ws::{Message, WebSocket},
         Form, State, WebSocketUpgrade,
     },
-    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Redirect, Response,
@@ -164,6 +164,7 @@ pub fn mcp_router(harness: Harness) -> Router {
         .route("/list-tools", get(mcp_tools))
         .route("/modules", get(mcp_modules))
         .route("/call", post(mcp_call))
+        .route("/mcp", post(mcp_protocol))
         .route("/mcp/status", get(mcp_status))
         .route("/mcp/tools", get(mcp_tools))
         .route("/mcp/list-tools", get(mcp_tools))
@@ -210,6 +211,135 @@ async fn mcp_call(
         &req.tool,
         req.args.unwrap_or_else(|| json!({})),
     )?))
+}
+
+#[cfg(feature = "mcp")]
+async fn mcp_protocol(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    Json(req): Json<McpJsonRpcReq>,
+) -> Response {
+    if !mcp_origin_allowed(&headers) {
+        return mcp_http_error(
+            StatusCode::FORBIDDEN,
+            req.id,
+            -32000,
+            "origin is not allowed",
+        );
+    }
+    if let Some(version) = headers
+        .get("mcp-protocol-version")
+        .and_then(|value| value.to_str().ok())
+    {
+        if !MCP_SUPPORTED_PROTOCOL_VERSIONS.contains(&version) {
+            return mcp_http_error(
+                StatusCode::BAD_REQUEST,
+                req.id,
+                -32600,
+                "unsupported MCP protocol version",
+            );
+        }
+    }
+    if req.jsonrpc != "2.0" {
+        return mcp_http_error(
+            StatusCode::BAD_REQUEST,
+            req.id,
+            -32600,
+            "jsonrpc must be '2.0'",
+        );
+    }
+
+    let Some(id) = req.id else {
+        return StatusCode::ACCEPTED.into_response();
+    };
+    let params = req.params.unwrap_or_else(|| json!({}));
+    let result = match req.method.as_str() {
+        "initialize" => {
+            let requested = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or(MCP_PROTOCOL_VERSION);
+            let negotiated = if MCP_SUPPORTED_PROTOCOL_VERSIONS.contains(&requested) {
+                requested
+            } else {
+                MCP_PROTOCOL_VERSION
+            };
+            json!({
+                "protocolVersion": negotiated,
+                "capabilities": { "tools": { "listChanged": false } },
+                "serverInfo": {
+                    "name": "leash",
+                    "title": "Leash Robotics Harness",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "instructions": "Use tools to inspect or operate Leash. Physical motion remains subject to runtime safety policy and explicit actuation gates."
+            })
+        }
+        "ping" => json!({}),
+        "tools/list" => serde_json::to_value(crate::mcp::protocol_tool_list())
+            .expect("MCP tool descriptors serialize"),
+        "tools/call" => {
+            let Some(name) = params.get("name").and_then(Value::as_str) else {
+                return mcp_http_error(
+                    StatusCode::OK,
+                    Some(id),
+                    -32602,
+                    "tools/call requires params.name",
+                );
+            };
+            if !crate::mcp::tool_descriptors()
+                .iter()
+                .any(|tool| tool.name == name)
+            {
+                return mcp_http_error(StatusCode::OK, Some(id), -32602, "unknown MCP tool");
+            }
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            serde_json::to_value(crate::mcp::protocol_call_tool(&harness, name, arguments))
+                .expect("MCP tool result serializes")
+        }
+        _ => return mcp_http_error(StatusCode::OK, Some(id), -32601, "method not found"),
+    };
+
+    Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })).into_response()
+}
+
+#[cfg(feature = "mcp")]
+fn mcp_http_error(status: StatusCode, id: Option<Value>, code: i64, message: &str) -> Response {
+    (
+        status,
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": id.unwrap_or(Value::Null),
+            "error": { "code": code, "message": message }
+        })),
+    )
+        .into_response()
+}
+
+#[cfg(feature = "mcp")]
+fn mcp_origin_allowed(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get("origin") else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Some(authority) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .and_then(|value| value.split('/').next())
+    else {
+        return false;
+    };
+    authority == "localhost"
+        || authority.starts_with("localhost:")
+        || authority == "127.0.0.1"
+        || authority.starts_with("127.0.0.1:")
+        || authority == "[::1]"
+        || authority.starts_with("[::1]:")
 }
 
 async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::TelemetryFrame> {
@@ -1256,6 +1386,21 @@ struct HttpError(anyhow::Error);
 struct McpCallReq {
     tool: String,
     args: Option<Value>,
+}
+
+#[cfg(feature = "mcp")]
+const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+
+#[cfg(feature = "mcp")]
+const MCP_SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
+
+#[cfg(feature = "mcp")]
+#[derive(Debug, Deserialize)]
+struct McpJsonRpcReq {
+    jsonrpc: String,
+    id: Option<Value>,
+    method: String,
+    params: Option<Value>,
 }
 
 impl<E> From<E> for HttpError

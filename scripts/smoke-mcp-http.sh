@@ -176,6 +176,35 @@ if (!driver || !driver.tools.includes("stop")) throw new Error("driver tool mapp
 if (JSON.stringify(payload).includes("mcp-smoke-token")) throw new Error("module map leaked token");'
 }
 
+assert_protocol_initialize() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.jsonrpc !== "2.0" || payload.id !== 1) throw new Error("invalid initialize envelope");
+if (payload.result?.protocolVersion !== "2025-11-25") throw new Error("protocol version was not negotiated");
+if (payload.result?.capabilities?.tools?.listChanged !== false) throw new Error("tools capability was missing");
+if (payload.result?.serverInfo?.name !== "leash") throw new Error("server info was missing");'
+}
+
+assert_protocol_tools() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.jsonrpc !== "2.0" || payload.id !== 2) throw new Error("invalid tools/list envelope");
+const tools = payload.result?.tools;
+if (!Array.isArray(tools)) throw new Error("tools/list result was missing");
+const names = new Set(tools.map((tool) => tool.name));
+for (const name of ["health", "modules", "invoke_capability", "stop"]) {
+  if (!names.has(name)) throw new Error(`missing protocol tool: ${name}`);
+}
+if (tools.some((tool) => !tool.inputSchema || tool.input_schema)) throw new Error("tool schema shape was not MCP-compatible");'
+}
+
+assert_protocol_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.jsonrpc !== "2.0" || payload.id !== 3) throw new Error("invalid tools/call envelope");
+if (payload.result?.isError !== false) throw new Error("health tool call failed");
+if (payload.result?.structuredContent?.profile !== "sim") throw new Error("structured health result was missing");
+const text = payload.result?.content?.[0];
+if (text?.type !== "text" || !text.text.includes("\"profile\":\"sim\"")) throw new Error("text health result was missing");'
+}
+
 curl -fsS "$base/mcp/tools" | assert_tools
 curl -fsS "$base/mcp/status" | assert_status
 curl -fsS -X POST "$base/mcp/call" \
@@ -184,6 +213,19 @@ curl -fsS -X POST "$base/mcp/call" \
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"stop","args":{}}' | assert_stop_call
+
+mcp_headers=(-H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+curl -fsS -X POST "$base/mcp" "${mcp_headers[@]}" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"leash-smoke","version":"1"}}}' | assert_protocol_initialize
+curl -fsS -o /dev/null -w '%{http_code}' -X POST "$base/mcp" "${mcp_headers[@]}" \
+  -H 'mcp-protocol-version: 2025-11-25' \
+  --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' | grep -qx '202'
+curl -fsS -X POST "$base/mcp" "${mcp_headers[@]}" \
+  -H 'mcp-protocol-version: 2025-11-25' \
+  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | assert_protocol_tools
+curl -fsS -X POST "$base/mcp" "${mcp_headers[@]}" \
+  -H 'mcp-protocol-version: 2025-11-25' \
+  --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"health","arguments":{}}}' | assert_protocol_call
 
 cargo run --quiet -- mcp list-tools | assert_tools
 cargo run --quiet -- mcp status --url "$base" | assert_status

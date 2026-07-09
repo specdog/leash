@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     capability::{InvocationOrigin, SafetyClass},
-    module::ModuleState,
+    module::{ModuleState, StackBlueprintMetadata},
     runtime::Harness,
     types::{PatrolStrategy, SpatialMemoryKind, SpeedMode},
 };
@@ -54,6 +54,7 @@ pub struct McpStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpModuleToolMap {
     pub ok: bool,
+    pub blueprint: StackBlueprintMetadata,
     pub modules: Vec<McpModuleTools>,
 }
 
@@ -64,6 +65,33 @@ pub struct McpModuleTools {
     pub state: ModuleState,
     pub physical: bool,
     pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct McpProtocolTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct McpProtocolToolList {
+    pub tools: Vec<McpProtocolTool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct McpTextContent {
+    pub r#type: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct McpProtocolCallResult {
+    pub content: Vec<McpTextContent>,
+    pub structured_content: Value,
+    pub is_error: bool,
 }
 
 #[derive(Clone)]
@@ -333,6 +361,19 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
     ]
 }
 
+pub fn protocol_tool_list() -> McpProtocolToolList {
+    McpProtocolToolList {
+        tools: tool_descriptors()
+            .into_iter()
+            .map(|tool| McpProtocolTool {
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.input_schema,
+            })
+            .collect(),
+    }
+}
+
 pub fn status(harness: &Harness, transport: &str) -> McpStatus {
     let health = harness.health();
     let modules_healthy = health.ok;
@@ -352,8 +393,8 @@ pub fn status(harness: &Harness, transport: &str) -> McpStatus {
 
 pub fn module_tool_map(harness: &Harness) -> McpModuleToolMap {
     let tools = tool_descriptors();
-    let modules = harness
-        .module_graph()
+    let graph = harness.module_graph();
+    let modules = graph
         .modules
         .into_iter()
         .map(|module| {
@@ -371,7 +412,32 @@ pub fn module_tool_map(harness: &Harness) -> McpModuleToolMap {
             }
         })
         .collect();
-    McpModuleToolMap { ok: true, modules }
+    McpModuleToolMap {
+        ok: true,
+        blueprint: graph.blueprint,
+        modules,
+    }
+}
+
+pub fn protocol_call_tool(harness: &Harness, name: &str, args: Value) -> McpProtocolCallResult {
+    match call_tool_value(harness, name, args) {
+        Ok(result) => McpProtocolCallResult {
+            content: vec![McpTextContent {
+                r#type: "text".to_string(),
+                text: serde_json::to_string(&result).unwrap_or_else(|_| "null".to_string()),
+            }],
+            structured_content: result,
+            is_error: false,
+        },
+        Err(err) => McpProtocolCallResult {
+            content: vec![McpTextContent {
+                r#type: "text".to_string(),
+                text: err.to_string(),
+            }],
+            structured_content: json!({ "error": err.to_string() }),
+            is_error: true,
+        },
+    }
 }
 
 pub fn call_tool(harness: &Harness, name: &str, args: Value) -> Result<McpCallResponse> {
@@ -541,6 +607,15 @@ mod tests {
         assert!(names.contains("stop"));
     }
 
+    #[test]
+    fn protocol_tool_list_uses_standard_input_schema_shape() {
+        let value = serde_json::to_value(protocol_tool_list()).unwrap();
+        let tools = value["tools"].as_array().unwrap();
+        let health = tools.iter().find(|tool| tool["name"] == "health").unwrap();
+        assert_eq!(health["inputSchema"]["type"], "object");
+        assert!(health.get("input_schema").is_none());
+    }
+
     #[tokio::test]
     async fn module_tool_map_does_not_leak_session_tokens() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
@@ -565,6 +640,16 @@ mod tests {
         let stop: DriveOutcome =
             serde_json::from_value(call_tool_value(&harness, "stop", json!({})).unwrap()).unwrap();
         assert!(stop.ok);
+    }
+
+    #[tokio::test]
+    async fn protocol_tool_call_returns_text_and_structured_content() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let result = protocol_call_tool(&harness, "health", json!({}));
+
+        assert!(!result.is_error);
+        assert_eq!(result.content[0].r#type, "text");
+        assert_eq!(result.structured_content["ok"], true);
     }
 
     #[tokio::test]

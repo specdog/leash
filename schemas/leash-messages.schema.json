@@ -1886,10 +1886,54 @@
             "failed"
           ],
           "type": "string"
+        },
+        "StackBlueprintMetadata": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "hardware_required": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "required_gates": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "stream_transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "name",
+            "profile",
+            "stream_transport",
+            "hardware_required",
+            "required_gates",
+            "capabilities"
+          ],
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "blueprint": {
+          "$ref": "#/$defs/StackBlueprintMetadata"
+        },
         "modules": {
           "items": {
             "$ref": "#/$defs/McpModuleTools"
@@ -1902,9 +1946,103 @@
       },
       "required": [
         "ok",
+        "blueprint",
         "modules"
       ],
       "title": "McpModuleToolMap",
+      "type": "object"
+    },
+    "McpProtocolCallResult": {
+      "$defs": {
+        "McpTextContent": {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "content": {
+          "items": {
+            "$ref": "#/$defs/McpTextContent"
+          },
+          "type": "array"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "structuredContent": true
+      },
+      "required": [
+        "content",
+        "structuredContent",
+        "isError"
+      ],
+      "title": "McpProtocolCallResult",
+      "type": "object"
+    },
+    "McpProtocolTool": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": true,
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "inputSchema"
+      ],
+      "title": "McpProtocolTool",
+      "type": "object"
+    },
+    "McpProtocolToolList": {
+      "$defs": {
+        "McpProtocolTool": {
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "inputSchema": true,
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "description",
+            "inputSchema"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/McpProtocolTool"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "McpProtocolToolList",
       "type": "object"
     },
     "McpStatus": {
@@ -1954,6 +2092,23 @@
         "tool_count"
       ],
       "title": "McpStatus",
+      "type": "object"
+    },
+    "McpTextContent": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "title": "McpTextContent",
       "type": "object"
     },
     "McpToolDescriptor": {
@@ -2154,6 +2309,47 @@
           ],
           "type": "string"
         },
+        "StackBlueprintMetadata": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "hardware_required": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "required_gates": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "stream_transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "name",
+            "profile",
+            "stream_transport",
+            "hardware_required",
+            "required_gates",
+            "capabilities"
+          ],
+          "type": "object"
+        },
         "StreamDescriptor": {
           "properties": {
             "direction": {
@@ -2187,6 +2383,9 @@
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "blueprint": {
+          "$ref": "#/$defs/StackBlueprintMetadata"
+        },
         "modules": {
           "items": {
             "$ref": "#/$defs/ModuleInfo"
@@ -2195,6 +2394,7 @@
         }
       },
       "required": [
+        "blueprint",
         "modules"
       ],
       "title": "ModuleGraph",
@@ -3500,6 +3700,49 @@
       ],
       "title": "SpeedMode",
       "type": "string"
+    },
+    "StackBlueprintMetadata": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hardware_required": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "required_gates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "stream_transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "name",
+        "profile",
+        "stream_transport",
+        "hardware_required",
+        "required_gates",
+        "capabilities"
+      ],
+      "title": "StackBlueprintMetadata",
+      "type": "object"
     },
     "StreamDescriptor": {
       "$defs": {
