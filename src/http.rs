@@ -633,9 +633,8 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
     if crate::v4l2_camera::enabled() {
         let frame = crate::v4l2_camera::capture_mjpeg_frame(device)
             .await
-            .map_err(|err| {
+            .inspect_err(|_| {
                 camera_guard.record_failure("capture-failed");
-                err
             })?;
         let mut response = frame.into_response();
         response
@@ -725,9 +724,8 @@ async fn camera_stream() -> Result<Response, HttpError> {
     if crate::v4l2_camera::enabled() {
         let receiver = crate::v4l2_camera::start_mjpeg_stream(device)
             .await
-            .map_err(|err| {
+            .inspect_err(|_| {
                 camera_guard.record_failure("stream-start-failed");
-                err
             })?;
         let stream = stream::unfold(
             (receiver, camera_guard),
