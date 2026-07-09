@@ -40,7 +40,9 @@ pub use memory::{
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
 };
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackBlueprintMetadata};
-pub use perception::{FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime};
+pub use perception::{
+    FakePerceptionAdapter, PerceptionAdapter, PerceptionRuntime, SimulatedPerceptionWorker,
+};
 pub use replay::{
     scaled_delay, validate_replay_speed, ReplayEvent, ReplayEventKind, ReplayPlayback,
     ReplayRecording, REPLAY_FORMAT_VERSION,
@@ -71,6 +73,8 @@ pub use types::{
     OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
 };
 pub use worker::{
-    ExternalWorkerSpec, ExternalWorkerState, ExternalWorkerStatus, WorkerHealthCheck,
-    WorkerRestartPolicy, WorkerSupervisor,
+    simulated_perception_worker_status, ExternalWorkerSpec, ExternalWorkerState,
+    ExternalWorkerStatus, WorkerHealthCheck, WorkerInputFrame, WorkerInputPayload,
+    WorkerOutputFrame, WorkerOutputPayload, WorkerRestartPolicy, WorkerSupervisor,
+    WORKER_FRAME_VERSION,
 };

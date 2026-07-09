@@ -825,6 +825,11 @@ impl Harness {
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
         let resource = self.config.resource_sampling.then(current_resource_sample);
+        let workers = if self.config.profile == Profile::Sim {
+            vec![crate::worker::simulated_perception_worker_status()]
+        } else {
+            Vec::new()
+        };
         let telemetry = TelemetryFrame {
             ts_ms: now,
             robot: self.config.role.clone(),
@@ -845,6 +850,7 @@ impl Harness {
             max_speed: command.speed_mode.cap(),
             sensors,
             vision: VisionResult::default(),
+            workers,
             resource,
             source: raw.source,
         };
@@ -862,7 +868,12 @@ impl Harness {
             byte_len: 0,
             sha256: None,
         };
-        telemetry.vision = self.perception.observe(observation);
+        if matches!(self.config.profile, Profile::Sim | Profile::Replay) {
+            telemetry.vision = self.perception.observe(observation);
+            if telemetry.workers.is_empty() {
+                telemetry.workers = vec![crate::worker::simulated_perception_worker_status()];
+            }
+        }
         telemetry
     }
 
@@ -2365,6 +2376,16 @@ mod tests {
         assert_eq!(message.payload["kind"], "telemetry");
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
         assert_eq!(message.payload["telemetry"]["vision"]["status"], "ok");
+        assert_eq!(
+            message.payload["telemetry"]["workers"][0]["name"],
+            "simulated-perception"
+        );
+        assert_eq!(message.payload["telemetry"]["workers"][0]["healthy"], true);
+        assert_eq!(message.payload["telemetry"]["workers"][0]["restarts"], 0);
+        assert_eq!(
+            message.payload["telemetry"]["workers"][0]["last_error"],
+            Value::Null
+        );
         assert_eq!(
             message.payload["visualization"]["detections"][0]["label"],
             "sim-fixture"

@@ -7,6 +7,7 @@ Leash publishes JSON Schema for the wire messages external tools consume:
 - capability descriptors, safety classes, module graph messages, and adapter messages
 - perception, visualization, planner, patrol, spatial-memory, drone, and manipulator payloads
 - network stream frames for TCP JSONL cross-process module boundaries
+- versioned worker input/output frames and sanitized worker health status
 
 The canonical artifact is [schemas/leash-messages.schema.json](../schemas/leash-messages.schema.json).
 It is generated from Rust `serde` + `schemars` types:
