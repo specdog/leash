@@ -329,6 +329,7 @@ mod tests {
             robot: "robot".to_string(),
             profile: "replay".to_string(),
             battery_v: Some(12.3),
+            battery_pct: Some(91.7),
             left_cmd: 0.0,
             right_cmd: 0.0,
             odometry_left: Some(0.0),
@@ -345,6 +346,7 @@ mod tests {
                 battery: BatteryStatus {
                     status: "available".to_string(),
                     voltage_v: Some(12.3),
+                    level_pct: Some(91.7),
                 },
                 odometry: OdometryStatus {
                     status: "available".to_string(),
@@ -361,6 +363,7 @@ mod tests {
                     status: "available".to_string(),
                     source: "replay".to_string(),
                     last_ms: Some(ts_ms),
+                    payload: None,
                 },
             },
             vision: Default::default(),

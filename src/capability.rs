@@ -215,6 +215,22 @@ impl CapabilityRegistry {
                 )?)
                 .map_err(Into::into)
             }
+            "camera_aim" => {
+                ensure_fields(&args, &["token", "pan_deg", "tilt_deg", "speed", "accel"])?;
+                let token = optional_string(&args, "token")?;
+                let pan_deg = required_f64(&args, "pan_deg")?;
+                let tilt_deg = required_f64(&args, "tilt_deg")?;
+                let speed = optional_u32(&args, "speed")?;
+                let accel = optional_u32(&args, "accel")?;
+                serde_json::to_value(self.harness.camera_aim(
+                    token.as_deref(),
+                    pan_deg,
+                    tilt_deg,
+                    speed,
+                    accel,
+                )?)
+                .map_err(Into::into)
+            }
             "speed_mode" => {
                 ensure_fields(&args, &["token", "speed_mode"])?;
                 let token = optional_string(&args, "token")?;
@@ -619,6 +635,20 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             "DriveOutcome",
         ),
         descriptor(
+            "camera_aim",
+            "Aim the camera gimbal in pan and tilt degrees through policy gates",
+            SafetyClass::PhysicalMotion,
+            object_schema(&[
+                ("token", "string", false),
+                ("pan_deg", "number", true),
+                ("tilt_deg", "number", true),
+                ("speed", "integer", false),
+                ("accel", "integer", false),
+                ("approval", "boolean", false),
+            ]),
+            "CameraAimOutcome",
+        ),
+        descriptor(
             "speed_mode",
             "Change the active speed cap",
             SafetyClass::SimControl,
@@ -906,6 +936,7 @@ fn object_schema(fields: &[(&str, &str, bool)]) -> Value {
 fn canonical_name(name: &str) -> &str {
     match name {
         "motors.stop" | "motors/stop" => "stop",
+        "camera.aim" | "camera/aim" | "gimbal_aim" | "gimbal.aim" | "gimbal/aim" => "camera_aim",
         "estop/reset" | "estop.reset" => "estop_reset",
         "planner.set_goal" | "planner/set_goal" => "planner_set_goal",
         "planner.cancel" | "planner/cancel" => "planner_cancel",
@@ -1011,6 +1042,12 @@ fn optional_u64(args: &Map<String, Value>, key: &str) -> Result<Option<u64>> {
             .ok_or_else(|| anyhow!("{key} must be an unsigned integer")),
         Some(_) => bail!("{key} must be an unsigned integer"),
     }
+}
+
+fn optional_u32(args: &Map<String, Value>, key: &str) -> Result<Option<u32>> {
+    optional_u64(args, key)?
+        .map(|value| u32::try_from(value).map_err(|_| anyhow!("{key} must fit in u32")))
+        .transpose()
 }
 
 fn required_f64(args: &Map<String, Value>, key: &str) -> Result<f64> {

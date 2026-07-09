@@ -12,7 +12,7 @@ flowchart TB
   cli --> config["show-config\nresolved config and sources"]
   cli --> replay["record, replay"]
   cli --> agent["agent-send, agent-interactive"]
-  cli --> mcp["mcp\nHTTP MCP helper commands"]
+  cli --> mcp["mcp\nHTTP MCP helpers and stdio bridge"]
   cli --> safety["health, stop\nremote HTTP helpers"]
 
   serve --> lib["leash_harness library"]

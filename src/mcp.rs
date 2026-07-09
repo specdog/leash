@@ -115,7 +115,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear"
+        description = "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear"
     )]
     pub async fn invoke_capability(
         &self,
@@ -193,6 +193,14 @@ pub struct InvokeCapabilityParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub right: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pan_deg: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tilt_deg: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accel: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_m: Option<f64>,
@@ -269,7 +277,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear",
+            "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[
@@ -278,6 +286,10 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
                 ("ttl_secs", "integer", false),
                 ("left", "number", false),
                 ("right", "number", false),
+                ("pan_deg", "number", false),
+                ("tilt_deg", "number", false),
+                ("speed", "integer", false),
+                ("accel", "integer", false),
                 ("frame_id", "string", false),
                 ("x_m", "number", false),
                 ("y_m", "number", false),

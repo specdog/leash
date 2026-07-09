@@ -389,10 +389,19 @@
     "BatteryStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "level_pct": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "status": {
           "type": "string"
         },
         "voltage_v": {
+          "default": null,
           "format": "double",
           "type": [
             "number",
@@ -3036,12 +3045,16 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "last_ms": {
+          "default": null,
           "format": "uint128",
           "minimum": 0,
           "type": [
             "integer",
             "null"
           ]
+        },
+        "payload": {
+          "default": null
         },
         "source": {
           "type": "string"
@@ -3180,10 +3193,19 @@
       "$defs": {
         "BatteryStatus": {
           "properties": {
+            "level_pct": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
             "status": {
               "type": "string"
             },
             "voltage_v": {
+              "default": null,
               "format": "double",
               "type": [
                 "number",
@@ -3251,12 +3273,16 @@
         "RawFrameStatus": {
           "properties": {
             "last_ms": {
+              "default": null,
               "format": "uint128",
               "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
+            },
+            "payload": {
+              "default": null
             },
             "source": {
               "type": "string"
@@ -3522,10 +3548,19 @@
       "$defs": {
         "BatteryStatus": {
           "properties": {
+            "level_pct": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
             "status": {
               "type": "string"
             },
             "voltage_v": {
+              "default": null,
               "format": "double",
               "type": [
                 "number",
@@ -3643,12 +3678,16 @@
         "RawFrameStatus": {
           "properties": {
             "last_ms": {
+              "default": null,
               "format": "uint128",
               "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
+            },
+            "payload": {
+              "default": null
             },
             "source": {
               "type": "string"
@@ -3776,7 +3815,16 @@
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "battery_pct": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "battery_v": {
+          "default": null,
           "format": "double",
           "type": [
             "number",
@@ -4018,10 +4066,19 @@
         },
         "BatteryStatus": {
           "properties": {
+            "level_pct": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
             "status": {
               "type": "string"
             },
             "voltage_v": {
+              "default": null,
               "format": "double",
               "type": [
                 "number",
@@ -4643,12 +4700,16 @@
         "RawFrameStatus": {
           "properties": {
             "last_ms": {
+              "default": null,
               "format": "uint128",
               "minimum": 0,
               "type": [
                 "integer",
                 "null"
               ]
+            },
+            "payload": {
+              "default": null
             },
             "source": {
               "type": "string"
@@ -4793,7 +4854,16 @@
         },
         "TelemetryFrame": {
           "properties": {
+            "battery_pct": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
             "battery_v": {
+              "default": null,
               "format": "double",
               "type": [
                 "number",

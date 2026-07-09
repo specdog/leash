@@ -529,7 +529,15 @@ fn waveshare_ugv_adapter_profile() -> AdapterProfile {
     AdapterProfile {
         category: AdapterCategory::MobileBase,
         maturity: AdapterMaturity::Alpha,
-        capabilities: strings(&["drive", "speed_mode", "stop", "estop", "observe", "capture"]),
+        capabilities: strings(&[
+            "drive",
+            "camera_aim",
+            "speed_mode",
+            "stop",
+            "estop",
+            "observe",
+            "capture",
+        ]),
         feature_flags: strings(&["waveshare-ugv"]),
         required_gates: strings(&["physical-actuation", "policy-token-or-approval"]),
         boundary: "feature-gated RobotDriver implementation; serial I/O isolated from core policy"

@@ -42,6 +42,8 @@ mavlink-drone = []
 manipulator = []
 bridge-compat = ["http"]
 cuda = []
+webrtc = ["http", "dep:webrtc"]
+v4l2-camera = ["http", "dep:v4l"]
 
 [dependencies]
 anyhow = "1.0"
@@ -51,7 +53,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-tokio = { version = "1.43", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.43", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -61,6 +63,10 @@ rmcp = { version = "1.7", optional = true, default-features = false, features = 
 schemars = { version = "1.0", optional = true, features = ["derive"] }
 serialport = { version = "4.6", optional = true }
 tower-http = { version = "0.6", optional = true, features = ["cors"] }
+webrtc = { version = "0.17.1", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+v4l = { version = "0.14", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "time"] }

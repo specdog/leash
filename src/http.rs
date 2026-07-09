@@ -1,7 +1,16 @@
-use std::{convert::Infallible, net::SocketAddr, time::Duration};
+use std::{
+    convert::Infallible,
+    env,
+    net::SocketAddr,
+    path::Path,
+    process::Stdio,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use anyhow::Result;
 use axum::{
+    body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket},
         Form, State, WebSocketUpgrade,
@@ -17,12 +26,23 @@ use axum::{
 use futures_util::{stream, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command as TokioCommand;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
 use crate::capability::InvocationOrigin;
+use crate::runtime::{
+    CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
+};
 use crate::types::{AgentMessageAck, AgentMessageList};
+#[cfg(feature = "webrtc")]
+use crate::webrtc_camera::{camera_webrtc_status, camera_webrtc_ws};
 use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
+
+static CAMERA_PROCESS_LOCK: LazyLock<Arc<TokioMutex<()>>> =
+    LazyLock::new(|| Arc::new(TokioMutex::new(())));
 
 #[derive(Debug, Deserialize)]
 struct PilotTokenReq {
@@ -43,6 +63,16 @@ struct DriveReq {
     left: f64,
     right: f64,
     speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CameraAimReq {
+    token: Option<String>,
+    pan_deg: f64,
+    tilt_deg: f64,
+    speed: Option<u32>,
+    accel: Option<u32>,
     approval: Option<bool>,
 }
 
@@ -84,7 +114,7 @@ pub async fn serve_mcp_http(harness: Harness, listen: SocketAddr) -> Result<()> 
 }
 
 pub fn router(harness: Harness) -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/", get(dashboard_page))
         .route("/dashboard", get(dashboard_page))
         .route("/dashboard/authorize", post(dashboard_authorize))
@@ -100,6 +130,10 @@ pub fn router(harness: Harness) -> Router {
         .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
         .route("/camera/status", get(camera_status))
+        .route("/camera/snapshot", get(camera_snapshot))
+        .route("/camera/stream.mjpg", get(camera_stream))
+        .route("/camera/aim", get(camera_aim_status).post(camera_aim))
+        .route("/gimbal/aim", get(camera_aim_status).post(camera_aim))
         .route("/agent", get(agent_page))
         .route("/agent/messages", get(agent_messages).post(agent_message))
         .route("/agent/send", post(agent_message))
@@ -113,9 +147,12 @@ pub fn router(harness: Harness) -> Router {
         .route("/estop", post(estop))
         .route("/estop/reset", post(estop_reset))
         .route("/stream", get(stream))
-        .route("/ws/telemetry", get(ws_telemetry))
-        .with_state(harness)
-        .layer(CorsLayer::permissive())
+        .route("/ws/telemetry", get(ws_telemetry));
+    #[cfg(feature = "webrtc")]
+    let app = app
+        .route("/camera/webrtc", get(camera_webrtc_status))
+        .route("/camera/webrtc/ws", get(camera_webrtc_ws));
+    app.with_state(harness).layer(CorsLayer::permissive())
 }
 
 #[cfg(feature = "mcp")]
@@ -188,10 +225,327 @@ async fn sensors(State(harness): State<Harness>) -> Json<Value> {
 }
 
 async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
+    let mut camera =
+        serde_json::to_value(harness.telemetry().sensors.camera).unwrap_or_else(|_| {
+            json!({
+                "status": "available",
+                "health": "healthy",
+                "snapshot_url": "/camera/snapshot",
+                "stream_url": null
+            })
+        });
+    if let Some(camera) = camera.as_object_mut() {
+        let device = camera_device_path();
+        if Path::new(&device).exists() {
+            camera.insert(
+                "stream_url".to_string(),
+                Value::String("/camera/stream.mjpg".to_string()),
+            );
+            #[cfg(feature = "webrtc")]
+            camera.insert(
+                "webrtc_url".to_string(),
+                Value::String("/camera/webrtc/ws".to_string()),
+            );
+            camera.insert("device".to_string(), Value::String(device));
+        }
+    }
     Json(json!({
         "ok": true,
-        "camera": harness.telemetry().sensors.camera
+        "camera": camera,
+        "gimbal": camera_aim_descriptor()
     }))
+}
+
+async fn camera_aim_status() -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "gimbal": camera_aim_descriptor()
+    }))
+}
+
+fn camera_aim_descriptor() -> Value {
+    json!({
+        "status": "available",
+        "capability": "camera_aim",
+        "endpoint": "/camera/aim",
+        "aliases": ["/gimbal/aim"],
+        "range": {
+            "pan_deg": [CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG],
+            "tilt_deg": [CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG]
+        }
+    })
+}
+
+#[cfg_attr(not(feature = "webrtc"), allow(dead_code))]
+pub(crate) fn camera_process_lock() -> Arc<TokioMutex<()>> {
+    CAMERA_PROCESS_LOCK.clone()
+}
+
+pub(crate) fn camera_device_path() -> String {
+    env::var("LEASH_CAMERA_DEVICE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/dev/video0".to_string())
+}
+
+pub(crate) fn camera_env_arg(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != "auto")
+}
+
+pub(crate) fn camera_v4l2_input_args(device: &str) -> Vec<String> {
+    let mut args = vec!["-f".to_string(), "v4l2".to_string()];
+    if let Some(format) = camera_env_arg("LEASH_CAMERA_INPUT_FORMAT") {
+        args.extend(["-input_format".to_string(), format]);
+    }
+    if let Some(size) = camera_env_arg("LEASH_CAMERA_VIDEO_SIZE") {
+        args.extend(["-video_size".to_string(), size]);
+    }
+    if let Some(framerate) = camera_env_arg("LEASH_CAMERA_FRAMERATE") {
+        args.extend(["-framerate".to_string(), framerate]);
+    }
+    args.extend(["-i".to_string(), device.to_string()]);
+    args
+}
+
+fn camera_stream_codec_args() -> Vec<String> {
+    match camera_env_arg("LEASH_CAMERA_STREAM_CODEC").as_deref() {
+        Some("copy") => vec!["-c:v".to_string(), "copy".to_string()],
+        _ => {
+            let quality =
+                camera_env_arg("LEASH_CAMERA_MJPEG_QUALITY").unwrap_or_else(|| "5".to_string());
+            vec![
+                "-vcodec".to_string(),
+                "mjpeg".to_string(),
+                "-q:v".to_string(),
+                quality,
+            ]
+        }
+    }
+}
+
+async fn camera_snapshot() -> Result<Response, HttpError> {
+    let device = camera_device_path();
+    if !Path::new(&device).exists() {
+        return Err(anyhow::anyhow!("camera device {device} is not available").into());
+    }
+    let _camera_guard = CAMERA_PROCESS_LOCK
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| anyhow::anyhow!("camera is busy; stream or capture already active"))?;
+
+    #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+    if crate::v4l2_camera::enabled() {
+        let frame = crate::v4l2_camera::capture_mjpeg_frame(device).await?;
+        let mut response = frame.into_response();
+        response
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+        return Ok(response);
+    }
+
+    let mut child = TokioCommand::new("ffmpeg")
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
+        .args(camera_v4l2_input_args(&device))
+        .args([
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|err| anyhow::anyhow!("start ffmpeg camera capture: {err}"))?;
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("ffmpeg camera capture did not expose stdout"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("ffmpeg camera capture did not expose stderr"))?;
+    let stdout_task = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).await.map(|_| bytes)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).await.map(|_| bytes)
+    });
+
+    let status = match time::timeout(Duration::from_secs(4), child.wait()).await {
+        Ok(result) => result.map_err(|err| anyhow::anyhow!("wait ffmpeg camera capture: {err}"))?,
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(anyhow::anyhow!("ffmpeg camera capture timed out").into());
+        }
+    };
+    let stdout = stdout_task
+        .await
+        .map_err(|err| anyhow::anyhow!("join ffmpeg camera stdout reader: {err}"))?
+        .map_err(|err| anyhow::anyhow!("read ffmpeg camera stdout: {err}"))?;
+    let stderr = stderr_task
+        .await
+        .map_err(|err| anyhow::anyhow!("join ffmpeg camera stderr reader: {err}"))?
+        .map_err(|err| anyhow::anyhow!("read ffmpeg camera stderr: {err}"))?;
+
+    if !status.success() || stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&stderr);
+        return Err(anyhow::anyhow!("ffmpeg camera capture failed: {stderr}").into());
+    }
+
+    let mut response = Bytes::from(stdout).into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+    Ok(response)
+}
+
+async fn camera_stream() -> Result<Response, HttpError> {
+    let device = camera_device_path();
+    if !Path::new(&device).exists() {
+        return Err(anyhow::anyhow!("camera device {device} is not available").into());
+    }
+    let camera_guard = CAMERA_PROCESS_LOCK
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| anyhow::anyhow!("camera is busy; stream or capture already active"))?;
+
+    #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+    if crate::v4l2_camera::enabled() {
+        let receiver = crate::v4l2_camera::start_mjpeg_stream(device).await?;
+        let stream = stream::unfold(
+            (receiver, camera_guard),
+            |(mut receiver, camera_guard)| async move {
+                receiver
+                    .recv()
+                    .await
+                    .map(|chunk| (Ok::<Bytes, Infallible>(chunk), (receiver, camera_guard)))
+            },
+        );
+        let mut response = Body::from_stream(stream).into_response();
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/x-mixed-replace; boundary=leashframe"),
+        );
+        response.headers_mut().insert(
+            "cache-control",
+            HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+        );
+        return Ok(response);
+    }
+
+    let mut command = TokioCommand::new("ffmpeg");
+    command
+        .kill_on_drop(true)
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
+        .args(camera_v4l2_input_args(&device))
+        .args(["-an"])
+        .args(camera_stream_codec_args())
+        .args(["-f", "mpjpeg", "-boundary_tag", "leashframe", "pipe:1"]);
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| anyhow::anyhow!("start ffmpeg camera stream: {err}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("ffmpeg camera stream did not expose stdout"))?;
+
+    let (first_chunk, stdout, child) = read_first_camera_frame(stdout, child).await?;
+    let stream = stream::unfold(
+        (Some(first_chunk), stdout, child, camera_guard),
+        |(first_chunk, mut stdout, mut child, camera_guard)| async move {
+            if let Some(first_chunk) = first_chunk {
+                return Some((
+                    Ok::<Bytes, Infallible>(first_chunk),
+                    (None, stdout, child, camera_guard),
+                ));
+            }
+
+            let mut chunk = vec![0; 32 * 1024];
+            match stdout.read(&mut chunk).await {
+                Ok(0) => {
+                    let _ = child.wait().await;
+                    None
+                }
+                Ok(size) => {
+                    chunk.truncate(size);
+                    Some((
+                        Ok::<Bytes, Infallible>(Bytes::from(chunk)),
+                        (None, stdout, child, camera_guard),
+                    ))
+                }
+                Err(_) => {
+                    let _ = child.kill().await;
+                    None
+                }
+            }
+        },
+    );
+
+    let mut response = Body::from_stream(stream).into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("multipart/x-mixed-replace; boundary=leashframe"),
+    );
+    response.headers_mut().insert(
+        "cache-control",
+        HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+    );
+    Ok(response)
+}
+
+async fn read_first_camera_frame(
+    mut stdout: tokio::process::ChildStdout,
+    mut child: tokio::process::Child,
+) -> Result<(Bytes, tokio::process::ChildStdout, tokio::process::Child), HttpError> {
+    let mut first_chunk = Vec::with_capacity(64 * 1024);
+    loop {
+        let mut chunk = vec![0; 32 * 1024];
+        match time::timeout(Duration::from_secs(2), stdout.read(&mut chunk)).await {
+            Err(_) => {
+                let _ = child.kill().await;
+                return Err(anyhow::anyhow!("ffmpeg camera stream produced no frame").into());
+            }
+            Ok(Err(err)) => {
+                let _ = child.kill().await;
+                return Err(anyhow::anyhow!("read ffmpeg camera stream: {err}").into());
+            }
+            Ok(Ok(0)) => {
+                let _ = child.wait().await;
+                return Err(
+                    anyhow::anyhow!("ffmpeg camera stream ended before first frame").into(),
+                );
+            }
+            Ok(Ok(size)) => {
+                chunk.truncate(size);
+                first_chunk.extend_from_slice(&chunk);
+                if first_chunk.windows(2).any(|bytes| bytes == [0xff, 0xd8]) {
+                    return Ok((Bytes::from(first_chunk), stdout, child));
+                }
+                if first_chunk.len() > 512 * 1024 {
+                    let _ = child.kill().await;
+                    return Err(
+                        anyhow::anyhow!("ffmpeg camera stream produced no JPEG frame").into(),
+                    );
+                }
+            }
+        }
+    }
 }
 
 async fn dashboard_page(State(harness): State<Harness>) -> Response {
@@ -722,6 +1076,26 @@ async fn drive(
                 "left": req.left,
                 "right": req.right,
                 "speed_mode": req.speed_mode,
+                "approval": req.approval,
+            }),
+            InvocationOrigin::Http,
+        )?,
+    ))
+}
+
+async fn camera_aim(
+    State(harness): State<Harness>,
+    Json(req): Json<CameraAimReq>,
+) -> Result<Json<Value>, HttpError> {
+    Ok(Json(
+        harness.capability_registry().invoke_value_with_origin(
+            "camera_aim",
+            json!({
+                "token": req.token,
+                "pan_deg": req.pan_deg,
+                "tilt_deg": req.tilt_deg,
+                "speed": req.speed,
+                "accel": req.accel,
                 "approval": req.approval,
             }),
             InvocationOrigin::Http,
