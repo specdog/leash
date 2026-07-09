@@ -46,6 +46,11 @@ const checks = [
     proof: "private fleet schema and errors, operator token/history/zone surfaces, landscape layout, and fixed mobile e-stop passed",
   },
   {
+    name: "adapter-contracts-and-checklist",
+    argv: ["bash", "scripts/smoke-adapter-contracts.sh"],
+    proof: "mobile-base, Waveshare, gimbal, and camera contracts plus the reusable pre-fleet checklist passed",
+  },
+  {
     name: "http-routes-and-policy",
     argv: ["bash", "scripts/smoke-http.sh"],
     proof: "HTTP routes, navigation status, motion telemetry, WebSocket/SSE visualization frames, external clients, authorized drive, and drive-denial policy passed",
