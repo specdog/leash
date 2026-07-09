@@ -24,6 +24,9 @@ curl -s http://127.0.0.1:8000/capabilities
 curl -s -X POST http://127.0.0.1:8000/motors/stop
 ```
 
+For camera-enabled builds and service environment settings, see
+[CAMERA.md](CAMERA.md).
+
 ## Waveshare Ubuntu UGV Install
 
 Only run this after the bot is physically safe and the stock Waveshare process

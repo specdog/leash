@@ -3,7 +3,8 @@ use std::{env, path::Path, sync::Arc, time::Duration};
 use anyhow::{anyhow, Result};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
     Json,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -37,24 +38,48 @@ use webrtc::{
 };
 
 use crate::http::{
-    camera_device_path, camera_env_arg, camera_process_lock, camera_v4l2_input_args,
+    camera_activity, camera_device_path, camera_env_arg, camera_record_failure,
+    camera_v4l2_input_args, camera_webrtc_enabled,
 };
 
 pub async fn camera_webrtc_status() -> Json<Value> {
     let device = camera_device_path();
+    let enabled = camera_webrtc_enabled();
+    let available = enabled && Path::new(&device).exists();
     Json(json!({
-        "ok": Path::new(&device).exists(),
-        "status": if Path::new(&device).exists() { "available" } else { "unavailable" },
+        "ok": available,
+        "status": if !enabled {
+            "disabled"
+        } else if Path::new(&device).exists() {
+            "available"
+        } else {
+            "unavailable"
+        },
         "device": device,
         "codec": "video/H264",
-        "signaling_url": "/camera/webrtc/ws",
+        "signaling_url": if enabled {
+            Value::String("/camera/webrtc/ws".to_string())
+        } else {
+            Value::Null
+        },
         "transport": "webrtc"
     }))
 }
 
 pub async fn camera_webrtc_ws(ws: WebSocketUpgrade) -> Response {
+    if !camera_webrtc_enabled() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "ok": false,
+                "error": "webrtc disabled"
+            })),
+        )
+            .into_response();
+    }
     ws.on_upgrade(|socket| async move {
         if let Err(err) = handle_camera_webrtc_socket(socket).await {
+            camera_record_failure("webrtc", "session-failed");
             warn!(?err, "camera WebRTC socket failed");
         }
     })
@@ -63,6 +88,7 @@ pub async fn camera_webrtc_ws(ws: WebSocketUpgrade) -> Response {
 async fn handle_camera_webrtc_socket(socket: WebSocket) -> Result<()> {
     let device = camera_device_path();
     if !Path::new(&device).exists() {
+        camera_record_failure("webrtc", "device-unavailable");
         return Err(anyhow!("camera device {device} is not available"));
     }
 
@@ -255,9 +281,7 @@ async fn stream_camera_h264(
     mut stop_rx: watch::Receiver<bool>,
 ) -> Result<()> {
     let device = camera_device_path();
-    let _camera_guard = camera_process_lock()
-        .try_lock_owned()
-        .map_err(|_| anyhow!("camera is busy; stream or capture already active"))?;
+    let camera_guard = camera_activity("webrtc")?;
 
     let mut child = TokioCommand::new("ffmpeg")
         .args(camera_webrtc_ffmpeg_args(&device))
@@ -265,7 +289,10 @@ async fn stream_camera_h264(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|err| anyhow!("start ffmpeg WebRTC camera encoder: {err}"))?;
+        .map_err(|err| {
+            camera_guard.record_failure("encoder-start-failed");
+            anyhow!("start ffmpeg WebRTC camera encoder: {err}")
+        })?;
     let mut stdout = child
         .stdout
         .take()
@@ -280,9 +307,18 @@ async fn stream_camera_h264(
             _ = stop_rx.changed() => {
                 break;
             }
+            _ = time::sleep(Duration::from_millis(100)) => {
+                if camera_guard.recovery_requested() {
+                    break;
+                }
+            }
             read = stdout.read(&mut chunk) => {
-                let size = read.map_err(|err| anyhow!("read ffmpeg WebRTC H264 stream: {err}"))?;
+                let size = read.map_err(|err| {
+                    camera_guard.record_failure("encoder-read-failed");
+                    anyhow!("read ffmpeg WebRTC H264 stream: {err}")
+                })?;
                 if size == 0 {
+                    camera_guard.record_failure("encoder-ended");
                     for nal in drain_h264_nals(&mut buffer, true) {
                         write_h264_sample(&video_track, nal, sample_duration).await?;
                     }
@@ -294,6 +330,7 @@ async fn stream_camera_h264(
                     write_h264_sample(&video_track, nal, sample_duration).await?;
                 }
                 if buffer.len() > 2 * 1024 * 1024 {
+                    camera_guard.record_failure("encoder-invalid-h264");
                     return Err(anyhow!("ffmpeg WebRTC H264 stream did not produce NAL boundaries"));
                 }
             }
@@ -366,6 +403,16 @@ fn camera_webrtc_ffmpeg_args(device: &str) -> Vec<String> {
             "-x264-params".to_string(),
             "repeat-headers=1:scenecut=0".to_string(),
         ]);
+    }
+
+    if let Some(bitrate) = camera_env_arg("LEASH_WEBRTC_BITRATE") {
+        args.extend(["-b:v".to_string(), bitrate]);
+    }
+    if let Some(maxrate) = camera_env_arg("LEASH_WEBRTC_MAXRATE") {
+        args.extend(["-maxrate".to_string(), maxrate]);
+    }
+    if let Some(bufsize) = camera_env_arg("LEASH_WEBRTC_BUFSIZE") {
+        args.extend(["-bufsize".to_string(), bufsize]);
     }
 
     args.extend(["-f".to_string(), "h264".to_string(), "pipe:1".to_string()]);

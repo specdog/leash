@@ -54,9 +54,26 @@ for (const endpoint of ["GET /", "GET /dashboard"]) {
 for (const endpoint of ["POST /dashboard/authorize", "POST /dashboard/stop", "POST /dashboard/estop", "POST /dashboard/estop-reset", "POST /dashboard/capture"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing dashboard action endpoint: ${endpoint}`);
 }
-for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages"]) {
+for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages", "GET /camera/stream/health", "POST /camera/stream/recover"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
 }'
+}
+
+assert_camera_health() {
+  local expected_recoveries="$1"
+  EXPECT_RECOVERIES="$expected_recoveries" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== false) throw new Error("missing sim camera unexpectedly reported healthy");
+if (payload.status !== "unavailable" || payload.device_available !== false) throw new Error("camera availability was wrong");
+if (payload.active_owner !== null || payload.active_since_ms !== null) throw new Error("idle camera reported an owner");
+if (payload.recovery_count !== Number(process.env.EXPECT_RECOVERIES)) throw new Error(`unexpected recovery count: ${payload.recovery_count}`);
+if (!Array.isArray(payload.recent_failures)) throw new Error("camera failure history was missing");'
+}
+
+assert_camera_recovery() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("camera recovery was not accepted");
+if (payload.recovery_requested !== false || payload.previous_owner !== null) throw new Error("idle recovery reported an owner");
+if (payload.recovery_generation !== 1 || payload.recovery_count !== 1) throw new Error("camera recovery counters were wrong");'
 }
 
 assert_health_modules() {
@@ -278,6 +295,9 @@ curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | parse_json
 curl -fsS "$base/sensors" | parse_json
+curl -fsS "$base/camera/stream/health" | assert_camera_health 0
+curl -fsS -X POST "$base/camera/stream/recover" | assert_camera_recovery
+curl -fsS "$base/camera/health" | assert_camera_health 1
 curl -fsS -X POST "$base/capture" | parse_json
 curl -fsS "$base/" | assert_dashboard_page
 curl -fsS "$base/dashboard" | assert_dashboard_page

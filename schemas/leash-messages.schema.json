@@ -415,6 +415,41 @@
       "title": "BatteryStatus",
       "type": "object"
     },
+    "CameraRecoveryResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "previous_owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recovery_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery_generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery_requested": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "recovery_requested",
+        "recovery_generation",
+        "recovery_count"
+      ],
+      "title": "CameraRecoveryResponse",
+      "type": "object"
+    },
     "CameraStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -442,6 +477,118 @@
         "health"
       ],
       "title": "CameraStatus",
+      "type": "object"
+    },
+    "CameraStreamFailure": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ts_ms",
+        "owner",
+        "reason"
+      ],
+      "title": "CameraStreamFailure",
+      "type": "object"
+    },
+    "CameraStreamHealth": {
+      "$defs": {
+        "CameraStreamFailure": {
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "owner",
+            "reason"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active_owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "active_since_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "device": {
+          "type": "string"
+        },
+        "device_available": {
+          "type": "boolean"
+        },
+        "last_recovery_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "recent_failures": {
+          "items": {
+            "$ref": "#/$defs/CameraStreamFailure"
+          },
+          "type": "array"
+        },
+        "recovery_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery_generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "status",
+        "device",
+        "device_available",
+        "recovery_generation",
+        "recovery_count",
+        "recent_failures"
+      ],
+      "title": "CameraStreamHealth",
       "type": "object"
     },
     "Capabilities": {
