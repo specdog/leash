@@ -15,3 +15,9 @@ Open `http://localhost:8787`.
 
 Fleet membership is the mounted JSON file. Each robot needs a unique `id`,
 display `name`, and Leash HTTP `baseUrl`.
+
+Set `videoTransport` to `mjpeg`, `webrtc`, or `auto`. `webrtc` is strict: the
+operator reports a fault when the bot does not advertise WebRTC and will not
+silently open the MJPEG relay. `auto` prefers WebRTC and falls back to MJPEG.
+Camera Refresh calls the bot's `/camera/stream/recover` endpoint and clears the
+operator relay cache.

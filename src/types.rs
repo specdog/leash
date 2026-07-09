@@ -606,6 +606,39 @@ pub struct CameraStatus {
     pub snapshot_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraStreamFailure {
+    pub ts_ms: u128,
+    pub owner: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraStreamHealth {
+    pub ok: bool,
+    pub status: String,
+    pub device: String,
+    pub device_available: bool,
+    pub active_owner: Option<String>,
+    pub active_since_ms: Option<u128>,
+    pub recovery_generation: u64,
+    pub recovery_count: u64,
+    pub last_recovery_ms: Option<u128>,
+    pub recent_failures: Vec<CameraStreamFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraRecoveryResponse {
+    pub ok: bool,
+    pub recovery_requested: bool,
+    pub previous_owner: Option<String>,
+    pub recovery_generation: u64,
+    pub recovery_count: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct RawFrameStatus {

@@ -64,13 +64,14 @@ pub use transport::{
     TcpJsonlStreamHubStatus, NETWORK_STREAM_FRAME_VERSION,
 };
 pub use types::{
-    AgentModelResponse, AutonomyOverlay, Capabilities, CaptureResult, CommandOverlay, CostmapFrame,
-    DetectionFrame, Health, ImageObservation, MapMetadata, OccupancyGridFrame, PatrolStatus,
-    PatrolStrategy, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample,
-    RunLogEntry, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
-    TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
-    VisualizationPath, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
+    AgentModelResponse, AutonomyOverlay, CameraRecoveryResponse, CameraStreamFailure,
+    CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
+    Health, ImageObservation, MapMetadata, OccupancyGridFrame, PatrolStatus, PatrolStrategy,
+    PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry,
+    SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
+    TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE,
+    COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN,
+    VISUALIZATION_FRAME_VERSION,
 };
 pub use worker::{
     simulated_perception_worker_status, ExternalWorkerSpec, ExternalWorkerState,

@@ -18,10 +18,11 @@ use leash_harness::{
     transport::NetworkStreamFrame,
     types::{
         AgentMessage, AgentMessageAck, AgentMessageList, AgentModelResponse, AutonomyOverlay,
-        BatteryStatus, CameraStatus, Capabilities, CaptureResult, CommandOverlay,
-        CommandStreamState, CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health,
-        ImageObservation, ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState,
-        MapMetadata, OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
+        BatteryStatus, CameraRecoveryResponse, CameraStatus, CameraStreamFailure,
+        CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
+        CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
+        ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapMetadata,
+        OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
         PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry,
         SafetyStreamState, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
         SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
@@ -109,6 +110,9 @@ fn schema_document() -> Result<Value> {
     insert::<BatteryStatus>(&mut schemas, "BatteryStatus")?;
     insert::<OdometryStatus>(&mut schemas, "OdometryStatus")?;
     insert::<CameraStatus>(&mut schemas, "CameraStatus")?;
+    insert::<CameraStreamFailure>(&mut schemas, "CameraStreamFailure")?;
+    insert::<CameraStreamHealth>(&mut schemas, "CameraStreamHealth")?;
+    insert::<CameraRecoveryResponse>(&mut schemas, "CameraRecoveryResponse")?;
     insert::<RawFrameStatus>(&mut schemas, "RawFrameStatus")?;
     insert::<SpeedMode>(&mut schemas, "SpeedMode")?;
     insert::<ResourceSample>(&mut schemas, "ResourceSample")?;
