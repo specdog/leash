@@ -1,25 +1,25 @@
 {
-  "fleetName": "Leash Local Fleet",
+  "fleetName": "Example Leash Fleet",
   "pollMs": 2500,
-  "snapshotMs": 250,
+  "snapshotMs": 1000,
   "robots": [
     {
-      "id": "guard-dog",
-      "name": "Guard Dog",
-      "role": "guard-dog",
-      "baseUrl": "http://10.0.0.181:8000",
-      "location": "window perch",
-      "notes": "LAN Jetson",
-      "videoTransport": "mjpeg"
+      "id": "example-rover-a",
+      "name": "Example Rover A",
+      "role": "inspection",
+      "baseUrl": "http://192.0.2.10:8000",
+      "location": "example zone a",
+      "notes": "Replace this documentation-only address in your private file",
+      "videoTransport": "auto"
     },
     {
-      "id": "pinkie",
-      "name": "Pinkie",
-      "role": "pinkie",
-      "baseUrl": "http://192.168.55.1:8000",
-      "location": "USB gadget link",
-      "notes": "direct USB Jetson",
-      "videoTransport": "mjpeg"
+      "id": "example-rover-b",
+      "name": "Example Rover B",
+      "role": "observation",
+      "baseUrl": "http://192.0.2.11:8000",
+      "location": "example zone b",
+      "notes": "RFC 5737 TEST-NET-1 address; not a real fleet endpoint",
+      "videoTransport": "webrtc"
     }
   ]
 }

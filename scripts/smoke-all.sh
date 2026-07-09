@@ -21,6 +21,7 @@ for (const key of [
   "LEASH_BRIDGE_URL",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
+  "LEASH_FLEET_CONFIG",
   "LEASH_MAVLINK_ENDPOINT",
   "LEASH_POLICY_MODE",
   "LEASH_PROFILE",
@@ -38,6 +39,11 @@ const checks = [
     name: "message-schemas-current",
     argv: ["cargo", "run", "--quiet", "--features", "mcp", "--bin", "leash-schema", "--", "--check"],
     proof: "checked-in JSON Schemas matched Rust wire message types",
+  },
+  {
+    name: "operator-fleet-and-mobile-ui",
+    argv: ["bash", "scripts/smoke-operator.sh"],
+    proof: "private fleet schema and errors, operator token/history surfaces, landscape layout, and fixed mobile e-stop passed",
   },
   {
     name: "http-routes-and-policy",

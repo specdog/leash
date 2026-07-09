@@ -24,33 +24,129 @@ const MIME = {
   ".svg": "image/svg+xml",
 };
 
-function loadFleet() {
-  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-  const config = JSON.parse(raw);
-  if (!Array.isArray(config.robots)) {
-    throw new Error("fleet config must include robots[]");
+const FLEET_KEYS = new Set(["fleetName", "pollMs", "snapshotMs", "robots"]);
+const ROBOT_KEYS = new Set([
+  "id",
+  "name",
+  "role",
+  "baseUrl",
+  "location",
+  "notes",
+  "videoTransport",
+]);
+const VIDEO_TRANSPORTS = new Set(["auto", "mjpeg", "webrtc"]);
+
+function loadFleet(configPath = CONFIG_PATH) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (error) {
+    throw new Error(`fleet config '${configPath}' could not be read: ${error.message}`);
+  }
+  const errors = validateFleetConfig(config);
+  if (errors.length > 0) {
+    throw new Error(`fleet config '${configPath}' is invalid:\n- ${errors.join("\n- ")}`);
   }
   return {
     fleetName: config.fleetName || "Leash Fleet",
     pollMs: Number(config.pollMs || 2500),
     snapshotMs: Number(config.snapshotMs || 3000),
     robots: config.robots.map((robot) => ({
-      id: required(robot, "id"),
-      name: robot.name || robot.id,
-      role: robot.role || "robot",
-      baseUrl: required(robot, "baseUrl").replace(/\/+$/, ""),
-      location: robot.location || "",
-      notes: robot.notes || "",
+      id: robot.id.trim(),
+      name: (robot.name || robot.id).trim(),
+      role: (robot.role || "robot").trim(),
+      baseUrl: robot.baseUrl.trim().replace(/\/+$/, ""),
+      location: robot.location?.trim() || "",
+      notes: robot.notes?.trim() || "",
       videoTransport: robot.videoTransport || "auto",
     })),
   };
 }
 
-function required(object, key) {
-  if (!object[key] || typeof object[key] !== "string") {
-    throw new Error(`fleet robot is missing string field '${key}'`);
+function validateFleetConfig(config) {
+  const errors = [];
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return ["root: expected an object"];
   }
-  return object[key];
+  rejectUnknownKeys(config, FLEET_KEYS, "root", errors);
+  optionalNonEmptyString(config, "fleetName", "fleetName", errors);
+  optionalInterval(config, "pollMs", errors);
+  optionalInterval(config, "snapshotMs", errors);
+  if (!Array.isArray(config.robots) || config.robots.length === 0) {
+    errors.push("robots: expected a non-empty array");
+    return errors;
+  }
+
+  const ids = new Set();
+  config.robots.forEach((robot, index) => {
+    const prefix = `robots[${index}]`;
+    if (!robot || typeof robot !== "object" || Array.isArray(robot)) {
+      errors.push(`${prefix}: expected an object`);
+      return;
+    }
+    rejectUnknownKeys(robot, ROBOT_KEYS, prefix, errors);
+    requiredNonEmptyString(robot, "id", `${prefix}.id`, errors);
+    requiredNonEmptyString(robot, "baseUrl", `${prefix}.baseUrl`, errors);
+    for (const key of ["name", "role", "location", "notes"]) {
+      optionalNonEmptyString(robot, key, `${prefix}.${key}`, errors);
+    }
+    if (typeof robot.id === "string" && robot.id.trim()) {
+      const id = robot.id.trim();
+      if (ids.has(id)) errors.push(`${prefix}.id: duplicate robot id '${id}'`);
+      ids.add(id);
+    }
+    if (robot.videoTransport != null && !VIDEO_TRANSPORTS.has(robot.videoTransport)) {
+      errors.push(
+        `${prefix}.videoTransport: expected one of ${[...VIDEO_TRANSPORTS].join(", ")}`,
+      );
+    }
+    if (typeof robot.baseUrl === "string" && robot.baseUrl.trim()) {
+      validateBaseUrl(robot.baseUrl, `${prefix}.baseUrl`, errors);
+    }
+  });
+  return errors;
+}
+
+function rejectUnknownKeys(object, allowed, prefix, errors) {
+  for (const key of Object.keys(object)) {
+    if (!allowed.has(key)) errors.push(`${prefix}.${key}: unknown field`);
+  }
+}
+
+function requiredNonEmptyString(object, key, pathName, errors) {
+  if (typeof object[key] !== "string" || !object[key].trim()) {
+    errors.push(`${pathName}: expected a non-empty string`);
+  }
+}
+
+function optionalNonEmptyString(object, key, pathName, errors) {
+  if (object[key] != null && (typeof object[key] !== "string" || !object[key].trim())) {
+    errors.push(`${pathName}: expected a non-empty string when provided`);
+  }
+}
+
+function optionalInterval(object, key, errors) {
+  if (
+    object[key] != null &&
+    (!Number.isInteger(object[key]) || object[key] < 100 || object[key] > 60_000)
+  ) {
+    errors.push(`${key}: expected an integer from 100 through 60000 milliseconds`);
+  }
+}
+
+function validateBaseUrl(value, pathName, errors) {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) {
+      errors.push(`${pathName}: expected an http or https URL`);
+    }
+    if (url.username || url.password) errors.push(`${pathName}: credentials are not allowed`);
+    if (url.pathname !== "/" || url.search || url.hash) {
+      errors.push(`${pathName}: expected an origin URL without a path, query, or fragment`);
+    }
+  } catch (_error) {
+    errors.push(`${pathName}: expected a valid absolute URL`);
+  }
 }
 
 function json(response, status, payload) {
@@ -581,23 +677,47 @@ async function handleApi(request, response, url) {
   }
 }
 
-const server = http.createServer(async (request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
-  try {
-    if (url.pathname.startsWith("/api/")) {
-      await handleApi(request, response, url);
-    } else {
-      serveStatic(response, url.pathname);
+function startServer() {
+  loadFleet();
+  const server = http.createServer(async (request, response) => {
+    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    try {
+      if (url.pathname.startsWith("/api/")) {
+        await handleApi(request, response, url);
+      } else {
+        serveStatic(response, url.pathname);
+      }
+    } catch (error) {
+      json(response, 500, { ok: false, error: error.message });
     }
-  } catch (error) {
-    json(response, 500, { ok: false, error: error.message });
-  }
-});
+  });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Leash operator listening on http://0.0.0.0:${PORT}`);
-  console.log(`Fleet config: ${CONFIG_PATH}`);
-  if (SNAPSHOT_WARMER_ENABLED) {
-    startSnapshotWarmers();
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Leash operator listening on http://0.0.0.0:${PORT}`);
+    console.log(`Fleet config: ${CONFIG_PATH}`);
+    if (SNAPSHOT_WARMER_ENABLED) startSnapshotWarmers();
+  });
+  return server;
+}
+
+function checkConfigFromCli() {
+  const index = process.argv.indexOf("--check-config");
+  if (index < 0) return false;
+  const requested = process.argv[index + 1];
+  if (!requested) throw new Error("--check-config requires a JSON file path");
+  const configPath = path.resolve(process.cwd(), requested);
+  const fleet = loadFleet(configPath);
+  console.log(JSON.stringify({ ok: true, configPath, robots: fleet.robots.length }));
+  return true;
+}
+
+if (require.main === module) {
+  try {
+    if (!checkConfigFromCli()) startServer();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
   }
-});
+}
+
+module.exports = { loadFleet, startServer, validateFleetConfig };
