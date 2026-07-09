@@ -62,12 +62,62 @@ pub struct ModuleInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct StackBlueprintMetadata {
+    pub schema_version: String,
+    pub name: String,
+    pub profile: String,
+    pub stream_transport: String,
+    pub hardware_required: bool,
+    pub required_gates: Vec<String>,
+    pub capabilities: Vec<String>,
+}
+
+impl StackBlueprintMetadata {
+    fn from_config(config: &HarnessConfig, capabilities: Vec<String>) -> Self {
+        Self {
+            schema_version: "leash.stack-blueprint/v1".to_string(),
+            name: config.profile.as_str().to_string(),
+            profile: config.profile.as_str().to_string(),
+            stream_transport: config.stream_transport.as_str().to_string(),
+            hardware_required: config.profile.is_physical(),
+            required_gates: if config.profile.is_physical() {
+                vec!["physical-actuation".to_string()]
+            } else {
+                Vec::new()
+            },
+            capabilities,
+        }
+    }
+
+    fn custom() -> Self {
+        Self {
+            schema_version: "leash.stack-blueprint/v1".to_string(),
+            name: "custom".to_string(),
+            profile: "custom".to_string(),
+            stream_transport: "custom".to_string(),
+            hardware_required: false,
+            required_gates: Vec::new(),
+            capabilities: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct ModuleGraph {
+    pub blueprint: StackBlueprintMetadata,
     pub modules: Vec<ModuleInfo>,
 }
 
 impl ModuleGraph {
     pub fn new(modules: Vec<ModuleInfo>) -> Result<Self> {
+        Self::with_blueprint(StackBlueprintMetadata::custom(), modules)
+    }
+
+    pub fn with_blueprint(
+        blueprint: StackBlueprintMetadata,
+        modules: Vec<ModuleInfo>,
+    ) -> Result<Self> {
         let mut names = HashSet::with_capacity(modules.len());
         let mut ids = HashSet::with_capacity(modules.len());
         for module in &modules {
@@ -95,7 +145,7 @@ impl ModuleGraph {
                 }
             }
         }
-        Ok(Self { modules })
+        Ok(Self { blueprint, modules })
     }
 
     pub fn modules(&self) -> &[ModuleInfo] {
@@ -159,6 +209,7 @@ impl ModuleGraph {
 
 #[derive(Debug, Clone)]
 pub struct ModuleCoordinator {
+    blueprint: StackBlueprintMetadata,
     modules: Vec<ModuleInfo>,
     start_failures: HashMap<String, String>,
 }
@@ -166,6 +217,7 @@ pub struct ModuleCoordinator {
 impl ModuleCoordinator {
     pub fn new(graph: ModuleGraph) -> Self {
         Self {
+            blueprint: graph.blueprint,
             modules: graph.modules,
             start_failures: HashMap::new(),
         }
@@ -219,7 +271,8 @@ impl ModuleCoordinator {
     }
 
     pub fn graph(&self) -> ModuleGraph {
-        ModuleGraph::new(self.modules.clone()).expect("coordinator preserves valid module graph")
+        ModuleGraph::with_blueprint(self.blueprint.clone(), self.modules.clone())
+            .expect("coordinator preserves valid module graph")
     }
 
     pub fn modules(&self) -> &[ModuleInfo] {
@@ -313,6 +366,7 @@ impl ModuleCoordinator {
 }
 
 pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -> ModuleGraph {
+    let blueprint = StackBlueprintMetadata::from_config(config, capabilities.clone());
     let driver_name = match config.profile {
         Profile::Sim => "sim-driver",
         Profile::Replay => "replay-driver",
@@ -358,100 +412,103 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
         _ => "OdometryStatus",
     };
     let transport = config.stream_transport;
-    ModuleGraph::new(vec![
-        ModuleInfo {
-            id: 0,
-            name: "harness-runtime".to_string(),
-            module_type: "runtime".to_string(),
-            state: ModuleState::Planned,
-            health: planned_health(),
-            dependencies: Vec::new(),
-            inputs: vec![stream(
-                "capability_request",
-                StreamDirection::Input,
-                "json",
-                transport,
-            )],
-            outputs: vec![
-                stream("health", StreamDirection::Output, "Health", transport),
-                stream(
-                    "capabilities",
-                    StreamDirection::Output,
-                    "Capabilities",
+    ModuleGraph::with_blueprint(
+        blueprint,
+        vec![
+            ModuleInfo {
+                id: 0,
+                name: "harness-runtime".to_string(),
+                module_type: "runtime".to_string(),
+                state: ModuleState::Planned,
+                health: planned_health(),
+                dependencies: Vec::new(),
+                inputs: vec![stream(
+                    "capability_request",
+                    StreamDirection::Input,
+                    "json",
                     transport,
-                ),
-            ],
-            capabilities,
-            physical: false,
-            required: true,
-        },
-        ModuleInfo {
-            id: 1,
-            name: driver_name.to_string(),
-            module_type: "driver".to_string(),
-            state: ModuleState::Planned,
-            health: planned_health(),
-            dependencies: vec!["harness-runtime".to_string()],
-            inputs: vec![stream(
-                if config.profile == Profile::MavlinkDrone {
-                    "flight_command"
-                } else if config.profile == Profile::Manipulator {
-                    "manipulator_command"
-                } else {
-                    "drive_command"
-                },
-                StreamDirection::Input,
-                driver_input,
-                transport,
-            )],
-            outputs: vec![stream(
-                if config.profile == Profile::MavlinkDrone {
-                    "flight_status"
-                } else if config.profile == Profile::Manipulator {
-                    "manipulator_status"
-                } else {
-                    "odometry"
-                },
-                StreamDirection::Output,
-                driver_output,
-                transport,
-            )],
-            capabilities: driver_capabilities,
-            physical: config.profile.is_physical(),
-            required: true,
-        },
-        ModuleInfo {
-            id: 2,
-            name: "telemetry".to_string(),
-            module_type: "telemetry".to_string(),
-            state: ModuleState::Planned,
-            health: planned_health(),
-            dependencies: vec![driver_name.to_string()],
-            inputs: vec![stream(
-                "odometry",
-                StreamDirection::Input,
-                "OdometryStatus",
-                transport,
-            )],
-            outputs: vec![
-                stream(
-                    "telemetry",
-                    StreamDirection::Output,
-                    "TelemetryFrame",
+                )],
+                outputs: vec![
+                    stream("health", StreamDirection::Output, "Health", transport),
+                    stream(
+                        "capabilities",
+                        StreamDirection::Output,
+                        "Capabilities",
+                        transport,
+                    ),
+                ],
+                capabilities,
+                physical: false,
+                required: true,
+            },
+            ModuleInfo {
+                id: 1,
+                name: driver_name.to_string(),
+                module_type: "driver".to_string(),
+                state: ModuleState::Planned,
+                health: planned_health(),
+                dependencies: vec!["harness-runtime".to_string()],
+                inputs: vec![stream(
+                    if config.profile == Profile::MavlinkDrone {
+                        "flight_command"
+                    } else if config.profile == Profile::Manipulator {
+                        "manipulator_command"
+                    } else {
+                        "drive_command"
+                    },
+                    StreamDirection::Input,
+                    driver_input,
                     transport,
-                ),
-                stream(
-                    "sensors",
+                )],
+                outputs: vec![stream(
+                    if config.profile == Profile::MavlinkDrone {
+                        "flight_status"
+                    } else if config.profile == Profile::Manipulator {
+                        "manipulator_status"
+                    } else {
+                        "odometry"
+                    },
                     StreamDirection::Output,
-                    "SensorSnapshot",
+                    driver_output,
                     transport,
-                ),
-            ],
-            capabilities: vec!["observe".to_string(), "capture".to_string()],
-            physical: false,
-            required: true,
-        },
-    ])
+                )],
+                capabilities: driver_capabilities,
+                physical: config.profile.is_physical(),
+                required: true,
+            },
+            ModuleInfo {
+                id: 2,
+                name: "telemetry".to_string(),
+                module_type: "telemetry".to_string(),
+                state: ModuleState::Planned,
+                health: planned_health(),
+                dependencies: vec![driver_name.to_string()],
+                inputs: vec![stream(
+                    "odometry",
+                    StreamDirection::Input,
+                    "OdometryStatus",
+                    transport,
+                )],
+                outputs: vec![
+                    stream(
+                        "telemetry",
+                        StreamDirection::Output,
+                        "TelemetryFrame",
+                        transport,
+                    ),
+                    stream(
+                        "sensors",
+                        StreamDirection::Output,
+                        "SensorSnapshot",
+                        transport,
+                    ),
+                ],
+                capabilities: vec!["observe".to_string(), "capture".to_string()],
+                physical: false,
+                required: true,
+            },
+        ],
+    )
     .expect("default module graph uses unique non-empty names")
 }
 
@@ -530,6 +587,28 @@ mod tests {
         let graph = default_module_graph(&HarnessConfig::default(), vec!["health".to_string()]);
         assert_eq!(graph.modules().len(), 3);
         assert_eq!(graph.stream_count(), 8);
+        assert_eq!(graph.blueprint.schema_version, "leash.stack-blueprint/v1");
+        assert_eq!(graph.blueprint.profile, "sim");
+        assert_eq!(graph.blueprint.stream_transport, "local-pubsub");
+        assert_eq!(graph.blueprint.capabilities, vec!["health"]);
+        assert!(!graph.blueprint.hardware_required);
+        assert!(graph.blueprint.required_gates.is_empty());
+    }
+
+    #[test]
+    fn physical_graph_blueprint_declares_actuation_gate() {
+        let graph = default_module_graph(
+            &HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_physical_actuation: true,
+                ..HarnessConfig::default()
+            },
+            vec!["drive".to_string(), "stop".to_string()],
+        );
+
+        assert_eq!(graph.blueprint.name, "waveshare-ugv");
+        assert!(graph.blueprint.hardware_required);
+        assert_eq!(graph.blueprint.required_gates, vec!["physical-actuation"]);
     }
 
     #[test]
