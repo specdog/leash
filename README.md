@@ -108,7 +108,7 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 | `capabilities` | Endpoints, MCP tools, speed modes |
 | `modules` | Module graph and stream metadata |
 | `observe` | Latest telemetry frame (odometry, battery, sensors) |
-| `invoke_capability` | authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, memory_clear |
+| `invoke_capability` | authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner and patrol calls, saved waypoint/zone CRUD, spatial-memory calls |
 | `stop` | Non-latching zero-speed motor stop |
 | `estop` | Latch emergency stop until reset |
 | `capture` | Deterministic frame capture |
@@ -153,9 +153,17 @@ Patrol builds on the same router with `start_patrol`, `stop_patrol`, and
 tracks visited cells, filters patrol goals through the sim clearance mask, and
 emits the active patrol goal/path in telemetry visualization frames.
 
+Saved navigation adds persistent waypoint and patrol-zone CRUD plus
+`start_patrol_zone`. Saved zones execute through the planner in simulation and
+as non-actuating path selection in replay; physical profiles refuse them. The
+operator lists configured zones and offers start/stop controls while keeping
+e-stop priority. Passive external motion-worker events are emitted in
+`TelemetryFrame.motion_events`. See [docs/NAVIGATION.md](docs/NAVIGATION.md).
+
 Planner movement calls the same `drive` capability as manual control, so speed
 caps, deadman state, estop state, and the soft odometry limit still apply. The
-router and patrol loop are sim-only demo surfaces.
+grid-strategy patrol loop is a sim-only demo surface; saved zone execution is
+available in sim and non-actuating replay.
 
 ## Spatial Memory
 

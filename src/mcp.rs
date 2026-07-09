@@ -143,7 +143,7 @@ impl LeashMcp {
 
     #[tool(
         name = "invoke_capability",
-        description = "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear"
+        description = "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, planner and patrol operations, saved waypoint and zone CRUD, or spatial-memory operations"
     )]
     pub async fn invoke_capability(
         &self,
@@ -305,7 +305,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
         ),
         tool_descriptor(
             "invoke_capability",
-            "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, or memory_clear",
+            "Invoke a named harness capability such as authorize, drive, camera_aim, stop, estop, planner and patrol operations, saved waypoint and zone CRUD, or spatial-memory operations",
             "harness-runtime",
             SafetyClass::PhysicalMotion,
             object_schema(&[

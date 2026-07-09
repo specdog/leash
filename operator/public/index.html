@@ -79,6 +79,7 @@
         <div><span>operator</span><strong class="metric-token">none</strong></div>
         <div class="metric-wide"><span>health history</span><strong class="metric-health-history">-</strong></div>
         <div class="metric-wide"><span>camera failures</span><strong class="metric-camera-history">none</strong></div>
+        <div class="metric-wide"><span>motion events</span><strong class="metric-motion-events">none</strong></div>
       </div>
       <div class="controls">
         <div class="control-row">
@@ -86,6 +87,12 @@
           <button class="camera-refresh" type="button">Camera Refresh</button>
           <button class="stop danger" type="button">Stop</button>
           <button class="estop danger" type="button">E-Stop</button>
+        </div>
+        <div class="patrol-panel">
+          <select class="patrol-zone" aria-label="Patrol zone"></select>
+          <button class="patrol-start" type="button">Start Patrol</button>
+          <button class="patrol-stop" type="button">Stop Patrol</button>
+          <span class="patrol-status">no zones</span>
         </div>
         <div class="pad" aria-label="Drive controls">
           <button class="drive" data-left="0.16" data-right="0.16" type="button">^</button>

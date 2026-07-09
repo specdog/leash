@@ -43,12 +43,12 @@ const checks = [
   {
     name: "operator-fleet-and-mobile-ui",
     argv: ["bash", "scripts/smoke-operator.sh"],
-    proof: "private fleet schema and errors, operator token/history surfaces, landscape layout, and fixed mobile e-stop passed",
+    proof: "private fleet schema and errors, operator token/history/zone surfaces, landscape layout, and fixed mobile e-stop passed",
   },
   {
     name: "http-routes-and-policy",
     argv: ["bash", "scripts/smoke-http.sh"],
-    proof: "HTTP routes, WebSocket/SSE telemetry with visualization map/costmap frames, external clients, agent input, capture, authorized drive, and drive-denial policy passed",
+    proof: "HTTP routes, navigation status, motion telemetry, WebSocket/SSE visualization frames, external clients, authorized drive, and drive-denial policy passed",
   },
   {
     name: "mcp-stdio",
@@ -58,7 +58,7 @@ const checks = [
   {
     name: "mcp-http-cli",
     argv: ["bash", "scripts/smoke-mcp-http.sh"],
-    proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, key=value/JSON direct calls, planner, patrol, and spatial-memory calls passed",
+    proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, planner, patrol, saved navigation CRUD/execution, and spatial-memory calls passed",
   },
   {
     name: "mcp-stdio-bridge",

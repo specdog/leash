@@ -110,6 +110,8 @@ pub struct TelemetryFrame {
     pub vision: VisionResult,
     #[serde(default)]
     pub workers: Vec<ExternalWorkerStatus>,
+    #[serde(default)]
+    pub motion_events: Vec<MotionEvent>,
     pub resource: Option<ResourceSample>,
     pub source: String,
 }
@@ -401,6 +403,10 @@ pub struct PatrolStatus {
     pub goal: Option<PlannerGoal>,
     pub path: VisualizationPath,
     pub visited_cells: Vec<String>,
+    #[serde(default)]
+    pub zone_id: Option<String>,
+    #[serde(default)]
+    pub waypoint_index: Option<usize>,
 }
 
 impl Default for PatrolStatus {
@@ -415,8 +421,82 @@ impl Default for PatrolStatus {
             goal: None,
             path: VisualizationPath::default(),
             visited_cells: Vec::new(),
+            zone_id: None,
+            waypoint_index: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SavedWaypoint {
+    pub id: String,
+    pub name: String,
+    pub frame_id: String,
+    pub x_m: f64,
+    pub y_m: f64,
+    pub tolerance_m: f64,
+    pub created_at_ms: u128,
+    pub updated_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct SavedWaypointList {
+    pub ok: bool,
+    pub store_path: String,
+    pub count: usize,
+    pub waypoints: Vec<SavedWaypoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ZoneBoundaryPoint {
+    pub x_m: f64,
+    pub y_m: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PatrolZone {
+    pub id: String,
+    pub name: String,
+    pub frame_id: String,
+    pub waypoint_ids: Vec<String>,
+    pub boundary: Vec<ZoneBoundaryPoint>,
+    pub created_at_ms: u128,
+    pub updated_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PatrolZoneList {
+    pub ok: bool,
+    pub store_path: String,
+    pub count: usize,
+    pub zones: Vec<PatrolZone>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MotionEventKind {
+    Detected,
+    Updated,
+    Cleared,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct MotionEvent {
+    pub event_id: String,
+    pub ts_ms: u128,
+    pub source: String,
+    pub frame_id: String,
+    pub kind: MotionEventKind,
+    pub confidence: f64,
+    pub x_m: Option<f64>,
+    pub y_m: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

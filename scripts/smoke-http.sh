@@ -56,6 +56,9 @@ for (const endpoint of ["POST /dashboard/authorize", "POST /dashboard/stop", "PO
 }
 for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages", "GET /camera/stream/health", "POST /camera/stream/recover"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
+}
+for (const endpoint of ["GET /waypoints", "GET /patrol/zones", "POST /patrol/zones/:zone_id/start", "GET /patrol/status", "POST /patrol/stop"]) {
+  if (!payload.endpoints.includes(endpoint)) throw new Error(`missing navigation endpoint: ${endpoint}`);
 }'
 }
 
@@ -94,6 +97,13 @@ assert_drive_outcome() {
 if (payload.ok !== true) throw new Error("drive outcome ok was not true");
 if (payload.left <= 0 || payload.right <= 0) throw new Error("drive outcome did not move in simulation");
 if (payload.speed_mode !== "low") throw new Error(`unexpected speed mode: ${payload.speed_mode}`);'
+}
+
+assert_motion_telemetry() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (!Array.isArray(payload.motion_events) || payload.motion_events.length < 1) throw new Error("motion events were missing");
+const event = payload.motion_events[0];
+if (event.source !== "simulated-motion" || event.kind !== "detected") throw new Error("motion event was invalid");'
 }
 
 assert_stream_frame() {
@@ -294,6 +304,9 @@ curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | parse_json
+curl -fsS "$base/waypoints" | parse_json
+curl -fsS "$base/patrol/zones" | parse_json
+curl -fsS "$base/patrol/status" | parse_json
 curl -fsS "$base/sensors" | parse_json
 curl -fsS "$base/camera/stream/health" | assert_camera_health 0
 curl -fsS -X POST "$base/camera/stream/recover" | assert_camera_recovery
@@ -338,6 +351,7 @@ curl -fsS -X POST "$base/estop/reset" \
 curl -fsS -X POST "$base/drive" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","left":0.2,"right":0.2}' | assert_drive_outcome
+curl -fsS "$base/telemetry" | assert_motion_telemetry
 curl -fsS -X POST "$base/motors/stop" | parse_json
 LEASH_URL="$base" node examples/clients/node/http-client.mjs | assert_client_example_summary node
 

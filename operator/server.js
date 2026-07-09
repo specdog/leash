@@ -613,12 +613,24 @@ async function handleApi(request, response, url) {
   }
   if (request.method === "GET" && action === "summary") {
     try {
-      const [health, telemetry, camera] = await Promise.all([
+      const [health, telemetry, camera, zones, patrol] = await Promise.all([
         robotJson(robot, "/health"),
         robotJson(robot, "/telemetry"),
         robotJson(robot, "/camera/status"),
+        robotJson(robot, "/patrol/zones").catch((error) => ({
+          ok: false,
+          count: 0,
+          zones: [],
+          error: error.message,
+        })),
+        robotJson(robot, "/patrol/status").catch((error) => ({
+          ok: false,
+          active: false,
+          status: "unavailable",
+          error: error.message,
+        })),
       ]);
-      json(response, 200, { ok: true, health, telemetry, camera });
+      json(response, 200, { ok: true, health, telemetry, camera, zones, patrol });
     } catch (error) {
       json(response, 502, {
         ok: false,
@@ -666,6 +678,16 @@ async function handleApi(request, response, url) {
     await post("/camera/stream/recover", {});
   } else if (action === "drive") {
     await post("/drive");
+  } else if (action === "patrol-start") {
+    if (!body.zone_id || typeof body.zone_id !== "string") {
+      json(response, 400, { ok: false, error: "zone_id is required" });
+      return;
+    }
+    await post(`/patrol/zones/${encodeURIComponent(body.zone_id)}/start`, {
+      speed_mode: body.speed_mode || "low",
+    });
+  } else if (action === "patrol-stop") {
+    await post("/patrol/stop", {});
   } else if (action === "stop") {
     await post("/stop", {});
   } else if (action === "estop") {

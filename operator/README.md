@@ -35,6 +35,11 @@ silently open the MJPEG relay. `auto` prefers WebRTC and falls back to MJPEG.
 Camera Refresh calls the bot's `/camera/stream/recover` endpoint and clears the
 operator relay cache.
 
+Each robot card also lists the bot's configured saved patrol zones, waypoint
+count, and current patrol status. Start Patrol is available only when a zone is
+configured; Stop Patrol and the persistent e-stop remain independent. Zone
+execution is accepted only by sim and replay Leash profiles.
+
 ## Operator token ownership
 
 Authorization is single-owner and last-writer-wins. A successful authorize

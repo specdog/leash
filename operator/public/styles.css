@@ -422,8 +422,22 @@ main.single-view {
 }
 
 .metric-health-history,
-.metric-camera-history {
+.metric-camera-history,
+.metric-motion-events {
   font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.patrol-panel {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.patrol-status {
+  grid-column: 1 / -1;
+  color: #62737b;
+  font-size: 11px;
 }
 
 .controls {
@@ -673,6 +687,11 @@ main.single-view {
 
   body.single-operator .control-row {
     gap: 5px;
+  }
+
+  body.single-operator .patrol-panel {
+    grid-template-columns: minmax(90px, 1fr) auto auto;
+    gap: 4px;
   }
 
   body.single-operator .pad,

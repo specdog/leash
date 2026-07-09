@@ -134,6 +134,27 @@ if (!payload.result || payload.result.active !== false) throw new Error("patrol 
 if (payload.result.status !== "stopped") throw new Error(`unexpected patrol stop status: ${payload.result.status}`);'
 }
 
+assert_waypoint_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("waypoint wrapper was invalid");
+if (payload.result?.count !== 1 || payload.result?.waypoints?.[0]?.id !== "entry") throw new Error("saved waypoint was missing");'
+}
+
+assert_zone_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("zone wrapper was invalid");
+const zone = payload.result?.zones?.[0];
+if (payload.result?.count !== 1 || zone?.id !== "front") throw new Error("patrol zone was missing");
+if (zone.waypoint_ids?.[0] !== "entry" || zone.boundary?.length !== 3) throw new Error("patrol zone model was invalid");'
+}
+
+assert_zone_start_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("zone start wrapper was invalid");
+if (payload.result?.active !== true || payload.result?.zone_id !== "front") throw new Error("patrol zone did not start");
+if (payload.result?.waypoint_index !== 0) throw new Error("patrol waypoint index was missing");'
+}
+
 assert_memory_tag_call() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory tag wrapper was invalid");
@@ -249,6 +270,21 @@ curl -fsS -X POST "$base/mcp/call" \
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"patrol_status"}}' | assert_patrol_status_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"stop_patrol"}}' | assert_patrol_stop_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"waypoint_create","id":"entry","name":"Entry","x_m":0.25,"y_m":0.0}}' | assert_waypoint_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"patrol_zone_create","id":"front","name":"Front","waypoint_ids":["entry"],"boundary":[{"x_m":0.0,"y_m":0.0},{"x_m":0.5,"y_m":0.0},{"x_m":0.5,"y_m":0.5}]}}' | assert_zone_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"patrol_zone_list"}}' | assert_zone_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"start_patrol_zone","zone_id":"front","speed_mode":"low"}}' | assert_zone_start_call
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"stop_patrol"}}' | assert_patrol_stop_call

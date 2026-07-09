@@ -63,6 +63,10 @@ assert.match(html, /class="mobile-estop estop danger"/);
 assert.match(html, /metric-health-history/);
 assert.match(html, /metric-camera-history/);
 assert.match(html, /metric-token/);
+assert.match(html, /class="patrol-zone"/);
+assert.match(html, /class="patrol-start"/);
+assert.match(html, /class="patrol-stop"/);
+assert.match(html, /metric-motion-events/);
 assert.match(css, /orientation: landscape/);
 assert.match(css, /body\.single-operator button\.mobile-estop/);
 assert.match(css, /position: fixed/);
@@ -72,5 +76,6 @@ console.log(JSON.stringify({
   robots: fleet.robots.length,
   validationErrorsProved: errors.length,
   mobileEstop: "fixed in single-bot mobile view",
+  patrolControls: "configured zone selector and start/stop controls present",
 }));
 EOF

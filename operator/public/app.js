@@ -111,6 +111,9 @@ function robotState(robot) {
       telemetry: null,
       healthHistory: [],
       cameraFailures: [],
+      motionEvents: [],
+      zones: [],
+      patrol: null,
       lastLog: [],
     });
   }
@@ -183,6 +186,35 @@ function renderHistories(card, current) {
   cameraMetric.title = recent
     .map((entry) => `${clockLabel(entry.ts_ms)} ${entry.owner}: ${entry.reason}`)
     .join("\n");
+
+  const motionMetric = card.querySelector(".metric-motion-events");
+  const motion = [...current.motionEvents].reverse().slice(0, 3);
+  motionMetric.textContent = motion.length
+    ? motion.map((entry) => `${entry.kind} ${clockLabel(entry.ts_ms)}`).join(" · ")
+    : "none";
+  motionMetric.title = motion
+    .map((entry) => `${clockLabel(entry.ts_ms)} ${entry.source}: ${entry.event_id}`)
+    .join("\n");
+}
+
+function renderPatrol(card, current) {
+  const select = card.querySelector(".patrol-zone");
+  const selected = select.value;
+  select.textContent = "";
+  for (const zone of current.zones) {
+    const option = document.createElement("option");
+    option.value = zone.id;
+    option.textContent = `${zone.name} (${zone.waypoint_ids.length})`;
+    option.title = `${zone.id} · ${zone.frame_id} · ${zone.boundary.length} boundary points`;
+    select.appendChild(option);
+  }
+  if (current.zones.some((zone) => zone.id === selected)) select.value = selected;
+  select.disabled = current.zones.length === 0;
+  card.querySelector(".patrol-start").disabled = current.zones.length === 0;
+  const status = current.patrol;
+  card.querySelector(".patrol-status").textContent = current.zones.length === 0
+    ? "no configured patrol zones"
+    : `${current.zones.length} zones · ${status?.status || "idle"}${status?.zone_id ? ` · ${status.zone_id}` : ""}`;
 }
 
 async function localOperatorOwnerId() {
@@ -315,6 +347,8 @@ function renderFleet() {
 
     node.querySelector(".authorize").addEventListener("click", () => authorize(robot));
     node.querySelector(".camera-refresh").addEventListener("click", () => refreshCamera(robot));
+    node.querySelector(".patrol-start").addEventListener("click", () => startPatrol(robot));
+    node.querySelector(".patrol-stop").addEventListener("click", () => stopPatrol(robot));
     node.querySelector(".stop").addEventListener("click", () => stopRobot(robot));
     for (const button of node.querySelectorAll(".estop")) {
       button.addEventListener("click", () => estopRobot(robot));
@@ -346,10 +380,13 @@ async function refreshRobot(robot) {
   const card = document.querySelector(`[data-robot-id="${robot.id}"]`);
   if (!card) return;
   try {
-    const { health, telemetry, camera } = await jsonApi(robot, "summary");
+    const { health, telemetry, camera, zones, patrol } = await jsonApi(robot, "summary");
     const current = robotState(robot);
     current.health = health;
     current.telemetry = telemetry;
+    current.motionEvents = Array.isArray(telemetry.motion_events) ? telemetry.motion_events : [];
+    current.zones = Array.isArray(zones?.zones) ? zones.zones : [];
+    current.patrol = patrol || null;
     recordHealth(current, Boolean(health.ok), health.ok ? "online" : "attention");
     setRobotClass(card, health.ok ? "ok" : "warn");
     card.querySelector(".state-text").textContent = health.ok ? "online" : "attention";
@@ -370,6 +407,7 @@ async function refreshRobot(robot) {
       : [];
     await renderOperatorToken(card, health.operator_token);
     renderHistories(card, current);
+    renderPatrol(card, current);
     maybeStartStream(robot, camera.camera);
     updateHud(robot);
     updateSelectorStatus();
@@ -383,6 +421,7 @@ async function refreshRobot(robot) {
     card.querySelector(".metric-health").textContent = "down";
     await renderOperatorToken(card, null);
     renderHistories(card, current);
+    renderPatrol(card, current);
     log(robot, error.message);
     updateHud(robot);
     updateSelectorStatus();
@@ -636,6 +675,35 @@ async function refreshCamera(robot) {
   await refreshRobot(robot);
   scheduleStreamReconnect(robot, 100);
   log(robot, "camera refreshed");
+}
+
+async function startPatrol(robot) {
+  const card = document.querySelector(`[data-robot-id="${robot.id}"]`);
+  const zoneId = card?.querySelector(".patrol-zone")?.value;
+  if (!zoneId) {
+    log(robot, "no patrol zone selected");
+    return;
+  }
+  try {
+    await jsonApi(robot, "patrol-start", {
+      method: "POST",
+      body: JSON.stringify({ zone_id: zoneId, speed_mode: speedMode.value }),
+    });
+    log(robot, `patrol started ${zoneId}`);
+    await refreshRobot(robot);
+  } catch (error) {
+    log(robot, error.message);
+  }
+}
+
+async function stopPatrol(robot) {
+  try {
+    await jsonApi(robot, "patrol-stop", { method: "POST", body: "{}" });
+    log(robot, "patrol stopped");
+    await refreshRobot(robot);
+  } catch (error) {
+    log(robot, error.message);
+  }
 }
 
 function refreshSnapshot(robot, options = {}) {
