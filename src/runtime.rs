@@ -24,6 +24,9 @@ use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
+#[cfg(feature = "waveshare-ugv")]
+use crate::adapter::waveshare_drive_values;
+
 #[cfg(feature = "mavlink-drone")]
 use crate::types::DroneCommandStatus;
 #[cfg(feature = "manipulator")]
@@ -32,6 +35,7 @@ use crate::types::{
 };
 use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
+    adapter::{GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
     memory::{
@@ -99,18 +103,7 @@ impl PatrolState {
     }
 }
 
-trait RobotDriver: Send + Sync {
-    fn drive(&self, left: f64, right: f64) -> Result<()>;
-
-    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        let _ = (pan_deg, tilt_deg, speed, accel);
-        Err(anyhow!("camera aim is unavailable for this profile"))
-    }
-
-    fn stop(&self) -> Result<()> {
-        self.drive(0.0, 0.0)
-    }
-
+trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
     #[cfg(feature = "waveshare-ugv")]
     fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
         Ok(None)
@@ -130,12 +123,16 @@ trait RobotDriver: Send + Sync {
 #[derive(Debug)]
 struct SimDriver;
 
-impl RobotDriver for SimDriver {
+impl RobotDriver for SimDriver {}
+
+impl MobileBaseAdapter for SimDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "sim drive");
         Ok(())
     }
+}
 
+impl GimbalAdapter for SimDriver {
     fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
         debug!(pan_deg, tilt_deg, speed, accel, "sim camera aim");
         Ok(())
@@ -145,12 +142,16 @@ impl RobotDriver for SimDriver {
 #[derive(Debug)]
 struct ReplayDriver;
 
-impl RobotDriver for ReplayDriver {
+impl RobotDriver for ReplayDriver {}
+
+impl MobileBaseAdapter for ReplayDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(left, right, "replay drive ignored");
         Ok(())
     }
+}
 
+impl GimbalAdapter for ReplayDriver {
     fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
         debug!(pan_deg, tilt_deg, speed, accel, "replay camera aim ignored");
         Ok(())
@@ -173,7 +174,10 @@ impl MavlinkDroneDriver {
 }
 
 #[cfg(feature = "mavlink-drone")]
-impl RobotDriver for MavlinkDroneDriver {
+impl RobotDriver for MavlinkDroneDriver {}
+
+#[cfg(feature = "mavlink-drone")]
+impl MobileBaseAdapter for MavlinkDroneDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(
             endpoint = self.endpoint,
@@ -182,6 +186,9 @@ impl RobotDriver for MavlinkDroneDriver {
         Ok(())
     }
 }
+
+#[cfg(feature = "mavlink-drone")]
+impl GimbalAdapter for MavlinkDroneDriver {}
 
 #[cfg(feature = "manipulator")]
 #[derive(Debug)]
@@ -195,7 +202,10 @@ impl ManipulatorDriver {
 }
 
 #[cfg(feature = "manipulator")]
-impl RobotDriver for ManipulatorDriver {
+impl RobotDriver for ManipulatorDriver {}
+
+#[cfg(feature = "manipulator")]
+impl MobileBaseAdapter for ManipulatorDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
         debug!(
             left,
@@ -204,6 +214,9 @@ impl RobotDriver for ManipulatorDriver {
         Ok(())
     }
 }
+
+#[cfg(feature = "manipulator")]
+impl GimbalAdapter for ManipulatorDriver {}
 
 #[cfg(feature = "waveshare-ugv")]
 struct WaveshareUgvDriver {
@@ -242,35 +255,6 @@ impl WaveshareUgvDriver {
 
 #[cfg(feature = "waveshare-ugv")]
 impl RobotDriver for WaveshareUgvDriver {
-    fn drive(&self, left: f64, right: f64) -> Result<()> {
-        let (mut left, mut right) = if self.drive_swap {
-            (right, left)
-        } else {
-            (left, right)
-        };
-        if self.drive_invert {
-            left = -left;
-            right = -right;
-        }
-        self.write_json(
-            json!({"T": 1, "L": left, "R": right}),
-            "write Waveshare UGV drive command",
-        )
-    }
-
-    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        self.write_json(
-            json!({
-                "T": 133,
-                "X": pan_deg,
-                "Y": tilt_deg,
-                "SPD": speed,
-                "ACC": accel
-            }),
-            "write Waveshare UGV camera gimbal command",
-        )
-    }
-
     fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
         let writer = self.writer.lock();
         writer
@@ -293,6 +277,33 @@ impl RobotDriver for WaveshareUgvDriver {
 
     fn request_telemetry(&self) -> Result<()> {
         self.write_json(json!({"T": 130}), "request Waveshare UGV base telemetry")
+    }
+}
+
+#[cfg(feature = "waveshare-ugv")]
+impl MobileBaseAdapter for WaveshareUgvDriver {
+    fn drive(&self, left: f64, right: f64) -> Result<()> {
+        let (left, right) = waveshare_drive_values(left, right, self.drive_invert, self.drive_swap);
+        self.write_json(
+            json!({"T": 1, "L": left, "R": right}),
+            "write Waveshare UGV drive command",
+        )
+    }
+}
+
+#[cfg(feature = "waveshare-ugv")]
+impl GimbalAdapter for WaveshareUgvDriver {
+    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
+        self.write_json(
+            json!({
+                "T": 133,
+                "X": pan_deg,
+                "Y": tilt_deg,
+                "SPD": speed,
+                "ACC": accel
+            }),
+            "write Waveshare UGV camera gimbal command",
+        )
     }
 }
 
