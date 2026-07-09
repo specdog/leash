@@ -385,6 +385,7 @@ mod tests {
                 estop: false,
                 deadman_ok: true,
                 physical_actuation_enabled: false,
+                operator_token: Default::default(),
                 accelerator: crate::accelerator::resolve_accelerator(
                     AcceleratorBackend::None,
                     false,

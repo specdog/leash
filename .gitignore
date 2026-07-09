@@ -5,4 +5,5 @@
 !.env.example
 *.log
 .DS_Store
-
+/operator/fleet.local.json
+/operator/config/fleet.json
