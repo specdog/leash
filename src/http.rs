@@ -34,6 +34,9 @@ use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
+use crate::adapter::{
+    CameraAdapter, CameraInputConfig, CameraStreamCodec, FfmpegV4l2CameraAdapter,
+};
 use crate::capability::InvocationOrigin;
 use crate::runtime::{
     CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
@@ -629,34 +632,26 @@ pub(crate) fn camera_webrtc_enabled() -> bool {
     )
 }
 
+#[cfg(feature = "webrtc")]
 pub(crate) fn camera_v4l2_input_args(device: &str) -> Vec<String> {
-    let mut args = vec!["-f".to_string(), "v4l2".to_string()];
-    if let Some(format) = camera_env_arg("LEASH_CAMERA_INPUT_FORMAT") {
-        args.extend(["-input_format".to_string(), format]);
-    }
-    if let Some(size) = camera_env_arg("LEASH_CAMERA_VIDEO_SIZE") {
-        args.extend(["-video_size".to_string(), size]);
-    }
-    if let Some(framerate) = camera_env_arg("LEASH_CAMERA_FRAMERATE") {
-        args.extend(["-framerate".to_string(), framerate]);
-    }
-    args.extend(["-i".to_string(), device.to_string()]);
-    args
+    FfmpegV4l2CameraAdapter.input_args(device, &camera_input_config())
 }
 
-fn camera_stream_codec_args() -> Vec<String> {
+fn camera_input_config() -> CameraInputConfig {
+    CameraInputConfig {
+        input_format: camera_env_arg("LEASH_CAMERA_INPUT_FORMAT"),
+        video_size: camera_env_arg("LEASH_CAMERA_VIDEO_SIZE"),
+        framerate: camera_env_arg("LEASH_CAMERA_FRAMERATE"),
+    }
+}
+
+fn camera_stream_codec() -> CameraStreamCodec {
     match camera_env_arg("LEASH_CAMERA_STREAM_CODEC").as_deref() {
-        Some("copy") => vec!["-c:v".to_string(), "copy".to_string()],
-        _ => {
-            let quality =
-                camera_env_arg("LEASH_CAMERA_MJPEG_QUALITY").unwrap_or_else(|| "5".to_string());
-            vec![
-                "-vcodec".to_string(),
-                "mjpeg".to_string(),
-                "-q:v".to_string(),
-                quality,
-            ]
-        }
+        Some("copy") => CameraStreamCodec::Copy,
+        _ => CameraStreamCodec::Mjpeg {
+            quality: camera_env_arg("LEASH_CAMERA_MJPEG_QUALITY")
+                .unwrap_or_else(|| "5".to_string()),
+        },
     }
 }
 
@@ -682,18 +677,9 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
-    let mut child = TokioCommand::new("ffmpeg")
-        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
-        .args(camera_v4l2_input_args(&device))
-        .args([
-            "-frames:v",
-            "1",
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "pipe:1",
-        ])
+    let plan = FfmpegV4l2CameraAdapter.capture_plan(&device, &camera_input_config());
+    let mut child = TokioCommand::new(&plan.program)
+        .args(&plan.args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -745,9 +731,11 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
     }
 
     let mut response = Bytes::from(stdout).into_response();
-    response
-        .headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str(&plan.content_type)
+            .map_err(|err| anyhow::anyhow!("invalid camera adapter content type: {err}"))?,
+    );
     Ok(response)
 }
 
@@ -801,14 +789,10 @@ async fn camera_stream() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
-    let mut command = TokioCommand::new("ffmpeg");
-    command
-        .kill_on_drop(true)
-        .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
-        .args(camera_v4l2_input_args(&device))
-        .args(["-an"])
-        .args(camera_stream_codec_args())
-        .args(["-f", "mpjpeg", "-boundary_tag", "leashframe", "pipe:1"]);
+    let plan =
+        FfmpegV4l2CameraAdapter.stream_plan(&device, &camera_input_config(), camera_stream_codec());
+    let mut command = TokioCommand::new(&plan.program);
+    command.kill_on_drop(true).args(&plan.args);
 
     let mut child = command
         .stdout(Stdio::piped())
@@ -880,7 +864,8 @@ async fn camera_stream() -> Result<Response, HttpError> {
     let mut response = Body::from_stream(stream).into_response();
     response.headers_mut().insert(
         CONTENT_TYPE,
-        HeaderValue::from_static("multipart/x-mixed-replace; boundary=leashframe"),
+        HeaderValue::from_str(&plan.content_type)
+            .map_err(|err| anyhow::anyhow!("invalid camera adapter content type: {err}"))?,
     );
     response.headers_mut().insert(
         "cache-control",

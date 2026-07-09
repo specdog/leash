@@ -10,6 +10,8 @@ flowchart TB
   docs --> mcp["MCP_HTTP.md\nstandard and compatibility HTTP paths"]
   docs --> camera["CAMERA.md\ncapture, stream, recovery, and encoder tuning"]
   docs --> navigation["NAVIGATION.md\nsaved waypoints, patrol zones, and motion events"]
+  docs --> adapters["ADAPTERS.md\nRust contracts and second-UGV checklist"]
+  docs --> adapterSmoke["ADAPTER_SMOKE_TEMPLATE.md\nreusable pre-fleet proof"]
 
   bot --> service["systemd user service\n~/.config/systemd/user/leash.service"]
   release --> proof["cargo, smoke scripts, package checks"]
@@ -24,3 +26,5 @@ flowchart TB
 - `MCP_HTTP.md`: MCP Streamable HTTP requests, safety behavior, and legacy REST compatibility.
 - `CAMERA.md`: camera ownership, health and recovery routes, capture settings, and Jetson encoder tuning.
 - `NAVIGATION.md`: persistent waypoints and patrol zones, sim/replay execution, operator controls, and passive motion events.
+- `ADAPTERS.md`: mobile-base, gimbal, and camera contracts plus the second-UGV implementation checklist.
+- `ADAPTER_SMOKE_TEMPLATE.md`: reusable no-hardware, bench, camera, telemetry, soak, and sign-off checklist.

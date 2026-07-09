@@ -390,6 +390,14 @@ Physical adapters must declare `physical-actuation` in `required_gates`; flight,
 joint, and other high-risk adapters should also declare the policy approval or
 token gate their commands require.
 
+The stable Rust boundaries are `MobileBaseAdapter`, `GimbalAdapter`, and
+`CameraAdapter`. Waveshare drive and gimbal commands implement those traits;
+the HTTP camera path consumes `FfmpegV4l2CameraAdapter` plans without changing
+operator content types. See [docs/ADAPTERS.md](docs/ADAPTERS.md) before adding a
+second UGV, then complete
+[docs/ADAPTER_SMOKE_TEMPLATE.md](docs/ADAPTER_SMOKE_TEMPLATE.md) before fleet
+operation.
+
 ## Features
 
 | Feature | Description | Default |

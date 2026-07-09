@@ -5,6 +5,7 @@
 //! allowed to reach hardware.
 
 pub mod accelerator;
+pub mod adapter;
 pub mod agent;
 pub mod capability;
 pub mod config;
@@ -32,6 +33,10 @@ pub mod webrtc_camera;
 pub mod worker;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
+pub use adapter::{
+    CameraAdapter, CameraCommandPlan, CameraInputConfig, CameraStreamCodec,
+    FfmpegV4l2CameraAdapter, GimbalAdapter, MobileBaseAdapter,
+};
 pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
