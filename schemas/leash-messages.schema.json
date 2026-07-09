@@ -3146,6 +3146,210 @@
       "title": "OdometryStatus",
       "type": "object"
     },
+    "OperatorSessionEvent": {
+      "$defs": {
+        "OperatorSessionEventKind": {
+          "enum": [
+            "summary",
+            "operator-ownership",
+            "joystick-drive",
+            "joystick-camera",
+            "camera-failure",
+            "camera-recovery",
+            "frame-health",
+            "telemetry"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "data": true,
+        "kind": {
+          "$ref": "#/$defs/OperatorSessionEventKind"
+        },
+        "offset_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "robot_id": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset_ms",
+        "ts_ms",
+        "robot_id",
+        "kind",
+        "data"
+      ],
+      "title": "OperatorSessionEvent",
+      "type": "object"
+    },
+    "OperatorSessionEventKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "summary",
+        "operator-ownership",
+        "joystick-drive",
+        "joystick-camera",
+        "camera-failure",
+        "camera-recovery",
+        "frame-health",
+        "telemetry"
+      ],
+      "title": "OperatorSessionEventKind",
+      "type": "string"
+    },
+    "OperatorSessionRecording": {
+      "$defs": {
+        "OperatorSessionEvent": {
+          "properties": {
+            "data": true,
+            "kind": {
+              "$ref": "#/$defs/OperatorSessionEventKind"
+            },
+            "offset_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "robot_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "offset_ms",
+            "ts_ms",
+            "robot_id",
+            "kind",
+            "data"
+          ],
+          "type": "object"
+        },
+        "OperatorSessionEventKind": {
+          "enum": [
+            "summary",
+            "operator-ownership",
+            "joystick-drive",
+            "joystick-camera",
+            "camera-failure",
+            "camera-recovery",
+            "frame-health",
+            "telemetry"
+          ],
+          "type": "string"
+        },
+        "OperatorSessionRobot": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "video_transport": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "role",
+            "location",
+            "video_transport"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ended_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/OperatorSessionEvent"
+          },
+          "type": "array"
+        },
+        "fleet_name": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "robots": {
+          "items": {
+            "$ref": "#/$defs/OperatorSessionRobot"
+          },
+          "type": "array"
+        },
+        "started_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "fleet_name",
+        "started_at_ms",
+        "ended_at_ms",
+        "robots",
+        "events"
+      ],
+      "title": "OperatorSessionRecording",
+      "type": "object"
+    },
+    "OperatorSessionRobot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "video_transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "location",
+        "video_transport"
+      ],
+      "title": "OperatorSessionRobot",
+      "type": "object"
+    },
     "OperatorTokenStatus": {
       "$defs": {
         "SpeedMode": {

@@ -499,6 +499,51 @@ pub struct MotionEvent {
     pub y_m: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum OperatorSessionEventKind {
+    Summary,
+    OperatorOwnership,
+    JoystickDrive,
+    JoystickCamera,
+    CameraFailure,
+    CameraRecovery,
+    FrameHealth,
+    Telemetry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct OperatorSessionRobot {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub location: String,
+    pub video_transport: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct OperatorSessionEvent {
+    pub offset_ms: u64,
+    pub ts_ms: u128,
+    pub robot_id: String,
+    pub kind: OperatorSessionEventKind,
+    pub data: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct OperatorSessionRecording {
+    pub format: String,
+    pub fleet_name: String,
+    pub started_at_ms: u128,
+    pub ended_at_ms: u128,
+    pub robots: Vec<OperatorSessionRobot>,
+    pub events: Vec<OperatorSessionEvent>,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]

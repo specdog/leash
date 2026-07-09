@@ -17,6 +17,13 @@ docker run --rm --name leash-operator \
 
 Open `http://localhost:8787`.
 
+Open `http://localhost:8787/?debug=1` to reveal session recording and offline
+replay controls. Recordings include safe operator ownership metadata, joystick
+commands, telemetry, camera failures, recovery requests, and frame health, but
+exclude robot base URLs and raw tokens. Loading a recording disables live
+polling and actuation while the timeline is active. See
+[`docs/OPERATOR_SESSIONS.md`](../docs/OPERATOR_SESSIONS.md).
+
 Fleet membership is the mounted JSON file. `fleet.local.json` and
 `operator/config/fleet.json` are ignored so real names, addresses, and notes do
 not enter source control. The public example uses documentation-only TEST-NET

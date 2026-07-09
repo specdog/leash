@@ -25,6 +25,7 @@ leash worker run -- node -e 'setInterval(() => {}, 1000)'
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
 - **Spatial memory primitives.** Agents can tag, query, list, and clear file-backed location/object memory isolated by run/profile.
 - **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
+- **Offline operator debugging.** The fleet GUI records safe ownership, joystick, telemetry, and camera events for timeline replay without a live robot.
 
 ## Repository Map
 

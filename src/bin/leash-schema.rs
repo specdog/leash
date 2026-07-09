@@ -22,12 +22,13 @@ use leash_harness::{
         CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
         CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
         ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapMetadata,
-        MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus,
-        PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal, PlannerStatus,
-        PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry, SafetyStreamState,
-        SavedWaypoint, SavedWaypointList, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
-        SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
-        VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint,
+        MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorSessionEvent,
+        OperatorSessionEventKind, OperatorSessionRecording, OperatorSessionRobot,
+        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal,
+        PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry,
+        SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorSnapshot, SpatialMemoryEntry,
+        SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint,
     },
     worker::{
         ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
@@ -146,6 +147,10 @@ fn schema_document() -> Result<Value> {
     insert::<PatrolZoneList>(&mut schemas, "PatrolZoneList")?;
     insert::<MotionEventKind>(&mut schemas, "MotionEventKind")?;
     insert::<MotionEvent>(&mut schemas, "MotionEvent")?;
+    insert::<OperatorSessionEventKind>(&mut schemas, "OperatorSessionEventKind")?;
+    insert::<OperatorSessionRobot>(&mut schemas, "OperatorSessionRobot")?;
+    insert::<OperatorSessionEvent>(&mut schemas, "OperatorSessionEvent")?;
+    insert::<OperatorSessionRecording>(&mut schemas, "OperatorSessionRecording")?;
     insert::<SpatialMemoryKind>(&mut schemas, "SpatialMemoryKind")?;
     insert::<SpatialMemoryEntry>(&mut schemas, "SpatialMemoryEntry")?;
     insert::<SpatialMemoryStatus>(&mut schemas, "SpatialMemoryStatus")?;
