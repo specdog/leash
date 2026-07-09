@@ -259,8 +259,12 @@ Telemetry includes a `vision` result with `ok`, `status`, `source`,
 same telemetry shape over HTTP and MCP, so sim and replay observe calls include
 deterministic fake detections for demos and CI.
 
-Core owns the `ImageObservation`, `DetectionFrame`, and `VisionResult` schemas
-plus timeout/panic/error isolation. Heavy providers should live outside the core
+Core owns the `ImageObservation`, `DetectionFrame`, `VisionResult`,
+`WorkerInputFrame`, and `WorkerOutputFrame` schemas plus timeout/panic/error
+isolation. Sim and replay run the deterministic perception fixture through the
+same versioned worker frames before publishing `VisionResult`, so the external
+contract is covered without starting a process or requiring hardware. Physical
+profiles do not run the fixture. Heavy providers should live outside the core
 crate behind the perception adapter boundary. A local HTTP provider can mirror
 the trait contract with:
 
@@ -495,8 +499,15 @@ leash run sim-stream-hub
 
 External workers are opt-in child processes. Leash does not start any external
 process unless a caller provides the command explicitly. The supervisor records
-the worker name, command, restart policy, process-health check, PID, exit code,
-restart count, and required/optional metadata.
+the worker name, restart policy, process-health check, PID, exit code, health,
+restart count, last error, and required/optional metadata. Runtime telemetry
+publishes only this status view; commands, arguments, environment values, local
+paths, and credentials are not included.
+
+External data exchange uses `leash-worker-frame-v1`. Inputs identify the worker,
+sequence, timestamp, and typed payload; outputs preserve that identity and carry
+either a typed result or a structured error. The deterministic perception input
+fixture is in `examples/workers/sim-perception-input.json`.
 
 Run a one-shot supervised worker check:
 

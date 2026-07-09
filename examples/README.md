@@ -8,6 +8,7 @@ flowchart TB
   examples --> local["local-llm-mcp/\nMCP client setup for local agents"]
   examples --> network["network-transport/\nTCP JSONL stream frame boundary"]
   examples --> replay["replay/\ndeterministic JSONL fixtures"]
+  examples --> workers["workers/\nexternal worker frame fixtures"]
   examples --> ugv["waveshare-ugv/\nphysical Jetson/Waveshare adapter notes"]
 
   bridge --> http["Leash HTTP runtime"]
@@ -23,4 +24,5 @@ flowchart TB
 - `local-llm-mcp/`: how to connect an MCP-capable local LLM client.
 - `network-transport/`: TCP JSONL stream frame contract for external module processes.
 - `replay/`: checked-in replay fixtures for deterministic observe paths and memory demos.
+- `workers/`: versioned no-hardware input fixtures for external worker contracts.
 - `waveshare-ugv/`: physical adapter notes for the Jetson/Waveshare UGV.

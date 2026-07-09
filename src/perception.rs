@@ -5,9 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
-use crate::types::{DetectionFrame, ImageObservation, VisionResult};
+use crate::{
+    types::{DetectionFrame, ImageObservation, VisionResult},
+    worker::{WorkerInputFrame, WorkerInputPayload, WorkerOutputFrame, WorkerOutputPayload},
+};
 
 const DEFAULT_TIMEOUT_MS: u64 = 100;
 
@@ -30,7 +33,7 @@ impl Default for PerceptionRuntime {
 impl PerceptionRuntime {
     pub fn fake() -> Self {
         Self::new(
-            FakePerceptionAdapter,
+            SimulatedPerceptionWorker,
             Duration::from_millis(DEFAULT_TIMEOUT_MS),
         )
     }
@@ -127,6 +130,33 @@ impl PerceptionAdapter for FakePerceptionAdapter {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SimulatedPerceptionWorker;
+
+impl SimulatedPerceptionWorker {
+    pub fn process(&self, input: WorkerInputFrame) -> Result<WorkerOutputFrame> {
+        input.validate()?;
+        let WorkerInputPayload::Perception { observation } = input.payload.clone();
+        let result = FakePerceptionAdapter.detect(observation)?;
+        Ok(WorkerOutputFrame::vision(&input, result))
+    }
+}
+
+impl PerceptionAdapter for SimulatedPerceptionWorker {
+    fn detect(&self, observation: ImageObservation) -> Result<VisionResult> {
+        let sequence = u64::try_from(observation.ts_ms).unwrap_or(u64::MAX);
+        let output = self.process(WorkerInputFrame::perception(
+            "simulated-perception",
+            sequence,
+            observation,
+        ))?;
+        match output.payload {
+            WorkerOutputPayload::Vision { result } => Ok(result),
+            WorkerOutputPayload::Error { message, .. } => bail!(message),
+        }
+    }
+}
+
 fn error_result(
     observed_at_ms: u128,
     source: &str,
@@ -159,6 +189,21 @@ mod tests {
         assert!(first.ok);
         assert_eq!(first.detections, second.detections);
         assert_eq!(first.detections[0].label, "sim-fixture");
+    }
+
+    #[test]
+    fn simulated_worker_fixture_exercises_input_and_output_frames() {
+        let input =
+            WorkerInputFrame::perception("simulated-perception", 42, observation("sim", 42));
+        let output = SimulatedPerceptionWorker.process(input).unwrap();
+
+        assert_eq!(output.schema_version, crate::worker::WORKER_FRAME_VERSION);
+        assert_eq!(output.sequence, 42);
+        let WorkerOutputPayload::Vision { result } = output.payload else {
+            panic!("simulated worker did not return a vision result");
+        };
+        assert_eq!(result.source, "fake-perception");
+        assert_eq!(result.detections[0].label, "sim-fixture");
     }
 
     #[test]

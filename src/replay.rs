@@ -367,6 +367,7 @@ mod tests {
                 },
             },
             vision: Default::default(),
+            workers: Vec::new(),
             resource: None,
             source: "replay".to_string(),
         };

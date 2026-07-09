@@ -27,6 +27,10 @@ use leash_harness::{
         SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
         VisionResult, VisualizationFrame, VisualizationPath,
     },
+    worker::{
+        ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
+        WorkerOutputFrame, WorkerOutputPayload,
+    },
 };
 
 const DEFAULT_OUTPUT: &str = "schemas/leash-messages.schema.json";
@@ -145,6 +149,12 @@ fn schema_document() -> Result<Value> {
     insert::<AutonomyOverlay>(&mut schemas, "AutonomyOverlay")?;
     insert::<ImageObservation>(&mut schemas, "ImageObservation")?;
     insert::<VisionResult>(&mut schemas, "VisionResult")?;
+    insert::<WorkerInputFrame>(&mut schemas, "WorkerInputFrame")?;
+    insert::<WorkerInputPayload>(&mut schemas, "WorkerInputPayload")?;
+    insert::<WorkerOutputFrame>(&mut schemas, "WorkerOutputFrame")?;
+    insert::<WorkerOutputPayload>(&mut schemas, "WorkerOutputPayload")?;
+    insert::<ExternalWorkerState>(&mut schemas, "ExternalWorkerState")?;
+    insert::<ExternalWorkerStatus>(&mut schemas, "ExternalWorkerStatus")?;
     insert::<AdapterCategory>(&mut schemas, "AdapterCategory")?;
     insert::<AdapterMaturity>(&mut schemas, "AdapterMaturity")?;
     insert::<AdapterProfile>(&mut schemas, "AdapterProfile")?;
