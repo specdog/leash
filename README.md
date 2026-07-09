@@ -108,7 +108,7 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 | `capabilities` | Endpoints, MCP tools, speed modes |
 | `modules` | Module graph and stream metadata |
 | `observe` | Latest telemetry frame (odometry, battery, sensors) |
-| `invoke_capability` | authorize, drive, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, memory_clear |
+| `invoke_capability` | authorize, drive, camera_aim, stop, estop, estop_reset, speed_mode, planner_set_goal, planner_cancel, planner_status, start_patrol, stop_patrol, patrol_status, memory_tag_location, memory_list, memory_query, memory_clear |
 | `stop` | Non-latching zero-speed motor stop |
 | `estop` | Latch emergency stop until reset |
 | `capture` | Deterministic frame capture |
@@ -117,12 +117,14 @@ leash replay examples/replay/sim-basic.jsonl --speed 10
 
 ```bash
 leash serve mcp-http --listen 127.0.0.1:9990
+leash mcp bridge --url http://127.0.0.1:9990
 leash mcp list-tools
 leash mcp status --url http://127.0.0.1:9990
 leash mcp modules
 leash mcp call health
 leash mcp call invoke_capability capability=authorize token=demo ttl_secs=30
 leash mcp call invoke_capability --json '{"capability":"speed_mode","speed_mode":"low"}'
+leash mcp call invoke_capability --json '{"capability":"camera_aim","token":"demo","pan_deg":0,"tilt_deg":0}'
 leash mcp call invoke_capability --json '{"capability":"planner_set_goal","x_m":0.25,"y_m":0.0,"speed_mode":"low"}'
 leash mcp call invoke_capability capability=planner_status
 leash mcp call invoke_capability --json '{"capability":"start_patrol","strategy":"coverage","speed_mode":"low"}'
@@ -193,6 +195,10 @@ GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
 GET  /events/telemetry     Server-sent telemetry stream
 GET  /sse/telemetry        Alias for /events/telemetry
+GET  /camera/status        Camera and gimbal status
+GET  /camera/snapshot      One JPEG snapshot from /dev/video0
+GET  /camera/aim           Gimbal range and control metadata
+POST /camera/aim           { token, pan_deg, tilt_deg, speed, accel, approval }
 GET  /agent                Local web input form
 GET  /agent/messages       Recent agent input messages
 POST /agent/messages       { source, text }
@@ -212,9 +218,9 @@ cargo run --features mcp --bin leash-schema -- --output schemas/leash-messages.s
 ```
 
 CI checks schema freshness with `--check`, and
-[docs/SCHEMAS.md](docs/SCHEMAS.md) documents compatibility rules. Standard-library
-Python and Node examples in `examples/clients/` read `/health`, consume
-`/telemetry`, and invoke `POST /stop` against sim HTTP.
+[docs/SCHEMAS.md](docs/SCHEMAS.md) documents compatibility rules. The Node
+example in `examples/clients/` reads `/health`, consumes `/telemetry`, and
+invokes `POST /stop` against sim HTTP.
 
 ## Viewer Frames
 

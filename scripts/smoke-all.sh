@@ -18,6 +18,7 @@ for (const key of [
   "LEASH_AGENT_PROVIDER",
   "LEASH_AGENT_TIMEOUT_MS",
   "LEASH_ALLOW_UNTOKENED_DRIVE",
+  "LEASH_BRIDGE_URL",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
   "LEASH_MAVLINK_ENDPOINT",
@@ -52,6 +53,11 @@ const checks = [
     name: "mcp-http-cli",
     argv: ["bash", "scripts/smoke-mcp-http.sh"],
     proof: "HTTP MCP tool list, health/stop calls, CLI status/modules, key=value/JSON direct calls, planner, patrol, and spatial-memory calls passed",
+  },
+  {
+    name: "mcp-stdio-bridge",
+    argv: ["bash", "scripts/smoke-mcp-bridge.sh"],
+    proof: "Rust stdio MCP bridge proxied tool list, health, and stop calls to MCP HTTP",
   },
   {
     name: "stream-hub",

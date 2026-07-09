@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leash Operator</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1 id="fleet-name">Leash Operator</h1>
+      <span id="fleet-status">starting</span>
+    </div>
+    <div class="toolbar">
+      <input id="operator-token" value="operator" aria-label="Operator token">
+      <select id="speed-mode" aria-label="Speed mode">
+        <option value="low" selected>low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+      </select>
+      <button id="refresh-all" type="button">Refresh</button>
+      <button id="stop-all" class="danger" type="button">Stop All</button>
+    </div>
+  </header>
+  <section class="selector">
+    <details id="fleet-selector" open>
+      <summary>
+        <span>Available Bots</span>
+        <strong id="selector-status">checking</strong>
+      </summary>
+      <div class="selector-options" id="selector-options"></div>
+    </details>
+  </section>
+  <main id="fleet-grid"></main>
+  <template id="robot-template">
+    <article class="robot">
+      <div class="robot-head">
+        <div>
+          <h2 class="robot-name"></h2>
+          <span class="robot-meta"></span>
+        </div>
+        <span class="state"><span class="dot"></span><span class="state-text">unknown</span></span>
+      </div>
+      <div class="viewer">
+        <video class="webrtc-video" autoplay playsinline muted></video>
+        <img class="snapshot" alt="" decoding="async">
+        <div class="viewer-empty">no frame</div>
+        <div class="hud hud-left">
+          <strong class="hud-name">-</strong>
+          <span class="hud-link">stream -</span>
+          <span class="hud-battery">battery -</span>
+          <span class="hud-drive">L 0.00 / R 0.00</span>
+        </div>
+        <div class="hud hud-right">
+          <strong class="hud-speed">speed -</strong>
+          <span class="hud-estop">estop -</span>
+          <span class="hud-aim">pan 0 / tilt 0</span>
+        </div>
+        <div class="joystick joystick-drive" data-stick="drive" aria-label="Drive joystick">
+          <div class="joystick-base">
+            <div class="joystick-thumb"></div>
+          </div>
+          <span class="joystick-label">drive</span>
+        </div>
+        <div class="joystick joystick-camera" data-stick="camera" aria-label="Camera joystick">
+          <div class="joystick-base">
+            <div class="joystick-thumb"></div>
+          </div>
+          <span class="joystick-label">camera</span>
+        </div>
+      </div>
+      <div class="metrics">
+        <div><span>health</span><strong class="metric-health">-</strong></div>
+        <div><span>battery</span><strong class="metric-battery">-</strong></div>
+        <div><span>estop</span><strong class="metric-estop">-</strong></div>
+        <div><span>serial</span><strong class="metric-profile">-</strong></div>
+      </div>
+      <div class="controls">
+        <div class="control-row">
+          <button class="authorize" type="button">Authorize</button>
+          <button class="camera-refresh" type="button">Camera Refresh</button>
+          <button class="stop danger" type="button">Stop</button>
+          <button class="estop danger" type="button">E-Stop</button>
+        </div>
+        <div class="pad" aria-label="Drive controls">
+          <button class="drive" data-left="0.16" data-right="0.16" type="button">^</button>
+          <button class="drive" data-left="-0.14" data-right="0.14" type="button">&lt;</button>
+          <button class="drive stop-drive" data-left="0" data-right="0" type="button">0</button>
+          <button class="drive" data-left="0.14" data-right="-0.14" type="button">&gt;</button>
+          <button class="drive" data-left="-0.12" data-right="-0.12" type="button">v</button>
+        </div>
+        <div class="aim">
+          <button class="aim-btn" data-pan="0" data-tilt="15" type="button">tilt up</button>
+          <button class="aim-btn" data-pan="-15" data-tilt="0" type="button">pan left</button>
+          <button class="aim-center" type="button">center</button>
+          <button class="aim-btn" data-pan="15" data-tilt="0" type="button">pan right</button>
+          <button class="aim-btn" data-pan="0" data-tilt="-15" type="button">tilt down</button>
+        </div>
+      </div>
+      <pre class="log"></pre>
+    </article>
+  </template>
+  <script src="/app.js"></script>
+</body>
+</html>

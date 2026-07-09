@@ -78,7 +78,10 @@ pub struct TelemetryFrame {
     pub ts_ms: u128,
     pub robot: String,
     pub profile: String,
+    #[serde(default)]
     pub battery_v: Option<f64>,
+    #[serde(default)]
+    pub battery_pct: Option<f64>,
     pub left_cmd: f64,
     pub right_cmd: f64,
     pub odometry_left: Option<f64>,
@@ -578,7 +581,10 @@ pub struct SensorSnapshot {
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct BatteryStatus {
     pub status: String,
+    #[serde(default)]
     pub voltage_v: Option<f64>,
+    #[serde(default)]
+    pub level_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -603,7 +609,20 @@ pub struct CameraStatus {
 pub struct RawFrameStatus {
     pub status: String,
     pub source: String,
+    #[serde(default)]
     pub last_ms: Option<u128>,
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraAimOutcome {
+    pub ok: bool,
+    pub pan_deg: f64,
+    pub tilt_deg: f64,
+    pub speed: u32,
+    pub accel: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

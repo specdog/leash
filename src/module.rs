@@ -339,6 +339,12 @@ pub fn default_module_graph(config: &HarnessConfig, capabilities: Vec<String>) -
             "stop".to_string(),
             "estop".to_string(),
         ],
+        Profile::WaveshareUgv => vec![
+            "drive".to_string(),
+            "camera_aim".to_string(),
+            "stop".to_string(),
+            "estop".to_string(),
+        ],
         _ => vec!["drive".to_string(), "stop".to_string(), "estop".to_string()],
     };
     let driver_input = match config.profile {

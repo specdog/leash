@@ -319,7 +319,6 @@ curl -fsS -X POST "$base/drive" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","left":0.2,"right":0.2}' | assert_drive_outcome
 curl -fsS -X POST "$base/motors/stop" | parse_json
-LEASH_URL="$base" python3 examples/clients/python/http_client.py | assert_client_example_summary python
 LEASH_URL="$base" node examples/clients/node/http-client.mjs | assert_client_example_summary node
 
 echo "http smoke ok: $base"

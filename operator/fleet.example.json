@@ -1,0 +1,25 @@
+{
+  "fleetName": "Leash Local Fleet",
+  "pollMs": 2500,
+  "snapshotMs": 250,
+  "robots": [
+    {
+      "id": "guard-dog",
+      "name": "Guard Dog",
+      "role": "guard-dog",
+      "baseUrl": "http://10.0.0.181:8000",
+      "location": "window perch",
+      "notes": "LAN Jetson",
+      "videoTransport": "mjpeg"
+    },
+    {
+      "id": "pinkie",
+      "name": "Pinkie",
+      "role": "pinkie",
+      "baseUrl": "http://192.168.55.1:8000",
+      "location": "USB gadget link",
+      "notes": "direct USB Jetson",
+      "videoTransport": "mjpeg"
+    }
+  ]
+}
