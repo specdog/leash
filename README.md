@@ -133,9 +133,13 @@ leash mcp call invoke_capability --json '{"capability":"memory_tag_location","na
 leash mcp call invoke_capability capability=memory_query query=dock
 ```
 
-`/mcp/tools`, `/mcp/status`, `/mcp/modules`, and `/mcp/call` return JSON for
-local agents and automation. Module/tool mapping exposes tool names by module
-without returning pilot session tokens.
+`POST /mcp` is the standards-compatible Streamable HTTP endpoint for MCP
+initialization, `tools/list`, and `tools/call`. The compatibility endpoints
+`/mcp/tools`, `/mcp/status`, `/mcp/modules`, and `/mcp/call` remain available for
+existing local agents and automation. Module/tool mapping includes the active
+stack blueprint and exposes tool names by module without returning pilot session
+tokens. See [docs/MCP_HTTP.md](docs/MCP_HTTP.md) for request examples and the
+compatibility contract.
 
 ## Sim Planner And Patrol
 

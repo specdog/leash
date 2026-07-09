@@ -6,9 +6,13 @@ use serde_json::{json, Value};
 
 use leash_harness::{
     capability::{CapabilityDescriptor, InvocationOrigin, SafetyClass},
-    mcp::{McpCallResponse, McpModuleToolMap, McpStatus, McpToolDescriptor, McpToolList},
+    mcp::{
+        McpCallResponse, McpModuleToolMap, McpProtocolCallResult, McpProtocolTool,
+        McpProtocolToolList, McpStatus, McpTextContent, McpToolDescriptor, McpToolList,
+    },
     module::{
-        ModuleGraph, ModuleHealth, ModuleInfo, ModuleState, StreamDescriptor, StreamDirection,
+        ModuleGraph, ModuleHealth, ModuleInfo, ModuleState, StackBlueprintMetadata,
+        StreamDescriptor, StreamDirection,
     },
     stack::{AdapterCategory, AdapterMaturity, AdapterProfile},
     transport::NetworkStreamFrame,
@@ -110,6 +114,7 @@ fn schema_document() -> Result<Value> {
     insert::<AgentMessageList>(&mut schemas, "AgentMessageList")?;
     insert::<AgentModelResponse>(&mut schemas, "AgentModelResponse")?;
     insert::<ModuleGraph>(&mut schemas, "ModuleGraph")?;
+    insert::<StackBlueprintMetadata>(&mut schemas, "StackBlueprintMetadata")?;
     insert::<ModuleInfo>(&mut schemas, "ModuleInfo")?;
     insert::<ModuleHealth>(&mut schemas, "ModuleHealth")?;
     insert::<ModuleState>(&mut schemas, "ModuleState")?;
@@ -149,6 +154,10 @@ fn schema_document() -> Result<Value> {
     insert::<McpCallResponse>(&mut schemas, "McpCallResponse")?;
     insert::<McpStatus>(&mut schemas, "McpStatus")?;
     insert::<McpModuleToolMap>(&mut schemas, "McpModuleToolMap")?;
+    insert::<McpProtocolTool>(&mut schemas, "McpProtocolTool")?;
+    insert::<McpProtocolToolList>(&mut schemas, "McpProtocolToolList")?;
+    insert::<McpTextContent>(&mut schemas, "McpTextContent")?;
+    insert::<McpProtocolCallResult>(&mut schemas, "McpProtocolCallResult")?;
     insert::<DroneCommandStatus>(&mut schemas, "DroneCommandStatus")?;
     insert::<ManipulatorJoint>(&mut schemas, "ManipulatorJoint")?;
     insert::<ManipulatorJointState>(&mut schemas, "ManipulatorJointState")?;
