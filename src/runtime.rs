@@ -45,11 +45,11 @@ use crate::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
         Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
         DriveOutcome, Health, ImageObservation, MapMetadata, OccupancyGridFrame, OdometryStatus,
-        PatrolStatus, PatrolStrategy, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        RawFrameStatus, ResourceSample, SafetyStreamState, SensorSnapshot, SpatialMemoryStatus,
-        SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
-        VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-        VISUALIZATION_FRAME_VERSION,
+        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PlannerGoal, PlannerStatus,
+        PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, SafetyStreamState,
+        SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
+        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -756,6 +756,7 @@ impl Harness {
             estop: command.estop,
             deadman_ok: !command.stopped_by_deadman,
             physical_actuation_enabled: self.physical_actuation_enabled(),
+            operator_token: self.operator_token_status(),
             accelerator: self.accelerator.clone(),
             modules: coordinator.graph().modules,
         }
@@ -842,7 +843,7 @@ impl Harness {
             right_cmd: command.right_cmd,
             odometry_left: raw.odometry_left,
             odometry_right: raw.odometry_right,
-            session_id: command.active_session_id,
+            session_id: command.active_session_id.as_deref().map(operator_owner_id),
             deadman_ok: !command.stopped_by_deadman,
             estop: command.estop,
             stopped_by_deadman: command.stopped_by_deadman,
@@ -1071,6 +1072,26 @@ impl Harness {
             command.active_session_id = None;
         }
         Ok(())
+    }
+
+    pub fn operator_token_status(&self) -> OperatorTokenStatus {
+        let now = Instant::now();
+        let mut sessions = self.sessions.lock();
+        sessions.retain(|_, session| session.expires_at > now);
+        let Some((token, session)) = sessions.iter().next() else {
+            return OperatorTokenStatus::default();
+        };
+        let expires_in_ms = session
+            .expires_at
+            .saturating_duration_since(now)
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+        OperatorTokenStatus {
+            active: true,
+            owner_id: Some(operator_owner_id(token)),
+            expires_in_ms: Some(expires_in_ms),
+            speed_mode: Some(session.speed_mode),
+        }
     }
 
     pub fn set_speed_mode(&self, token: Option<&str>, speed_mode: SpeedMode) -> Result<()> {
@@ -1657,6 +1678,11 @@ impl Harness {
             }
         });
     }
+}
+
+fn operator_owner_id(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    format!("operator-{}", &format!("{digest:x}")[..12])
 }
 
 #[cfg(feature = "waveshare-ugv")]
@@ -2302,6 +2328,49 @@ mod tests {
             .modules
             .iter()
             .all(|module| module.state == crate::module::ModuleState::Running));
+    }
+
+    #[tokio::test]
+    async fn a_new_operator_deterministically_takes_ownership_without_exposing_tokens() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        harness
+            .authorize("first-private-token".to_string(), 30, SpeedMode::Low)
+            .unwrap();
+        harness
+            .drive(Some("first-private-token"), 0.1, 0.1, None)
+            .unwrap();
+
+        harness
+            .authorize("second-private-token".to_string(), 30, SpeedMode::High)
+            .unwrap();
+
+        let status = harness.operator_token_status();
+        assert!(status.active);
+        assert_eq!(
+            status.owner_id.as_deref(),
+            Some(operator_owner_id("second-private-token").as_str())
+        );
+        assert_eq!(status.speed_mode, Some(SpeedMode::High));
+        assert!(status
+            .expires_in_ms
+            .is_some_and(|ttl| ttl > 0 && ttl <= 30_000));
+        assert_eq!(harness.telemetry().left_cmd, 0.0);
+        assert!(harness
+            .drive(Some("first-private-token"), 0.1, 0.1, None)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid pilot token"));
+        harness
+            .drive(Some("second-private-token"), 0.1, 0.1, None)
+            .unwrap();
+
+        let serialized = serde_json::to_string(&harness.health()).unwrap();
+        assert!(!serialized.contains("first-private-token"));
+        assert!(!serialized.contains("second-private-token"));
+        assert_eq!(
+            harness.telemetry().session_id.as_deref(),
+            Some(operator_owner_id("second-private-token").as_str())
+        );
     }
 
     #[tokio::test]

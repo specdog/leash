@@ -199,7 +199,12 @@ impl CapabilityRegistry {
                 let ttl_secs = optional_u64(&args, "ttl_secs")?.unwrap_or(120);
                 let speed_mode = optional_speed_mode(&args, "speed_mode")?.unwrap_or_default();
                 self.harness.authorize(token, ttl_secs, speed_mode)?;
-                Ok(json!({ "ok": true, "ttl_secs": ttl_secs, "speed_mode": speed_mode }))
+                Ok(json!({
+                    "ok": true,
+                    "ttl_secs": ttl_secs,
+                    "speed_mode": speed_mode,
+                    "operator_token": self.harness.operator_token_status(),
+                }))
             }
             "drive" => {
                 ensure_fields(&args, &["token", "left", "right", "speed_mode"])?;

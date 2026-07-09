@@ -37,6 +37,15 @@ pub const COST_LETHAL: u8 = 254;
 pub const COST_UNKNOWN: u8 = 255;
 pub const MANIPULATOR_SCHEMA_VERSION: &str = "leash-manipulator-v1";
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct OperatorTokenStatus {
+    pub active: bool,
+    pub owner_id: Option<String>,
+    pub expires_in_ms: Option<u64>,
+    pub speed_mode: Option<SpeedMode>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Health {
@@ -49,6 +58,8 @@ pub struct Health {
     pub estop: bool,
     pub deadman_ok: bool,
     pub physical_actuation_enabled: bool,
+    #[serde(default)]
+    pub operator_token: OperatorTokenStatus,
     pub accelerator: AcceleratorStatus,
     pub modules: Vec<ModuleInfo>,
 }

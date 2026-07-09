@@ -395,6 +395,10 @@ main.single-view {
   text-transform: uppercase;
 }
 
+.mobile-estop {
+  display: none;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -415,6 +419,11 @@ main.single-view {
   margin-top: 5px;
   overflow-wrap: anywhere;
   font-size: 13px;
+}
+
+.metric-health-history,
+.metric-camera-history {
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .controls {
@@ -514,6 +523,21 @@ main.single-view {
   }
 }
 
+@media (max-width: 760px), (orientation: landscape) and (max-height: 620px) {
+  body.single-operator button.mobile-estop {
+    position: fixed;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    z-index: 30;
+    display: block;
+    min-width: 104px;
+    min-height: 48px;
+    border: 2px solid #ffffff;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    font-size: 15px;
+  }
+}
+
 @media (orientation: landscape) and (max-height: 620px) {
   body.single-operator {
     display: flex;
@@ -542,7 +566,10 @@ main.single-view {
 
   body.single-operator .toolbar {
     flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
     gap: 5px;
+    padding-bottom: 2px;
   }
 
   body.single-operator input {
@@ -558,8 +585,7 @@ main.single-view {
   }
 
   body.single-operator .selector {
-    flex: 0 0 auto;
-    padding: 4px 8px;
+    display: none;
   }
 
   body.single-operator .selector details {
@@ -620,11 +646,14 @@ main.single-view {
 
   body.single-operator .metrics {
     grid-area: metrics;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
     gap: 5px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
   }
 
   body.single-operator .metrics div {
+    flex: 0 0 104px;
     min-height: 40px;
     padding: 5px 6px;
   }
@@ -639,6 +668,7 @@ main.single-view {
     min-height: 0;
     overflow: auto;
     gap: 6px;
+    padding-bottom: 54px;
   }
 
   body.single-operator .control-row {

@@ -22,9 +22,9 @@ use leash_harness::{
         CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
         CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
         ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapMetadata,
-        OccupancyGridFrame, OdometryStatus, PatrolStatus, PatrolStrategy, PlannerGoal,
-        PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry,
-        SafetyStreamState, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
+        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
+        PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
+        RunLogEntry, SafetyStreamState, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
         SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
         VisionResult, VisualizationFrame, VisualizationPath,
     },
@@ -101,6 +101,7 @@ fn schema_document() -> Result<Value> {
     let mut schemas = BTreeMap::new();
 
     insert::<Health>(&mut schemas, "Health")?;
+    insert::<OperatorTokenStatus>(&mut schemas, "OperatorTokenStatus")?;
     insert::<Capabilities>(&mut schemas, "Capabilities")?;
     insert::<TelemetryFrame>(&mut schemas, "TelemetryFrame")?;
     insert::<TelemetryStreamFrame>(&mut schemas, "TelemetryStreamFrame")?;

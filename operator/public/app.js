@@ -12,6 +12,7 @@ const selectorStatus = document.querySelector("#selector-status");
 const state = new Map();
 let fleet = { robots: [], pollMs: 2500, snapshotMs: 3000 };
 let selectedRobotId = localStorage.getItem("leash.operator.selection") || "fleet";
+let ownerFingerprintCache = { token: "", id: null };
 
 const OPERATOR_TOKEN_KEY = "leash.operator.token";
 const DRIVE_LOOP_MS = 33;
@@ -50,6 +51,7 @@ tokenInput.addEventListener("change", () => {
   const value = tokenInput.value.trim() || newOperatorToken();
   tokenInput.value = value;
   localStorage.setItem(OPERATOR_TOKEN_KEY, value);
+  ownerFingerprintCache = { token: "", id: null };
 });
 
 function api(robot, route, options = {}) {
@@ -107,6 +109,8 @@ function robotState(robot) {
       authorizedAt: 0,
       health: null,
       telemetry: null,
+      healthHistory: [],
+      cameraFailures: [],
       lastLog: [],
     });
   }
@@ -146,6 +150,75 @@ function batteryLabel(telemetry) {
   if (Number.isFinite(percent)) return `battery ${percent.toFixed(0)}%`;
   if (Number.isFinite(voltage)) return `battery ${voltage.toFixed(2)} V`;
   return "battery -";
+}
+
+function recordHealth(current, ok, detail) {
+  const previous = current.healthHistory[0];
+  if (previous && previous.ok === ok && previous.detail === detail) return;
+  current.healthHistory.unshift({ ts: Date.now(), ok, detail });
+  current.healthHistory = current.healthHistory.slice(0, 8);
+}
+
+function clockLabel(timestamp) {
+  const date = new Date(Number(timestamp));
+  return Number.isNaN(date.valueOf())
+    ? "?"
+    : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderHistories(card, current) {
+  const healthMetric = card.querySelector(".metric-health-history");
+  healthMetric.textContent = current.healthHistory.length
+    ? current.healthHistory.map((entry) => `${entry.ok ? "✓" : "✕"} ${clockLabel(entry.ts)}`).join(" · ")
+    : "-";
+  healthMetric.title = current.healthHistory
+    .map((entry) => `${clockLabel(entry.ts)} ${entry.detail}`)
+    .join("\n");
+
+  const cameraMetric = card.querySelector(".metric-camera-history");
+  const recent = [...current.cameraFailures].reverse().slice(0, 3);
+  cameraMetric.textContent = recent.length
+    ? recent.map((entry) => `${entry.reason} ${clockLabel(entry.ts_ms)}`).join(" · ")
+    : "none";
+  cameraMetric.title = recent
+    .map((entry) => `${clockLabel(entry.ts_ms)} ${entry.owner}: ${entry.reason}`)
+    .join("\n");
+}
+
+async function localOperatorOwnerId() {
+  const value = token();
+  if (ownerFingerprintCache.token === value) return ownerFingerprintCache.id;
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  const suffix = [...new Uint8Array(digest).slice(0, 6)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  ownerFingerprintCache = { token: value, id: `operator-${suffix}` };
+  return ownerFingerprintCache.id;
+}
+
+async function renderOperatorToken(card, status) {
+  const metric = card.querySelector(".metric-token");
+  if (!status?.active) {
+    metric.textContent = "none";
+    metric.title = "No active operator token";
+    return;
+  }
+  let localId = null;
+  try {
+    localId = await localOperatorOwnerId();
+  } catch (_error) {
+    // The owner fingerprint remains visible when Web Crypto is unavailable.
+  }
+  const owner = localId && localId === status.owner_id ? "mine" : status.owner_id || "active";
+  const ttl = Number.isFinite(status.expires_in_ms)
+    ? `${Math.max(0, Math.ceil(status.expires_in_ms / 1000))}s`
+    : "ttl ?";
+  metric.textContent = `${owner} · ${ttl}`;
+  metric.title = [status.owner_id, status.speed_mode].filter(Boolean).join(" · ");
 }
 
 function updateHud(robot) {
@@ -243,7 +316,9 @@ function renderFleet() {
     node.querySelector(".authorize").addEventListener("click", () => authorize(robot));
     node.querySelector(".camera-refresh").addEventListener("click", () => refreshCamera(robot));
     node.querySelector(".stop").addEventListener("click", () => stopRobot(robot));
-    node.querySelector(".estop").addEventListener("click", () => estopRobot(robot));
+    for (const button of node.querySelectorAll(".estop")) {
+      button.addEventListener("click", () => estopRobot(robot));
+    }
     node.querySelector(".aim-center").addEventListener("click", () => aimRobot(robot, 0, 0, true));
 
     for (const button of node.querySelectorAll(".aim-btn")) {
@@ -275,6 +350,7 @@ async function refreshRobot(robot) {
     const current = robotState(robot);
     current.health = health;
     current.telemetry = telemetry;
+    recordHealth(current, Boolean(health.ok), health.ok ? "online" : "attention");
     setRobotClass(card, health.ok ? "ok" : "warn");
     card.querySelector(".state-text").textContent = health.ok ? "online" : "attention";
     card.querySelector(".metric-health").textContent = health.ok ? "ok" : "attention";
@@ -289,6 +365,11 @@ async function refreshRobot(robot) {
     }
     current.lastCamera = camera.camera;
     current.cameraStatus = camera.camera?.status || "unknown";
+    current.cameraFailures = Array.isArray(camera.stream_health?.recent_failures)
+      ? camera.stream_health.recent_failures
+      : [];
+    await renderOperatorToken(card, health.operator_token);
+    renderHistories(card, current);
     maybeStartStream(robot, camera.camera);
     updateHud(robot);
     updateSelectorStatus();
@@ -296,9 +377,12 @@ async function refreshRobot(robot) {
     const current = robotState(robot);
     current.health = null;
     current.cameraStatus = "unknown";
+    recordHealth(current, false, error.message);
     setRobotClass(card, "down");
     card.querySelector(".state-text").textContent = "offline";
     card.querySelector(".metric-health").textContent = "down";
+    await renderOperatorToken(card, null);
+    renderHistories(card, current);
     log(robot, error.message);
     updateHud(robot);
     updateSelectorStatus();
