@@ -39,3 +39,6 @@ Safety defaults:
 - speed caps are enforced before writing serial frames
 - deadman sends zero speed after stale drive commands
 - `estop` latches until `estop_reset`
+
+Camera capture, health/recovery routes, and Jetson WebRTC encoder settings are
+documented in [docs/CAMERA.md](../../docs/CAMERA.md).

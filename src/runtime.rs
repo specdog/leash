@@ -786,6 +786,8 @@ impl Harness {
                 "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
                 "GET /camera/status".to_string(),
+                "GET /camera/stream/health".to_string(),
+                "POST /camera/stream/recover".to_string(),
                 "GET /camera/snapshot".to_string(),
                 "GET /camera/stream.mjpg".to_string(),
                 "GET /agent".to_string(),

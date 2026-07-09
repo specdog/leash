@@ -1,11 +1,12 @@
 use std::{
+    collections::VecDeque,
     convert::Infallible,
     env,
     net::SocketAddr,
     path::Path,
     process::Stdio,
     sync::{Arc, LazyLock},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Result;
@@ -24,11 +25,12 @@ use axum::{
     Json, Router,
 };
 use futures_util::{stream, SinkExt, Stream, StreamExt};
+use parking_lot::Mutex as ParkingMutex;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tokio::time;
 use tower_http::cors::CorsLayer;
 
@@ -43,6 +45,116 @@ use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
 
 static CAMERA_PROCESS_LOCK: LazyLock<Arc<TokioMutex<()>>> =
     LazyLock::new(|| Arc::new(TokioMutex::new(())));
+static CAMERA_RUNTIME_STATE: LazyLock<ParkingMutex<CameraRuntimeState>> =
+    LazyLock::new(|| ParkingMutex::new(CameraRuntimeState::default()));
+
+const CAMERA_FAILURE_HISTORY_LIMIT: usize = 16;
+
+#[derive(Debug, Default)]
+struct CameraRuntimeState {
+    active_owner: Option<String>,
+    active_since_ms: Option<u128>,
+    active_generation: u64,
+    recovery_generation: u64,
+    recovery_count: u64,
+    last_recovery_ms: Option<u128>,
+    recent_failures: VecDeque<crate::types::CameraStreamFailure>,
+}
+
+impl CameraRuntimeState {
+    fn start(&mut self, owner: &str) -> u64 {
+        self.active_owner = Some(owner.to_string());
+        self.active_since_ms = Some(camera_now_ms());
+        self.active_generation = self.recovery_generation;
+        self.active_generation
+    }
+
+    fn finish(&mut self, owner: &str, generation: u64) {
+        if self.active_owner.as_deref() == Some(owner) && self.active_generation == generation {
+            self.active_owner = None;
+            self.active_since_ms = None;
+        }
+    }
+
+    fn record_failure(&mut self, owner: &str, reason: &str) {
+        if self.recent_failures.len() == CAMERA_FAILURE_HISTORY_LIMIT {
+            self.recent_failures.pop_front();
+        }
+        self.recent_failures
+            .push_back(crate::types::CameraStreamFailure {
+                ts_ms: camera_now_ms(),
+                owner: owner.to_string(),
+                reason: reason.to_string(),
+            });
+    }
+
+    fn recover(&mut self) -> crate::types::CameraRecoveryResponse {
+        let previous_owner = self.active_owner.clone();
+        self.recovery_generation = self.recovery_generation.saturating_add(1);
+        self.recovery_count = self.recovery_count.saturating_add(1);
+        self.last_recovery_ms = Some(camera_now_ms());
+        crate::types::CameraRecoveryResponse {
+            ok: true,
+            recovery_requested: previous_owner.is_some(),
+            previous_owner,
+            recovery_generation: self.recovery_generation,
+            recovery_count: self.recovery_count,
+        }
+    }
+
+    fn health(&self, device: String) -> crate::types::CameraStreamHealth {
+        let device_available = Path::new(&device).exists();
+        let recovering =
+            self.active_owner.is_some() && self.active_generation < self.recovery_generation;
+        let status = if !device_available {
+            "unavailable"
+        } else if recovering {
+            "recovering"
+        } else if self.active_owner.is_some() {
+            "active"
+        } else {
+            "idle"
+        };
+        crate::types::CameraStreamHealth {
+            ok: device_available && !recovering,
+            status: status.to_string(),
+            device,
+            device_available,
+            active_owner: self.active_owner.clone(),
+            active_since_ms: self.active_since_ms,
+            recovery_generation: self.recovery_generation,
+            recovery_count: self.recovery_count,
+            last_recovery_ms: self.last_recovery_ms,
+            recent_failures: self.recent_failures.iter().cloned().collect(),
+        }
+    }
+}
+
+pub(crate) struct CameraActivityGuard {
+    _process_guard: OwnedMutexGuard<()>,
+    owner: &'static str,
+    generation: u64,
+}
+
+impl CameraActivityGuard {
+    pub(crate) fn recovery_requested(&self) -> bool {
+        CAMERA_RUNTIME_STATE.lock().recovery_generation != self.generation
+    }
+
+    pub(crate) fn record_failure(&self, reason: &str) {
+        CAMERA_RUNTIME_STATE
+            .lock()
+            .record_failure(self.owner, reason);
+    }
+}
+
+impl Drop for CameraActivityGuard {
+    fn drop(&mut self) {
+        CAMERA_RUNTIME_STATE
+            .lock()
+            .finish(self.owner, self.generation);
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct PilotTokenReq {
@@ -130,6 +242,9 @@ pub fn router(harness: Harness) -> Router {
         .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
         .route("/camera/status", get(camera_status))
+        .route("/camera/health", get(camera_stream_health))
+        .route("/camera/stream/health", get(camera_stream_health))
+        .route("/camera/stream/recover", post(camera_stream_recover))
         .route("/camera/snapshot", get(camera_snapshot))
         .route("/camera/stream.mjpg", get(camera_stream))
         .route("/camera/aim", get(camera_aim_status).post(camera_aim))
@@ -372,18 +487,33 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
                 Value::String("/camera/stream.mjpg".to_string()),
             );
             #[cfg(feature = "webrtc")]
-            camera.insert(
-                "webrtc_url".to_string(),
-                Value::String("/camera/webrtc/ws".to_string()),
-            );
+            if camera_webrtc_enabled() {
+                camera.insert(
+                    "webrtc_url".to_string(),
+                    Value::String("/camera/webrtc/ws".to_string()),
+                );
+            }
             camera.insert("device".to_string(), Value::String(device));
         }
     }
     Json(json!({
         "ok": true,
         "camera": camera,
+        "stream_health": camera_stream_health_snapshot(),
         "gimbal": camera_aim_descriptor()
     }))
+}
+
+async fn camera_stream_health() -> Json<crate::types::CameraStreamHealth> {
+    Json(camera_stream_health_snapshot())
+}
+
+async fn camera_stream_recover() -> Json<crate::types::CameraRecoveryResponse> {
+    Json(CAMERA_RUNTIME_STATE.lock().recover())
+}
+
+fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
+    CAMERA_RUNTIME_STATE.lock().health(camera_device_path())
 }
 
 async fn camera_aim_status() -> Json<Value> {
@@ -411,6 +541,22 @@ pub(crate) fn camera_process_lock() -> Arc<TokioMutex<()>> {
     CAMERA_PROCESS_LOCK.clone()
 }
 
+pub(crate) fn camera_activity(owner: &'static str) -> Result<CameraActivityGuard> {
+    let process_guard = camera_process_lock()
+        .try_lock_owned()
+        .map_err(|_| anyhow::anyhow!("camera is busy; stream or capture already active"))?;
+    let generation = CAMERA_RUNTIME_STATE.lock().start(owner);
+    Ok(CameraActivityGuard {
+        _process_guard: process_guard,
+        owner,
+        generation,
+    })
+}
+
+pub(crate) fn camera_record_failure(owner: &str, reason: &str) {
+    CAMERA_RUNTIME_STATE.lock().record_failure(owner, reason);
+}
+
 pub(crate) fn camera_device_path() -> String {
     env::var("LEASH_CAMERA_DEVICE")
         .ok()
@@ -424,6 +570,24 @@ pub(crate) fn camera_env_arg(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && value != "auto")
+}
+
+fn camera_now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+#[cfg(feature = "webrtc")]
+pub(crate) fn camera_webrtc_enabled() -> bool {
+    let Some(value) = camera_env_arg("LEASH_WEBRTC_ENABLED") else {
+        return true;
+    };
+    !matches!(
+        value.to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off" | "disabled"
+    )
 }
 
 pub(crate) fn camera_v4l2_input_args(device: &str) -> Vec<String> {
@@ -460,16 +624,19 @@ fn camera_stream_codec_args() -> Vec<String> {
 async fn camera_snapshot() -> Result<Response, HttpError> {
     let device = camera_device_path();
     if !Path::new(&device).exists() {
+        camera_record_failure("snapshot", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let _camera_guard = CAMERA_PROCESS_LOCK
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| anyhow::anyhow!("camera is busy; stream or capture already active"))?;
+    let camera_guard = camera_activity("snapshot")?;
 
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let frame = crate::v4l2_camera::capture_mjpeg_frame(device).await?;
+        let frame = crate::v4l2_camera::capture_mjpeg_frame(device)
+            .await
+            .map_err(|err| {
+                camera_guard.record_failure("capture-failed");
+                err
+            })?;
         let mut response = frame.into_response();
         response
             .headers_mut()
@@ -493,7 +660,10 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|err| anyhow::anyhow!("start ffmpeg camera capture: {err}"))?;
+        .map_err(|err| {
+            camera_guard.record_failure("capture-start-failed");
+            anyhow::anyhow!("start ffmpeg camera capture: {err}")
+        })?;
 
     let mut stdout = child
         .stdout
@@ -517,6 +687,7 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
+            camera_guard.record_failure("capture-timeout");
             return Err(anyhow::anyhow!("ffmpeg camera capture timed out").into());
         }
     };
@@ -531,6 +702,7 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
 
     if !status.success() || stdout.is_empty() {
         let stderr = String::from_utf8_lossy(&stderr);
+        camera_guard.record_failure("capture-encoder-failed");
         return Err(anyhow::anyhow!("ffmpeg camera capture failed: {stderr}").into());
     }
 
@@ -544,23 +716,40 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
 async fn camera_stream() -> Result<Response, HttpError> {
     let device = camera_device_path();
     if !Path::new(&device).exists() {
+        camera_record_failure("mjpeg", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = CAMERA_PROCESS_LOCK
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| anyhow::anyhow!("camera is busy; stream or capture already active"))?;
+    let camera_guard = camera_activity("mjpeg")?;
 
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let receiver = crate::v4l2_camera::start_mjpeg_stream(device).await?;
+        let receiver = crate::v4l2_camera::start_mjpeg_stream(device)
+            .await
+            .map_err(|err| {
+                camera_guard.record_failure("stream-start-failed");
+                err
+            })?;
         let stream = stream::unfold(
             (receiver, camera_guard),
             |(mut receiver, camera_guard)| async move {
-                receiver
-                    .recv()
-                    .await
-                    .map(|chunk| (Ok::<Bytes, Infallible>(chunk), (receiver, camera_guard)))
+                loop {
+                    if camera_guard.recovery_requested() {
+                        return None;
+                    }
+                    match time::timeout(Duration::from_millis(100), receiver.recv()).await {
+                        Err(_) => continue,
+                        Ok(Some(chunk)) => {
+                            return Some((
+                                Ok::<Bytes, Infallible>(chunk),
+                                (receiver, camera_guard),
+                            ));
+                        }
+                        Ok(None) => {
+                            camera_guard.record_failure("stream-ended");
+                            return None;
+                        }
+                    }
+                }
             },
         );
         let mut response = Body::from_stream(stream).into_response();
@@ -588,17 +777,31 @@ async fn camera_stream() -> Result<Response, HttpError> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|err| anyhow::anyhow!("start ffmpeg camera stream: {err}"))?;
+        .map_err(|err| {
+            camera_guard.record_failure("stream-start-failed");
+            anyhow::anyhow!("start ffmpeg camera stream: {err}")
+        })?;
 
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| anyhow::anyhow!("ffmpeg camera stream did not expose stdout"))?;
 
-    let (first_chunk, stdout, child) = read_first_camera_frame(stdout, child).await?;
+    let (first_chunk, stdout, child) = match read_first_camera_frame(stdout, child).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            camera_guard.record_failure("stream-first-frame-failed");
+            return Err(err);
+        }
+    };
     let stream = stream::unfold(
         (Some(first_chunk), stdout, child, camera_guard),
         |(first_chunk, mut stdout, mut child, camera_guard)| async move {
+            if camera_guard.recovery_requested() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return None;
+            }
             if let Some(first_chunk) = first_chunk {
                 return Some((
                     Ok::<Bytes, Infallible>(first_chunk),
@@ -606,22 +809,32 @@ async fn camera_stream() -> Result<Response, HttpError> {
                 ));
             }
 
-            let mut chunk = vec![0; 32 * 1024];
-            match stdout.read(&mut chunk).await {
-                Ok(0) => {
-                    let _ = child.wait().await;
-                    None
-                }
-                Ok(size) => {
-                    chunk.truncate(size);
-                    Some((
-                        Ok::<Bytes, Infallible>(Bytes::from(chunk)),
-                        (None, stdout, child, camera_guard),
-                    ))
-                }
-                Err(_) => {
+            loop {
+                if camera_guard.recovery_requested() {
                     let _ = child.kill().await;
-                    None
+                    let _ = child.wait().await;
+                    return None;
+                }
+                let mut chunk = vec![0; 32 * 1024];
+                match time::timeout(Duration::from_millis(100), stdout.read(&mut chunk)).await {
+                    Err(_) => continue,
+                    Ok(Ok(0)) => {
+                        let _ = child.wait().await;
+                        camera_guard.record_failure("stream-ended");
+                        return None;
+                    }
+                    Ok(Ok(size)) => {
+                        chunk.truncate(size);
+                        return Some((
+                            Ok::<Bytes, Infallible>(Bytes::from(chunk)),
+                            (None, stdout, child, camera_guard),
+                        ));
+                    }
+                    Ok(Err(_)) => {
+                        let _ = child.kill().await;
+                        camera_guard.record_failure("stream-read-failed");
+                        return None;
+                    }
                 }
             }
         },
@@ -1419,5 +1632,52 @@ impl IntoResponse for HttpError {
             Json(json!({ "ok": false, "error": self.0.to_string() })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{camera_activity, CameraRuntimeState, CAMERA_RUNTIME_STATE};
+
+    #[test]
+    fn camera_runtime_state_tracks_owner_recovery_and_bounded_failures() {
+        let mut state = CameraRuntimeState::default();
+        let generation = state.start("mjpeg");
+        let active = state.health("/".to_string());
+        assert_eq!(active.status, "active");
+        assert_eq!(active.active_owner.as_deref(), Some("mjpeg"));
+
+        let recovery = state.recover();
+        assert!(recovery.recovery_requested);
+        assert_eq!(recovery.previous_owner.as_deref(), Some("mjpeg"));
+        assert_eq!(state.health("/".to_string()).status, "recovering");
+
+        state.finish("mjpeg", generation);
+        assert_eq!(state.health("/".to_string()).status, "idle");
+
+        for _ in 0..20 {
+            state.record_failure("mjpeg", "stream-ended");
+        }
+        assert_eq!(state.health("/".to_string()).recent_failures.len(), 16);
+    }
+
+    #[test]
+    fn camera_activity_serializes_snapshot_and_stream_owners() {
+        *CAMERA_RUNTIME_STATE.lock() = CameraRuntimeState::default();
+        let snapshot = camera_activity("snapshot").unwrap();
+
+        let error = camera_activity("mjpeg").err().unwrap().to_string();
+        assert!(error.contains("camera is busy"));
+        CAMERA_RUNTIME_STATE.lock().recover();
+        assert!(snapshot.recovery_requested());
+
+        drop(snapshot);
+        let mjpeg = camera_activity("mjpeg").unwrap();
+        assert_eq!(
+            CAMERA_RUNTIME_STATE.lock().active_owner.as_deref(),
+            Some("mjpeg")
+        );
+        drop(mjpeg);
+        *CAMERA_RUNTIME_STATE.lock() = CameraRuntimeState::default();
     }
 }

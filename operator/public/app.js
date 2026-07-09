@@ -321,6 +321,14 @@ function maybeStartStream(robot, camera) {
     return;
   }
   if (current.streaming || current.streamReconnectTimer) return;
+  if (robot.videoTransport === "webrtc" && !camera?.webrtc_url) {
+    current.streamStatus = "webrtc unavailable";
+    current.cameraStatus = "fault";
+    updateHud(robot);
+    updateSelectorStatus();
+    refreshSnapshot(robot, { force: true, cacheOnly: true });
+    return;
+  }
   if (robot.videoTransport !== "mjpeg" && camera?.webrtc_url && !current.rtcFallback) {
     startWebRtcStream(robot, camera);
     return;
@@ -379,6 +387,16 @@ async function startWebRtcStream(robot, camera) {
 
   const fail = (message) => {
     closeWebRtc(robot);
+    if (robot.videoTransport === "webrtc") {
+      current.streaming = false;
+      current.streamStatus = "webrtc unavailable";
+      current.cameraStatus = "fault";
+      log(robot, message || "webrtc unavailable");
+      updateHud(robot);
+      updateSelectorStatus();
+      refreshSnapshot(robot, { force: true, cacheOnly: true });
+      return;
+    }
     current.rtcFallback = true;
     current.streaming = false;
     current.streamStatus = "reconnecting";

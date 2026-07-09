@@ -511,6 +511,10 @@ async function handleApi(request, response, url) {
     await proxyJson(response, robot, "/camera/status");
     return;
   }
+  if (request.method === "GET" && action === "camera-health") {
+    await proxyJson(response, robot, "/camera/stream/health");
+    return;
+  }
   if (request.method === "GET" && action === "summary") {
     try {
       const [health, telemetry, camera] = await Promise.all([
@@ -534,6 +538,13 @@ async function handleApi(request, response, url) {
     return;
   }
   if (request.method === "GET" && action === "stream.mjpg") {
+    if (robot.videoTransport === "webrtc") {
+      json(response, 409, {
+        ok: false,
+        error: "mjpeg stream disabled for this robot",
+      });
+      return;
+    }
     await proxyStream(response, robot);
     return;
   }
@@ -556,7 +567,7 @@ async function handleApi(request, response, url) {
     await post("/camera/aim");
   } else if (action === "camera-refresh") {
     resetCameraRelay(robot);
-    json(response, 200, { ok: true });
+    await post("/camera/stream/recover", {});
   } else if (action === "drive") {
     await post("/drive");
   } else if (action === "stop") {
