@@ -1620,7 +1620,7 @@ impl Harness {
                 interval.tick().await;
                 if let Err(err) = driver.request_telemetry() {
                     failures += 1;
-                    if failures == 1 || failures % 20 == 0 {
+                    if failures == 1 || failures.is_multiple_of(20) {
                         warn!(?err, "request Waveshare telemetry failed");
                     }
                 } else {
