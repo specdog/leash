@@ -1,0 +1,20 @@
+{
+  "schema_version": "leash-worker-frame-v1",
+  "worker": "simulated-perception",
+  "sequence": 42,
+  "ts_ms": 42,
+  "payload": {
+    "perception": {
+      "observation": {
+        "ts_ms": 42,
+        "frame_id": "camera",
+        "source": "sim",
+        "width_px": 640,
+        "height_px": 480,
+        "content_type": "image/simulated",
+        "byte_len": 0,
+        "sha256": null
+      }
+    }
+  }
+}

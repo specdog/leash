@@ -19,6 +19,7 @@ if (!Array.isArray(payload.statuses) || payload.statuses.length !== 1) {
 const worker = payload.statuses[0];
 if (worker.name !== "smoke-worker") throw new Error(`unexpected worker name: ${worker.name}`);
 if (worker.state !== "running") throw new Error(`unexpected worker state: ${worker.state}`);
+if (worker.healthy !== true) throw new Error("running worker was not healthy");
 if (!Number.isInteger(worker.pid) || worker.pid <= 0) {
   throw new Error(`worker pid was invalid: ${worker.pid}`);
 }
@@ -29,6 +30,8 @@ if (worker.health_check !== "process") {
   throw new Error(`unexpected health check: ${worker.health_check}`);
 }
 if (worker.required !== true) throw new Error("worker should default to required");
+if (worker.restarts !== 0 || worker.last_error !== null) throw new Error("clean worker reported restart or error state");
+if ("command" in worker || "args" in worker || "env" in worker) throw new Error("worker status leaked process configuration");
 EOF
 
 echo "worker smoke ok"

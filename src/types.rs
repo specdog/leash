@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::{
     accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo,
-    stack::AdapterProfile,
+    stack::AdapterProfile, worker::ExternalWorkerStatus,
 };
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +97,8 @@ pub struct TelemetryFrame {
     pub sensors: SensorSnapshot,
     #[serde(default)]
     pub vision: VisionResult,
+    #[serde(default)]
+    pub workers: Vec<ExternalWorkerStatus>,
     pub resource: Option<ResourceSample>,
     pub source: String,
 }

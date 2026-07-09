@@ -1290,6 +1290,111 @@
       "title": "DroneCommandStatus",
       "type": "object"
     },
+    "ExternalWorkerState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "planned",
+        "starting",
+        "running",
+        "exited",
+        "failed",
+        "stopped"
+      ],
+      "title": "ExternalWorkerState",
+      "type": "string"
+    },
+    "ExternalWorkerStatus": {
+      "$defs": {
+        "ExternalWorkerState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "exited",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "WorkerHealthCheck": {
+          "enum": [
+            "process"
+          ],
+          "type": "string"
+        },
+        "WorkerRestartPolicy": {
+          "enum": [
+            "never",
+            "on-failure"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "health_check": {
+          "$ref": "#/$defs/WorkerHealthCheck"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "restart_policy": {
+          "$ref": "#/$defs/WorkerRestartPolicy"
+        },
+        "restarts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/ExternalWorkerState"
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "healthy",
+        "restarts",
+        "restart_policy",
+        "health_check",
+        "required"
+      ],
+      "title": "ExternalWorkerStatus",
+      "type": "object"
+    },
     "Health": {
       "$defs": {
         "AcceleratorBackend": {
@@ -3893,6 +3998,81 @@
           ],
           "type": "object"
         },
+        "ExternalWorkerState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "exited",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "ExternalWorkerStatus": {
+          "properties": {
+            "exit_code": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "health_check": {
+              "$ref": "#/$defs/WorkerHealthCheck"
+            },
+            "healthy": {
+              "type": "boolean"
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "restart_policy": {
+              "$ref": "#/$defs/WorkerRestartPolicy"
+            },
+            "restarts": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/ExternalWorkerState"
+            }
+          },
+          "required": [
+            "name",
+            "state",
+            "healthy",
+            "restarts",
+            "restart_policy",
+            "health_check",
+            "required"
+          ],
+          "type": "object"
+        },
         "OdometryStatus": {
           "properties": {
             "left_m": {
@@ -4054,6 +4234,19 @@
             "detections"
           ],
           "type": "object"
+        },
+        "WorkerHealthCheck": {
+          "enum": [
+            "process"
+          ],
+          "type": "string"
+        },
+        "WorkerRestartPolicy": {
+          "enum": [
+            "never",
+            "on-failure"
+          ],
+          "type": "string"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4163,6 +4356,13 @@
             "source": "none",
             "status": "unavailable"
           }
+        },
+        "workers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExternalWorkerStatus"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -4543,6 +4743,81 @@
             "y_m",
             "width_m",
             "height_m"
+          ],
+          "type": "object"
+        },
+        "ExternalWorkerState": {
+          "enum": [
+            "planned",
+            "starting",
+            "running",
+            "exited",
+            "failed",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "ExternalWorkerStatus": {
+          "properties": {
+            "exit_code": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "health_check": {
+              "$ref": "#/$defs/WorkerHealthCheck"
+            },
+            "healthy": {
+              "type": "boolean"
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "restart_policy": {
+              "$ref": "#/$defs/WorkerRestartPolicy"
+            },
+            "restarts": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/ExternalWorkerState"
+            }
+          },
+          "required": [
+            "name",
+            "state",
+            "healthy",
+            "restarts",
+            "restart_policy",
+            "health_check",
+            "required"
           ],
           "type": "object"
         },
@@ -5202,6 +5477,13 @@
                 "source": "none",
                 "status": "unavailable"
               }
+            },
+            "workers": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ExternalWorkerStatus"
+              },
+              "type": "array"
             }
           },
           "required": [
@@ -5448,6 +5730,19 @@
             "poses"
           ],
           "type": "object"
+        },
+        "WorkerHealthCheck": {
+          "enum": [
+            "process"
+          ],
+          "type": "string"
+        },
+        "WorkerRestartPolicy": {
+          "enum": [
+            "never",
+            "on-failure"
+          ],
+          "type": "string"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6423,6 +6718,522 @@
       ],
       "title": "VisualizationPath",
       "type": "object"
+    },
+    "WorkerInputFrame": {
+      "$defs": {
+        "ImageObservation": {
+          "properties": {
+            "byte_len": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "content_type": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_px": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_px": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "source",
+            "width_px",
+            "height_px",
+            "content_type",
+            "byte_len"
+          ],
+          "type": "object"
+        },
+        "WorkerInputPayload": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "perception": {
+                  "properties": {
+                    "observation": {
+                      "$ref": "#/$defs/ImageObservation"
+                    }
+                  },
+                  "required": [
+                    "observation"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "perception"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/WorkerInputPayload"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worker": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "worker",
+        "sequence",
+        "ts_ms",
+        "payload"
+      ],
+      "title": "WorkerInputFrame",
+      "type": "object"
+    },
+    "WorkerInputPayload": {
+      "$defs": {
+        "ImageObservation": {
+          "properties": {
+            "byte_len": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "content_type": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_px": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_px": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "source",
+            "width_px",
+            "height_px",
+            "content_type",
+            "byte_len"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "perception": {
+              "properties": {
+                "observation": {
+                  "$ref": "#/$defs/ImageObservation"
+                }
+              },
+              "required": [
+                "observation"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "perception"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "WorkerInputPayload"
+    },
+    "WorkerOutputFrame": {
+      "$defs": {
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        },
+        "VisionResult": {
+          "properties": {
+            "detections": {
+              "items": {
+                "$ref": "#/$defs/DetectionFrame"
+              },
+              "type": "array"
+            },
+            "duration_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "source",
+            "observed_at_ms",
+            "duration_ms",
+            "detections"
+          ],
+          "type": "object"
+        },
+        "WorkerOutputPayload": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "vision": {
+                  "properties": {
+                    "result": {
+                      "$ref": "#/$defs/VisionResult"
+                    }
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "vision"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "error": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/WorkerOutputPayload"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worker": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "worker",
+        "sequence",
+        "ts_ms",
+        "payload"
+      ],
+      "title": "WorkerOutputFrame",
+      "type": "object"
+    },
+    "WorkerOutputPayload": {
+      "$defs": {
+        "DetectionFrame": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "id",
+            "label",
+            "confidence",
+            "x_m",
+            "y_m",
+            "width_m",
+            "height_m"
+          ],
+          "type": "object"
+        },
+        "VisionResult": {
+          "properties": {
+            "detections": {
+              "items": {
+                "$ref": "#/$defs/DetectionFrame"
+              },
+              "type": "array"
+            },
+            "duration_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "source",
+            "observed_at_ms",
+            "duration_ms",
+            "detections"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "vision": {
+              "properties": {
+                "result": {
+                  "$ref": "#/$defs/VisionResult"
+                }
+              },
+              "required": [
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "vision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "WorkerOutputPayload"
     }
   },
   "title": "Leash message schemas"
