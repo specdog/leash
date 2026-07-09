@@ -38,18 +38,20 @@ use crate::{
         default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     },
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
+    navigation::{navigation_path_for_memory, NavigationStore, PatrolZoneSpec, WaypointSpec},
     perception::PerceptionRuntime,
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
         Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, MapMetadata, OccupancyGridFrame, OdometryStatus,
-        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PlannerGoal, PlannerStatus,
-        PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, SafetyStreamState,
-        SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
-        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
-        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        DriveOutcome, Health, ImageObservation, MapMetadata, MotionEvent, MotionEventKind,
+        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
+        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus,
+        ResourceSample, SafetyStreamState, SavedWaypointList, SensorSnapshot, SpatialMemoryStatus,
+        SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
+        VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+        VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -391,6 +393,7 @@ pub struct Harness {
     planner: Arc<Mutex<PlannerStatus>>,
     patrol: Arc<Mutex<PatrolState>>,
     spatial_memory: Arc<SpatialMemoryStore>,
+    navigation: Arc<NavigationStore>,
     perception: PerceptionRuntime,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
@@ -414,7 +417,9 @@ impl Harness {
         let instance_id = HARNESS_INSTANCE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         let memory_path =
             memory_path.unwrap_or_else(|| default_spatial_memory_path(&config, instance_id));
+        let navigation_path = navigation_path_for_memory(&memory_path);
         let spatial_memory = Arc::new(SpatialMemoryStore::open(memory_path)?);
+        let navigation = Arc::new(NavigationStore::open(navigation_path)?);
 
         let driver: Arc<dyn RobotDriver> = match config.profile {
             Profile::Sim => Arc::new(SimDriver),
@@ -461,6 +466,7 @@ impl Harness {
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
             patrol: Arc::new(Mutex::new(PatrolState::default())),
             spatial_memory,
+            navigation,
             perception: PerceptionRuntime::fake(),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
@@ -645,6 +651,118 @@ impl Harness {
         self.spatial_memory.clear()
     }
 
+    pub fn waypoints(&self) -> SavedWaypointList {
+        self.navigation.waypoints()
+    }
+
+    pub fn create_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
+        self.navigation.create_waypoint(spec)
+    }
+
+    pub fn update_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
+        self.navigation.update_waypoint(spec)
+    }
+
+    pub fn delete_waypoint(&self, id: &str) -> Result<SavedWaypointList> {
+        self.navigation.delete_waypoint(id)
+    }
+
+    pub fn patrol_zones(&self) -> PatrolZoneList {
+        self.navigation.zones()
+    }
+
+    pub fn create_patrol_zone(&self, spec: PatrolZoneSpec) -> Result<PatrolZoneList> {
+        self.navigation.create_zone(spec)
+    }
+
+    pub fn update_patrol_zone(&self, spec: PatrolZoneSpec) -> Result<PatrolZoneList> {
+        self.navigation.update_zone(spec)
+    }
+
+    pub fn delete_patrol_zone(&self, id: &str) -> Result<PatrolZoneList> {
+        self.navigation.delete_zone(id)
+    }
+
+    pub fn start_patrol_zone(&self, zone_id: &str, speed_mode: SpeedMode) -> Result<PatrolStatus> {
+        if !matches!(self.config.profile, Profile::Sim | Profile::Replay) {
+            return Err(anyhow!(
+                "patrol zones are only available for sim and replay profiles"
+            ));
+        }
+        if self.command.lock().estop {
+            return Err(anyhow!("estop is latched; reset it before starting patrol"));
+        }
+        let zone = self
+            .navigation
+            .zone(zone_id)
+            .ok_or_else(|| anyhow!("patrol zone '{zone_id}' does not exist"))?;
+        let waypoint_id = zone
+            .waypoint_ids
+            .first()
+            .ok_or_else(|| anyhow!("patrol zone '{zone_id}' has no waypoints"))?;
+        let waypoint = self
+            .navigation
+            .waypoint(waypoint_id)
+            .ok_or_else(|| anyhow!("patrol zone waypoint '{waypoint_id}' does not exist"))?;
+        let goal = PlannerGoal {
+            frame_id: waypoint.frame_id,
+            x_m: waypoint.x_m,
+            y_m: waypoint.y_m,
+            tolerance_m: waypoint.tolerance_m,
+            speed_mode,
+        };
+
+        let planner = if self.config.profile == Profile::Sim {
+            self.set_planner_goal(goal.clone())?
+        } else {
+            let status = PlannerStatus {
+                ok: true,
+                active: true,
+                status: "replay".to_string(),
+                message: "replay patrol zone selected without actuation".to_string(),
+                goal: Some(goal.clone()),
+                path: VisualizationPath {
+                    ts_ms: now_ms(),
+                    frame_id: zone.frame_id.clone(),
+                    poses: zone
+                        .waypoint_ids
+                        .iter()
+                        .filter_map(|id| self.navigation.waypoint(id))
+                        .map(|waypoint| Pose2d {
+                            ts_ms: now_ms(),
+                            frame_id: waypoint.frame_id,
+                            x_m: waypoint.x_m,
+                            y_m: waypoint.y_m,
+                            yaw_rad: 0.0,
+                        })
+                        .collect(),
+                },
+                last_drive: None,
+            };
+            *self.planner.lock() = status.clone();
+            status
+        };
+
+        let mut patrol = self.patrol.lock();
+        patrol.status = patrol_status(PatrolStatusUpdate {
+            ok: planner.ok,
+            active: planner.active,
+            status: &planner.status,
+            message: if self.config.profile == Profile::Replay {
+                "replay patrol zone selected without actuation"
+            } else {
+                "patrol zone goal accepted"
+            },
+            strategy: Some(PatrolStrategy::Coverage),
+            speed_mode,
+            goal: Some(goal),
+            path: planner.path,
+        });
+        patrol.status.zone_id = Some(zone.id);
+        patrol.status.waypoint_index = Some(0);
+        Ok(patrol.status_with_visited())
+    }
+
     pub fn start_patrol(
         &self,
         strategy: PatrolStrategy,
@@ -795,6 +913,11 @@ impl Harness {
                 "GET /agent/messages".to_string(),
                 "POST /agent/messages".to_string(),
                 "POST /pilot/authorize".to_string(),
+                "GET /waypoints".to_string(),
+                "GET /patrol/zones".to_string(),
+                "POST /patrol/zones/:zone_id/start".to_string(),
+                "GET /patrol/status".to_string(),
+                "POST /patrol/stop".to_string(),
                 "POST /drive".to_string(),
                 "POST /motors/stop".to_string(),
                 "POST /estop".to_string(),
@@ -854,6 +977,7 @@ impl Harness {
             sensors,
             vision: VisionResult::default(),
             workers,
+            motion_events: Vec::new(),
             resource,
             source: raw.source,
         };
@@ -875,6 +999,29 @@ impl Harness {
             telemetry.vision = self.perception.observe(observation);
             if telemetry.workers.is_empty() {
                 telemetry.workers = vec![crate::worker::simulated_perception_worker_status()];
+            }
+            if telemetry.motion_events.is_empty()
+                && (telemetry.left_cmd.abs() > f64::EPSILON
+                    || telemetry.right_cmd.abs() > f64::EPSILON)
+            {
+                let source = if self.config.profile == Profile::Replay {
+                    "replay-motion"
+                } else {
+                    "simulated-motion"
+                };
+                telemetry.motion_events.push(MotionEvent {
+                    event_id: format!("{source}-{}", telemetry.ts_ms),
+                    ts_ms: telemetry.ts_ms,
+                    source: source.to_string(),
+                    frame_id: "map".to_string(),
+                    kind: MotionEventKind::Detected,
+                    confidence: 1.0,
+                    x_m: telemetry
+                        .odometry_left
+                        .zip(telemetry.odometry_right)
+                        .map(|(left, right)| (left + right) / 2.0),
+                    y_m: Some(0.0),
+                });
             }
         }
         telemetry
@@ -2120,6 +2267,8 @@ fn patrol_status(update: PatrolStatusUpdate<'_>) -> PatrolStatus {
         goal: update.goal,
         path: update.path,
         visited_cells: Vec::new(),
+        zone_id: None,
+        waypoint_index: None,
     }
 }
 
@@ -2663,6 +2812,91 @@ mod tests {
         assert!(!harness.planner_status().active);
         assert_eq!(harness.telemetry().left_cmd, 0.0);
         assert_eq!(harness.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn saved_patrol_zone_executes_in_sim_and_replay_without_physical_actuation() {
+        for profile in [Profile::Sim, Profile::Replay] {
+            let harness = Harness::new(HarnessConfig {
+                profile,
+                replay_source: (profile == Profile::Replay)
+                    .then(|| std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+                ..HarnessConfig::default()
+            })
+            .unwrap();
+            harness
+                .create_waypoint(WaypointSpec {
+                    id: "entry".to_string(),
+                    name: "Entry".to_string(),
+                    frame_id: "map".to_string(),
+                    x_m: 0.25,
+                    y_m: 0.0,
+                    tolerance_m: 0.1,
+                })
+                .unwrap();
+            harness
+                .create_patrol_zone(PatrolZoneSpec {
+                    id: "front".to_string(),
+                    name: "Front".to_string(),
+                    frame_id: "map".to_string(),
+                    waypoint_ids: vec!["entry".to_string()],
+                    boundary: vec![
+                        crate::types::ZoneBoundaryPoint { x_m: 0.0, y_m: 0.0 },
+                        crate::types::ZoneBoundaryPoint { x_m: 0.5, y_m: 0.0 },
+                        crate::types::ZoneBoundaryPoint { x_m: 0.5, y_m: 0.5 },
+                    ],
+                })
+                .unwrap();
+
+            let status = harness.start_patrol_zone("front", SpeedMode::Low).unwrap();
+            assert!(status.ok);
+            assert!(status.active);
+            assert_eq!(status.zone_id.as_deref(), Some("front"));
+            assert_eq!(status.waypoint_index, Some(0));
+            assert!(!harness.health().physical_actuation_enabled);
+            if profile == Profile::Replay {
+                assert_eq!(status.status, "replay");
+                assert_eq!(harness.telemetry().left_cmd, 0.0);
+            }
+        }
+    }
+
+    #[cfg(feature = "manipulator")]
+    #[tokio::test]
+    async fn saved_patrol_zone_is_rejected_by_a_physical_profile() {
+        let harness = Harness::new(HarnessConfig {
+            profile: Profile::Manipulator,
+            allow_physical_actuation: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+
+        let error = harness
+            .start_patrol_zone("anything", SpeedMode::Low)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("only available for sim and replay"));
+    }
+
+    #[tokio::test]
+    async fn sim_and_replay_telemetry_emit_observe_only_motion_events() {
+        let sim = Harness::new(HarnessConfig::default()).unwrap();
+        sim.drive(None, 0.1, 0.1, Some(SpeedMode::Low)).unwrap();
+        let sim_frame = sim.telemetry();
+        assert_eq!(sim_frame.motion_events.len(), 1);
+        assert_eq!(sim_frame.motion_events[0].source, "simulated-motion");
+
+        let replay = Harness::new(HarnessConfig {
+            profile: Profile::Replay,
+            replay_source: Some(std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        time::sleep(Duration::from_millis(80)).await;
+        let replay_frame = replay.telemetry();
+        assert_eq!(replay_frame.motion_events.len(), 1);
+        assert_eq!(replay_frame.motion_events[0].source, "replay-motion");
+        assert_eq!(replay_frame.left_cmd, 0.2);
     }
 
     #[tokio::test]

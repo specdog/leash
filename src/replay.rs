@@ -368,6 +368,7 @@ mod tests {
             },
             vision: Default::default(),
             workers: Vec::new(),
+            motion_events: Vec::new(),
             resource: None,
             source: "replay".to_string(),
         };

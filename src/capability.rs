@@ -5,8 +5,9 @@ use serde_json::{json, Map, Value};
 use crate::{
     config::PolicyMode,
     memory::{SpatialMemoryQuery, SpatialMemoryTag},
+    navigation::{PatrolZoneSpec, WaypointSpec},
     runtime::Harness,
-    types::{PatrolStrategy, PlannerGoal, SpatialMemoryKind, SpeedMode},
+    types::{PatrolStrategy, PlannerGoal, SpatialMemoryKind, SpeedMode, ZoneBoundaryPoint},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -296,6 +297,58 @@ impl CapabilityRegistry {
             "patrol_status" => {
                 ensure_fields(&args, &[])?;
                 serde_json::to_value(self.harness.patrol_status()).map_err(Into::into)
+            }
+            "waypoint_create" | "waypoint_update" => {
+                ensure_fields(
+                    &args,
+                    &["id", "name", "frame_id", "x_m", "y_m", "tolerance_m"],
+                )?;
+                let spec = waypoint_spec(&args)?;
+                let status = if name == "waypoint_create" {
+                    self.harness.create_waypoint(spec)?
+                } else {
+                    self.harness.update_waypoint(spec)?
+                };
+                serde_json::to_value(status).map_err(Into::into)
+            }
+            "waypoint_list" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.waypoints()).map_err(Into::into)
+            }
+            "waypoint_delete" => {
+                ensure_fields(&args, &["id"])?;
+                let id = required_string(&args, "id")?;
+                serde_json::to_value(self.harness.delete_waypoint(&id)?).map_err(Into::into)
+            }
+            "patrol_zone_create" | "patrol_zone_update" => {
+                ensure_fields(
+                    &args,
+                    &["id", "name", "frame_id", "waypoint_ids", "boundary"],
+                )?;
+                let spec = patrol_zone_spec(&args)?;
+                let status = if name == "patrol_zone_create" {
+                    self.harness.create_patrol_zone(spec)?
+                } else {
+                    self.harness.update_patrol_zone(spec)?
+                };
+                serde_json::to_value(status).map_err(Into::into)
+            }
+            "patrol_zone_list" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.patrol_zones()).map_err(Into::into)
+            }
+            "patrol_zone_delete" => {
+                ensure_fields(&args, &["id"])?;
+                let id = required_string(&args, "id")?;
+                serde_json::to_value(self.harness.delete_patrol_zone(&id)?).map_err(Into::into)
+            }
+            "start_patrol_zone" => {
+                ensure_fields(&args, &["zone_id", "speed_mode"])?;
+                let zone_id = required_string(&args, "zone_id")?;
+                let speed_mode =
+                    optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low);
+                serde_json::to_value(self.harness.start_patrol_zone(&zone_id, speed_mode)?)
+                    .map_err(Into::into)
             }
             "memory_tag_location" => {
                 ensure_fields(
@@ -736,6 +789,72 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             "PatrolStatus",
         ),
         descriptor(
+            "waypoint_create",
+            "Create a persistent saved waypoint",
+            SafetyClass::SimControl,
+            waypoint_schema(),
+            "SavedWaypointList",
+        ),
+        descriptor(
+            "waypoint_list",
+            "List persistent saved waypoints",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "SavedWaypointList",
+        ),
+        descriptor(
+            "waypoint_update",
+            "Update a persistent saved waypoint",
+            SafetyClass::SimControl,
+            waypoint_schema(),
+            "SavedWaypointList",
+        ),
+        descriptor(
+            "waypoint_delete",
+            "Delete a saved waypoint that is not referenced by a patrol zone",
+            SafetyClass::SimControl,
+            object_schema(&[("id", "string", true)]),
+            "SavedWaypointList",
+        ),
+        descriptor(
+            "patrol_zone_create",
+            "Create a persistent patrol zone from saved waypoints and an optional boundary",
+            SafetyClass::SimControl,
+            patrol_zone_schema(),
+            "PatrolZoneList",
+        ),
+        descriptor(
+            "patrol_zone_list",
+            "List persistent patrol zones",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "PatrolZoneList",
+        ),
+        descriptor(
+            "patrol_zone_update",
+            "Update a persistent patrol zone",
+            SafetyClass::SimControl,
+            patrol_zone_schema(),
+            "PatrolZoneList",
+        ),
+        descriptor(
+            "patrol_zone_delete",
+            "Delete a persistent patrol zone",
+            SafetyClass::SimControl,
+            object_schema(&[("id", "string", true)]),
+            "PatrolZoneList",
+        ),
+        descriptor(
+            "start_patrol_zone",
+            "Start a saved patrol zone in sim or replay without enabling physical actuation",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("zone_id", "string", true),
+                ("speed_mode", "SpeedMode", false),
+            ]),
+            "PatrolStatus",
+        ),
+        descriptor(
             "memory_tag_location",
             "Tag or update a named map-frame location or observed object in the local spatial memory store",
             SafetyClass::SimControl,
@@ -938,6 +1057,27 @@ fn object_schema(fields: &[(&str, &str, bool)]) -> Value {
     })
 }
 
+fn waypoint_schema() -> Value {
+    object_schema(&[
+        ("id", "string", true),
+        ("name", "string", true),
+        ("frame_id", "string", false),
+        ("x_m", "number", true),
+        ("y_m", "number", true),
+        ("tolerance_m", "number", false),
+    ])
+}
+
+fn patrol_zone_schema() -> Value {
+    object_schema(&[
+        ("id", "string", true),
+        ("name", "string", true),
+        ("frame_id", "string", false),
+        ("waypoint_ids", "array", true),
+        ("boundary", "array", false),
+    ])
+}
+
 fn canonical_name(name: &str) -> &str {
     match name {
         "motors.stop" | "motors/stop" => "stop",
@@ -949,6 +1089,15 @@ fn canonical_name(name: &str) -> &str {
         "patrol.start" | "patrol/start" | "patrol_start" => "start_patrol",
         "patrol.stop" | "patrol/stop" | "patrol_stop" => "stop_patrol",
         "patrol.status" | "patrol/status" => "patrol_status",
+        "waypoint.create" | "waypoint/create" => "waypoint_create",
+        "waypoint.list" | "waypoint/list" => "waypoint_list",
+        "waypoint.update" | "waypoint/update" => "waypoint_update",
+        "waypoint.delete" | "waypoint/delete" => "waypoint_delete",
+        "patrol.zone.create" | "patrol/zone/create" => "patrol_zone_create",
+        "patrol.zone.list" | "patrol/zone/list" => "patrol_zone_list",
+        "patrol.zone.update" | "patrol/zone/update" => "patrol_zone_update",
+        "patrol.zone.delete" | "patrol/zone/delete" => "patrol_zone_delete",
+        "patrol.zone.start" | "patrol/zone/start" => "start_patrol_zone",
         "memory.tag"
         | "memory/tag"
         | "memory.tag_location"
@@ -1074,6 +1223,66 @@ fn optional_f64(args: &Map<String, Value>, key: &str) -> Result<Option<f64>> {
             .ok_or_else(|| anyhow!("{key} must be a finite number")),
         Some(_) => bail!("{key} must be a number"),
     }
+}
+
+fn waypoint_spec(args: &Map<String, Value>) -> Result<WaypointSpec> {
+    Ok(WaypointSpec {
+        id: required_string(args, "id")?,
+        name: required_string(args, "name")?,
+        frame_id: optional_string(args, "frame_id")?.unwrap_or_else(|| "map".to_string()),
+        x_m: required_f64(args, "x_m")?,
+        y_m: required_f64(args, "y_m")?,
+        tolerance_m: optional_f64(args, "tolerance_m")?.unwrap_or(0.1),
+    })
+}
+
+fn patrol_zone_spec(args: &Map<String, Value>) -> Result<PatrolZoneSpec> {
+    Ok(PatrolZoneSpec {
+        id: required_string(args, "id")?,
+        name: required_string(args, "name")?,
+        frame_id: optional_string(args, "frame_id")?.unwrap_or_else(|| "map".to_string()),
+        waypoint_ids: required_string_array(args, "waypoint_ids")?,
+        boundary: optional_boundary(args, "boundary")?,
+    })
+}
+
+fn required_string_array(args: &Map<String, Value>, key: &str) -> Result<Vec<String>> {
+    let values = args
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("{key} must be an array of strings"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| anyhow!("{key} must contain only strings"))
+        })
+        .collect()
+}
+
+fn optional_boundary(args: &Map<String, Value>, key: &str) -> Result<Vec<ZoneBoundaryPoint>> {
+    let Some(value) = args.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow!("{key} must be an array of coordinate objects"))?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let object = value
+                .as_object()
+                .ok_or_else(|| anyhow!("{key}[{index}] must be an object"))?;
+            ensure_fields(object, &["x_m", "y_m"])?;
+            Ok(ZoneBoundaryPoint {
+                x_m: required_f64(object, "x_m")?,
+                y_m: required_f64(object, "y_m")?,
+            })
+        })
+        .collect()
 }
 
 fn required_speed_mode(args: &Map<String, Value>, key: &str) -> Result<SpeedMode> {
@@ -1339,6 +1548,60 @@ mod tests {
         assert_eq!(stopped["active"], false);
         assert_eq!(stopped["status"], "stopped");
         assert_eq!(harness.telemetry().left_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn waypoint_and_zone_capabilities_execute_in_sim_with_estop_priority() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let registry = CapabilityRegistry::new(harness.clone());
+
+        let waypoints = registry
+            .invoke_value(
+                "waypoint.create",
+                json!({
+                    "id": "entry",
+                    "name": "Entry",
+                    "x_m": 0.25,
+                    "y_m": 0.0
+                }),
+            )
+            .unwrap();
+        assert_eq!(waypoints["count"], 1);
+
+        let zones = registry
+            .invoke_value(
+                "patrol.zone.create",
+                json!({
+                    "id": "front",
+                    "name": "Front",
+                    "waypoint_ids": ["entry"],
+                    "boundary": [
+                        {"x_m": 0.0, "y_m": 0.0},
+                        {"x_m": 0.5, "y_m": 0.0},
+                        {"x_m": 0.5, "y_m": 0.5}
+                    ]
+                }),
+            )
+            .unwrap();
+        assert_eq!(zones["zones"][0]["id"], "front");
+
+        let started = registry
+            .invoke_value(
+                "patrol.zone.start",
+                json!({"zone_id": "front", "speed_mode": "low"}),
+            )
+            .unwrap();
+        assert_eq!(started["active"], true);
+        assert_eq!(started["zone_id"], "front");
+        assert_eq!(started["waypoint_index"], 0);
+
+        registry.invoke_value("estop", json!({})).unwrap();
+        assert!(!harness.patrol_status().active);
+        let error = registry
+            .invoke_value("start_patrol_zone", json!({"zone_id": "front"}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("estop is latched"));
     }
 
     #[tokio::test]

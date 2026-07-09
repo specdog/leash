@@ -2881,6 +2881,76 @@
       "title": "ModuleState",
       "type": "string"
     },
+    "MotionEvent": {
+      "$defs": {
+        "MotionEventKind": {
+          "enum": [
+            "detected",
+            "updated",
+            "cleared"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/MotionEventKind"
+        },
+        "source": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x_m": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "y_m": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "event_id",
+        "ts_ms",
+        "source",
+        "frame_id",
+        "kind",
+        "confidence"
+      ],
+      "title": "MotionEvent",
+      "type": "object"
+    },
+    "MotionEventKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "detected",
+        "updated",
+        "cleared"
+      ],
+      "title": "MotionEventKind",
+      "type": "string"
+    },
     "NetworkStreamFrame": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -3273,6 +3343,22 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "waypoint_index": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "zone_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -3296,6 +3382,166 @@
       ],
       "title": "PatrolStrategy",
       "type": "string"
+    },
+    "PatrolZone": {
+      "$defs": {
+        "ZoneBoundaryPoint": {
+          "properties": {
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x_m",
+            "y_m"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "boundary": {
+          "items": {
+            "$ref": "#/$defs/ZoneBoundaryPoint"
+          },
+          "type": "array"
+        },
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "waypoint_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "frame_id",
+        "waypoint_ids",
+        "boundary",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "PatrolZone",
+      "type": "object"
+    },
+    "PatrolZoneList": {
+      "$defs": {
+        "PatrolZone": {
+          "properties": {
+            "boundary": {
+              "items": {
+                "$ref": "#/$defs/ZoneBoundaryPoint"
+              },
+              "type": "array"
+            },
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "waypoint_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "frame_id",
+            "waypoint_ids",
+            "boundary",
+            "created_at_ms",
+            "updated_at_ms"
+          ],
+          "type": "object"
+        },
+        "ZoneBoundaryPoint": {
+          "properties": {
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x_m",
+            "y_m"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "store_path": {
+          "type": "string"
+        },
+        "zones": {
+          "items": {
+            "$ref": "#/$defs/PatrolZone"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "store_path",
+        "count",
+        "zones"
+      ],
+      "title": "PatrolZoneList",
+      "type": "object"
     },
     "PlannerGoal": {
       "$defs": {
@@ -3738,6 +3984,132 @@
         "physical_actuation_enabled"
       ],
       "title": "SafetyStreamState",
+      "type": "object"
+    },
+    "SavedWaypoint": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tolerance_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "frame_id",
+        "x_m",
+        "y_m",
+        "tolerance_m",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "SavedWaypoint",
+      "type": "object"
+    },
+    "SavedWaypointList": {
+      "$defs": {
+        "SavedWaypoint": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "created_at_ms",
+            "updated_at_ms"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "store_path": {
+          "type": "string"
+        },
+        "waypoints": {
+          "items": {
+            "$ref": "#/$defs/SavedWaypoint"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "store_path",
+        "count",
+        "waypoints"
+      ],
+      "title": "SavedWaypointList",
       "type": "object"
     },
     "SensorSnapshot": {
@@ -4319,6 +4691,62 @@
           ],
           "type": "object"
         },
+        "MotionEvent": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/MotionEventKind"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event_id",
+            "ts_ms",
+            "source",
+            "frame_id",
+            "kind",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        "MotionEventKind": {
+          "enum": [
+            "detected",
+            "updated",
+            "cleared"
+          ],
+          "type": "string"
+        },
         "OdometryStatus": {
           "properties": {
             "left_m": {
@@ -4526,6 +4954,13 @@
         "max_speed": {
           "format": "double",
           "type": "number"
+        },
+        "motion_events": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MotionEvent"
+          },
+          "type": "array"
         },
         "odometry_left": {
           "format": "double",
@@ -5274,6 +5709,62 @@
           ],
           "type": "string"
         },
+        "MotionEvent": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/MotionEventKind"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event_id",
+            "ts_ms",
+            "source",
+            "frame_id",
+            "kind",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        "MotionEventKind": {
+          "enum": [
+            "detected",
+            "updated",
+            "cleared"
+          ],
+          "type": "string"
+        },
         "OccupancyGridFrame": {
           "properties": {
             "cells": {
@@ -5691,6 +6182,13 @@
             "max_speed": {
               "format": "double",
               "type": "number"
+            },
+            "motion_events": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/MotionEvent"
+              },
+              "type": "array"
             },
             "odometry_left": {
               "format": "double",
@@ -7081,6 +7579,26 @@
                 "perception"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "motion": {
+                  "properties": {
+                    "observation": {
+                      "$ref": "#/$defs/ImageObservation"
+                    }
+                  },
+                  "required": [
+                    "observation"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "motion"
+              ],
+              "type": "object"
             }
           ]
         }
@@ -7190,6 +7708,26 @@
             "perception"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "motion": {
+              "properties": {
+                "observation": {
+                  "$ref": "#/$defs/ImageObservation"
+                }
+              },
+              "required": [
+                "observation"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "motion"
+          ],
+          "type": "object"
         }
       ],
       "title": "WorkerInputPayload"
@@ -7245,6 +7783,62 @@
             "height_m"
           ],
           "type": "object"
+        },
+        "MotionEvent": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/MotionEventKind"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event_id",
+            "ts_ms",
+            "source",
+            "frame_id",
+            "kind",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        "MotionEventKind": {
+          "enum": [
+            "detected",
+            "updated",
+            "cleared"
+          ],
+          "type": "string"
         },
         "VisionResult": {
           "properties": {
@@ -7309,6 +7903,29 @@
               },
               "required": [
                 "vision"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "motion-events": {
+                  "properties": {
+                    "events": {
+                      "items": {
+                        "$ref": "#/$defs/MotionEvent"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "motion-events"
               ],
               "type": "object"
             },
@@ -7427,6 +8044,62 @@
           ],
           "type": "object"
         },
+        "MotionEvent": {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "event_id": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/MotionEventKind"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "y_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event_id",
+            "ts_ms",
+            "source",
+            "frame_id",
+            "kind",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        "MotionEventKind": {
+          "enum": [
+            "detected",
+            "updated",
+            "cleared"
+          ],
+          "type": "string"
+        },
         "VisionResult": {
           "properties": {
             "detections": {
@@ -7497,6 +8170,29 @@
         {
           "additionalProperties": false,
           "properties": {
+            "motion-events": {
+              "properties": {
+                "events": {
+                  "items": {
+                    "$ref": "#/$defs/MotionEvent"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "events"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "motion-events"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "error": {
               "properties": {
                 "code": {
@@ -7524,6 +8220,25 @@
         }
       ],
       "title": "WorkerOutputPayload"
+    },
+    "ZoneBoundaryPoint": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x_m",
+        "y_m"
+      ],
+      "title": "ZoneBoundaryPoint",
+      "type": "object"
     }
   },
   "title": "Leash message schemas"

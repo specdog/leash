@@ -14,7 +14,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket},
-        Form, State, WebSocketUpgrade,
+        Form, Path as AxumPath, State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
     response::{
@@ -201,6 +201,11 @@ struct AgentMessageReq {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct PatrolZoneStartReq {
+    speed_mode: Option<SpeedMode>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct DashboardActionReq {
     token: Option<String>,
     ttl_secs: Option<u64>,
@@ -255,6 +260,11 @@ pub fn router(harness: Harness) -> Router {
         .route("/capture", post(capture))
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
+        .route("/waypoints", get(waypoints))
+        .route("/patrol/zones", get(patrol_zones))
+        .route("/patrol/zones/:zone_id/start", post(patrol_zone_start))
+        .route("/patrol/status", get(patrol_status))
+        .route("/patrol/stop", post(patrol_stop))
         .route("/drive", post(drive))
         .route("/motors/drive", post(drive))
         .route("/motors/stop", post(motors_stop))
@@ -295,6 +305,35 @@ async fn health(State(harness): State<Harness>) -> Json<crate::types::Health> {
 
 async fn capabilities(State(harness): State<Harness>) -> Json<crate::types::Capabilities> {
     Json(harness.capabilities())
+}
+
+async fn waypoints(State(harness): State<Harness>) -> Json<crate::types::SavedWaypointList> {
+    Json(harness.waypoints())
+}
+
+async fn patrol_zones(State(harness): State<Harness>) -> Json<crate::types::PatrolZoneList> {
+    Json(harness.patrol_zones())
+}
+
+async fn patrol_status(State(harness): State<Harness>) -> Json<crate::types::PatrolStatus> {
+    Json(harness.patrol_status())
+}
+
+async fn patrol_zone_start(
+    AxumPath(zone_id): AxumPath<String>,
+    State(harness): State<Harness>,
+    Json(req): Json<PatrolZoneStartReq>,
+) -> Result<Json<crate::types::PatrolStatus>, HttpError> {
+    Ok(Json(harness.start_patrol_zone(
+        &zone_id,
+        req.speed_mode.unwrap_or(SpeedMode::Low),
+    )?))
+}
+
+async fn patrol_stop(
+    State(harness): State<Harness>,
+) -> Result<Json<crate::types::PatrolStatus>, HttpError> {
+    Ok(Json(harness.stop_patrol()?))
 }
 
 async fn modules(State(harness): State<Harness>) -> Json<crate::module::ModuleGraph> {

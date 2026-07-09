@@ -22,11 +22,12 @@ use leash_harness::{
         CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
         CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
         ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapMetadata,
-        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
-        PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample,
-        RunLogEntry, SafetyStreamState, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
+        MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus,
+        PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal, PlannerStatus,
+        PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry, SafetyStreamState,
+        SavedWaypoint, SavedWaypointList, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
         SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
-        VisionResult, VisualizationFrame, VisualizationPath,
+        VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint,
     },
     worker::{
         ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
@@ -138,6 +139,13 @@ fn schema_document() -> Result<Value> {
     insert::<PlannerStatus>(&mut schemas, "PlannerStatus")?;
     insert::<PatrolStrategy>(&mut schemas, "PatrolStrategy")?;
     insert::<PatrolStatus>(&mut schemas, "PatrolStatus")?;
+    insert::<SavedWaypoint>(&mut schemas, "SavedWaypoint")?;
+    insert::<SavedWaypointList>(&mut schemas, "SavedWaypointList")?;
+    insert::<ZoneBoundaryPoint>(&mut schemas, "ZoneBoundaryPoint")?;
+    insert::<PatrolZone>(&mut schemas, "PatrolZone")?;
+    insert::<PatrolZoneList>(&mut schemas, "PatrolZoneList")?;
+    insert::<MotionEventKind>(&mut schemas, "MotionEventKind")?;
+    insert::<MotionEvent>(&mut schemas, "MotionEvent")?;
     insert::<SpatialMemoryKind>(&mut schemas, "SpatialMemoryKind")?;
     insert::<SpatialMemoryEntry>(&mut schemas, "SpatialMemoryEntry")?;
     insert::<SpatialMemoryStatus>(&mut schemas, "SpatialMemoryStatus")?;

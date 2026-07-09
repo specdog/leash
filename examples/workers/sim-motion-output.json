@@ -1,0 +1,22 @@
+{
+  "schema_version": "leash-worker-frame-v1",
+  "worker": "simulated-motion",
+  "sequence": 43,
+  "ts_ms": 1250,
+  "payload": {
+    "motion-events": {
+      "events": [
+        {
+          "event_id": "sim-motion-43",
+          "ts_ms": 1250,
+          "source": "simulated-motion",
+          "frame_id": "map",
+          "kind": "detected",
+          "confidence": 0.92,
+          "x_m": 0.25,
+          "y_m": 0.0
+        }
+      ]
+    }
+  }
+}
