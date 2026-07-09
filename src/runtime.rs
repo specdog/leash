@@ -1773,6 +1773,7 @@ fn waveshare_odometry_m(frame: &Value, centimeters_key: &str, meter_keys: &[&str
         .map(|centimeters| centimeters / 100.0)
 }
 
+#[cfg(feature = "waveshare-ugv")]
 fn json_number(value: &Value) -> Option<f64> {
     match value {
         Value::Number(number) => number.as_f64(),
