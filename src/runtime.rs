@@ -817,9 +817,10 @@ impl Harness {
             .ok_or_else(|| anyhow!("patrol zone '{zone_id}' does not exist"))?;
         let active_map = self.active_map_scope();
         for waypoint_id in &zone.waypoint_ids {
-            let waypoint = self.navigation.waypoint(waypoint_id).ok_or_else(|| {
-                anyhow!("patrol zone waypoint '{waypoint_id}' does not exist")
-            })?;
+            let waypoint = self
+                .navigation
+                .waypoint(waypoint_id)
+                .ok_or_else(|| anyhow!("patrol zone waypoint '{waypoint_id}' does not exist"))?;
             if waypoint.map.is_some() && waypoint.map.as_ref() != active_map.as_ref() {
                 return Err(anyhow!(
                     "patrol zone waypoint map identity does not match active localization"
