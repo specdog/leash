@@ -82,6 +82,7 @@ flowchart LR
   leash --> generic["generic sensor contracts"]
   generic --> ros["implementation-only\nROS 2 Humble adapter"]
   ros --> slam["robot_localization\nand SLAM Toolbox"]
+  calibration["versioned Pinkie\ncalibration evidence"] --> ros
   slam --> provider["generic localization\nprovider update"]
   provider --> leash
   leash --> tools["telemetry, replay, MCP,\nvisualization, memory"]
@@ -90,7 +91,9 @@ flowchart LR
 
 Start with the implementation guide for private configuration, pinned container
 builds, stationary sensor proof, map save/load, rollback, and supervised field
-gates. Generic extension authors should instead use
+gates. Pinkie's measured transforms and loop-closure acceptance live in the
+[calibration guide](implementations/waveshare-ugv/calibration/README.md).
+Generic extension authors should instead use
 [the adapter guide](docs/ADAPTERS.md) and
 [localization-provider contract](docs/LOCALIZATION_PROVIDERS.md).
 

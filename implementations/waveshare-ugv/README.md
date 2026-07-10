@@ -130,6 +130,8 @@ on the already-owned base serial stream.
 | `LEASH_UGV_IMU_ACCEL_LSB_PER_G` | `8192` | Base-controller acceleration scale. |
 | `LEASH_UGV_IMU_GYRO_DPS_PER_LSB` | `0.0164` | Base-controller gyro scale before conversion to rad/s. |
 | `LEASH_UGV_IMU_AXIS_MAP` | `x,y,z` | Signed raw-to-body axes, e.g. `y,-x,z`. |
+| `LEASH_UGV_IMU_ACCEL_BIAS_MPS2` | `0,0,0` | Measured body-frame acceleration bias subtracted after scale/axis mapping. |
+| `LEASH_UGV_IMU_GYRO_BIAS_RADPS` | `0,0,0` | Measured body-frame angular-velocity bias subtracted after scale/axis mapping. |
 | `LEASH_UGV_IMU_STALE_MS` | `500` | Maximum IMU age before health becomes stale. |
 
 The default body convention is +X forward, +Y left, +Z up. Acceleration is
@@ -138,6 +140,11 @@ host receipt time because the base JSON frame does not provide an epoch clock;
 orientation remains absent rather than publishing an unverified quaternion.
 Change scales or signed axes only from measured calibration proof for the
 mounted unit.
+
+The versioned Pinkie profile, measurement sequence, non-actuating capture and
+offline acceptance tools are in [`calibration/`](calibration/README.md). The
+checked-in profile stays explicitly unmeasured until the issue #166 field gates
+and evidence digests have passed.
 
 The LD06 parser accepts the vendor 47-byte `0x54 0x2c` packet, checks CRC-8,
 interpolates its 12 angles from packet start/end, applies the configured body
