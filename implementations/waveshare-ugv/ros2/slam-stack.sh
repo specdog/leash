@@ -54,6 +54,13 @@ stop_leash() {
   curl -fsS -X POST "$leash_url/stop" >/dev/null
 }
 
+require_time_sync() {
+  [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]] || {
+    echo "target clock is not synchronized; correct time before starting ROS" >&2
+    exit 1
+  }
+}
+
 valid_map_name() {
   [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]
 }
@@ -66,6 +73,7 @@ case "$command" in
     ;;
   start)
     stop_leash
+    require_time_sync
     compose up -d --build
     stop_leash
     ;;
@@ -76,6 +84,7 @@ case "$command" in
     ;;
   restart)
     stop_leash
+    require_time_sync
     compose restart slam
     stop_leash
     ;;
