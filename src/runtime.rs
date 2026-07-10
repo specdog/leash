@@ -38,6 +38,11 @@ use crate::{
     adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
+    localization::{
+        ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationProvider,
+        LocalizationProviderStatus, LocalizationProviderUpdate,
+        DEFAULT_LOCALIZATION_STALE_AFTER_MS,
+    },
     memory::{
         default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     },
@@ -431,6 +436,9 @@ pub struct Harness {
     perception: PerceptionRuntime,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
+    localization_provider: InProcessLocalizationProvider,
+    localization_input: ExternalLocalizationProvider,
+    localization_seq: Arc<AtomicU64>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
 }
@@ -476,6 +484,31 @@ impl Harness {
             .as_ref()
             .map(|path| ReplayPlayback::from_path(path, config.replay_speed))
             .transpose()?;
+        let localization_provider = InProcessLocalizationProvider::new(
+            format!("{}-localization", config.profile.as_str()),
+            DEFAULT_LOCALIZATION_STALE_AFTER_MS,
+        );
+        let localization_sequence = if config.profile == Profile::Sim {
+            let ts_ms = now_ms();
+            let localization = simulated_localization_frame(ts_ms, &raw);
+            let (map, occupancy_grid, costmap) = simulated_map_frames(ts_ms);
+            localization_provider.apply_at(
+                LocalizationProviderUpdate {
+                    version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    sequence: 1,
+                    localization,
+                    map,
+                    occupancy_grid,
+                    costmap,
+                },
+                ts_ms,
+            )?;
+            1
+        } else {
+            0
+        };
+        let localization_input =
+            ExternalLocalizationProvider::from_provider(localization_provider.clone(), 64);
 
         let capabilities = default_capability_descriptors()
             .into_iter()
@@ -504,6 +537,9 @@ impl Harness {
             perception: PerceptionRuntime::fake(),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
+            localization_provider,
+            localization_input,
+            localization_seq: Arc::new(AtomicU64::new(localization_sequence)),
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
         };
@@ -518,6 +554,24 @@ impl Harness {
 
     pub fn config(&self) -> &HarnessConfig {
         &self.config
+    }
+
+    pub fn submit_localization_update(&self, update: LocalizationProviderUpdate) -> Result<()> {
+        self.localization_input.submit(update).map_err(Into::into)
+    }
+
+    pub fn disconnect_localization_provider(&self, error: impl Into<String>) -> Result<()> {
+        self.localization_input
+            .disconnect(error)
+            .map_err(Into::into)
+    }
+
+    pub fn fail_localization_provider(&self, error: impl Into<String>) -> Result<()> {
+        self.localization_input.fail(error).map_err(Into::into)
+    }
+
+    pub fn localization_provider_status(&self) -> LocalizationProviderStatus {
+        self.localization_provider.snapshot(now_ms()).status
     }
 
     pub fn subscribe_telemetry(&self) -> broadcast::Receiver<TelemetryFrame> {
@@ -670,7 +724,8 @@ impl Harness {
     }
 
     pub fn tag_spatial_memory(&self, tag: SpatialMemoryTag) -> Result<SpatialMemoryStatus> {
-        self.spatial_memory.tag(tag)
+        let map = self.map_scope_for_frame(&tag.frame_id);
+        self.spatial_memory.tag_scoped(tag, map)
     }
 
     pub fn spatial_memory(&self) -> SpatialMemoryStatus {
@@ -690,15 +745,29 @@ impl Harness {
     }
 
     pub fn create_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
-        self.navigation.create_waypoint(spec)
+        let map = self.map_scope_for_frame(&spec.frame_id);
+        self.navigation.create_waypoint_scoped(spec, map)
     }
 
     pub fn update_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
-        self.navigation.update_waypoint(spec)
+        let map = self.map_scope_for_frame(&spec.frame_id);
+        self.navigation.update_waypoint_scoped(spec, map)
     }
 
     pub fn delete_waypoint(&self, id: &str) -> Result<SavedWaypointList> {
         self.navigation.delete_waypoint(id)
+    }
+
+    fn map_scope_for_frame(&self, frame_id: &str) -> Option<MapIdentity> {
+        let map = self
+            .localization_provider
+            .snapshot(now_ms())
+            .localization
+            .map;
+        (map.frame_id == frame_id
+            && !map.map_id.trim().is_empty()
+            && !map.map_revision.trim().is_empty())
+        .then_some(map)
     }
 
     pub fn patrol_zones(&self) -> PatrolZoneList {
@@ -977,27 +1046,39 @@ impl Harness {
 
     pub fn telemetry(&self) -> TelemetryFrame {
         if let Some(frame) = self.replay.as_ref().and_then(ReplayPlayback::telemetry_now) {
-            return self.telemetry_with_vision(replay_telemetry_source(frame.telemetry));
+            let now = now_ms();
+            let mut telemetry = replay_telemetry_source(frame.telemetry);
+            let sequence = self.localization_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = self.localization_provider.apply_at(
+                LocalizationProviderUpdate::from_telemetry(sequence, &telemetry),
+                now,
+            );
+            let snapshot = self.localization_provider.snapshot(now);
+            apply_localization_snapshot(&mut telemetry, snapshot);
+            return self.telemetry_with_vision(telemetry);
         }
 
         let now = now_ms();
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
-        let localization = if self.config.profile == Profile::Sim {
-            simulated_localization_frame(now, &raw)
-        } else {
-            LocalizationFrame::default()
-        };
-        let (map, occupancy_grid, costmap) = if self.config.profile == Profile::Sim {
-            simulated_map_frames(now)
-        } else {
-            (
-                MapMetadata::default(),
-                OccupancyGridFrame::default(),
-                CostmapFrame::default(),
-            )
-        };
+        if self.config.profile == Profile::Sim {
+            let localization = simulated_localization_frame(now, &raw);
+            let (map, occupancy_grid, costmap) = simulated_map_frames(now);
+            let sequence = self.localization_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = self.localization_provider.apply_at(
+                LocalizationProviderUpdate {
+                    version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    sequence,
+                    localization,
+                    map,
+                    occupancy_grid,
+                    costmap,
+                },
+                now,
+            );
+        }
+        let localization_snapshot = self.localization_provider.snapshot(now);
         let resource = self.config.resource_sampling.then(current_resource_sample);
         let workers = if self.config.profile == Profile::Sim {
             vec![crate::worker::simulated_perception_worker_status()]
@@ -1023,10 +1104,11 @@ impl Harness {
             speed_mode: command.speed_mode,
             max_speed: command.speed_mode.cap(),
             sensors,
-            localization,
-            map,
-            occupancy_grid,
-            costmap,
+            localization: localization_snapshot.localization,
+            localization_provider: localization_snapshot.status,
+            map: localization_snapshot.map,
+            occupancy_grid: localization_snapshot.occupancy_grid,
+            costmap: localization_snapshot.costmap,
             vision: VisionResult::default(),
             workers,
             motion_events: Vec::new(),
@@ -1189,6 +1271,7 @@ impl Harness {
             range_scan: telemetry.sensors.range_scan.clone(),
             imu: telemetry.sensors.imu.clone(),
             localization: telemetry.localization.clone(),
+            localization_provider: telemetry.localization_provider.clone(),
         }
     }
 
@@ -2188,6 +2271,17 @@ fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, Costma
     (map, occupancy_grid, costmap)
 }
 
+fn apply_localization_snapshot(
+    telemetry: &mut TelemetryFrame,
+    snapshot: crate::localization::LocalizationProviderSnapshot,
+) {
+    telemetry.localization = snapshot.localization;
+    telemetry.localization_provider = snapshot.status;
+    telemetry.map = snapshot.map;
+    telemetry.occupancy_grid = snapshot.occupancy_grid;
+    telemetry.costmap = snapshot.costmap;
+}
+
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
     value.max(min).min(max)
 }
@@ -2799,6 +2893,51 @@ mod tests {
         assert!(status.path.poses.is_empty());
         assert_eq!(harness.telemetry().left_cmd, 0.0);
         assert_eq!(harness.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn provider_map_scopes_memory_and_waypoints_without_issuing_motion() {
+        let memory_path = std::env::temp_dir().join(format!(
+            "leash-provider-scope-{}-{}.json",
+            std::process::id(),
+            now_ms()
+        ));
+        let navigation_path = navigation_path_for_memory(&memory_path);
+        let harness =
+            Harness::new_with_memory_path(HarnessConfig::default(), memory_path.clone()).unwrap();
+
+        let memory = harness
+            .tag_spatial_memory(SpatialMemoryTag {
+                name: "dock".to_string(),
+                kind: crate::types::SpatialMemoryKind::Location,
+                frame_id: "map".to_string(),
+                x_m: 0.25,
+                y_m: 0.0,
+                confidence: 0.9,
+            })
+            .unwrap();
+        let waypoints = harness
+            .create_waypoint(WaypointSpec {
+                id: "dock".to_string(),
+                name: "Dock".to_string(),
+                frame_id: "map".to_string(),
+                x_m: 0.25,
+                y_m: 0.0,
+                tolerance_m: 0.1,
+            })
+            .unwrap();
+
+        let memory_map = memory.entries[0].map.as_ref().unwrap();
+        let waypoint_map = waypoints.waypoints[0].map.as_ref().unwrap();
+        assert_eq!(memory_map, waypoint_map);
+        assert_eq!(memory_map.map_id, "sim-local");
+        assert_eq!(memory_map.map_revision, "sim-grid-v1");
+        let telemetry = harness.telemetry();
+        assert_eq!(telemetry.left_cmd, 0.0);
+        assert_eq!(telemetry.right_cmd, 0.0);
+
+        let _ = std::fs::remove_file(memory_path);
+        let _ = std::fs::remove_file(navigation_path);
     }
 
     #[tokio::test]

@@ -109,6 +109,9 @@ async function main() {
   if (telemetry.localization?.version !== "leash-localization-v1" || telemetry.localization?.health?.status !== "tracking") {
     fail(`missing localization in observe payload: ${JSON.stringify(telemetry.localization)}`);
   }
+  if (telemetry.localization_provider?.state !== "tracking" || telemetry.localization_provider?.generation !== 1) {
+    fail(`missing localization provider state: ${JSON.stringify(telemetry.localization_provider)}`);
+  }
   if (telemetry.map?.map_id !== telemetry.localization.map.map_id) {
     fail(`map identity did not match localization: ${JSON.stringify(telemetry.map)}`);
   }

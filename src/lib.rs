@@ -12,6 +12,7 @@ pub mod config;
 pub mod daemon;
 #[cfg(feature = "http")]
 pub mod http;
+pub mod localization;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 #[cfg(feature = "mcp")]
@@ -43,6 +44,13 @@ pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
+pub use localization::{
+    ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationApplyOutcome,
+    LocalizationProvider, LocalizationProviderError, LocalizationProviderSnapshot,
+    LocalizationProviderState, LocalizationProviderStatus, LocalizationProviderUpdate,
+    ReplayLocalizationProvider, SimulationLocalizationProvider,
+    DEFAULT_LOCALIZATION_STALE_AFTER_MS, LOCALIZATION_PROVIDER_UPDATE_VERSION,
+};
 pub use memory::{
     default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,

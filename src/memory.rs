@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::HarnessConfig,
     daemon,
-    types::{SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus},
+    types::{MapIdentity, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus},
 };
 
 pub const SPATIAL_MEMORY_FORMAT: &str = "leash-spatial-memory-v1";
@@ -71,7 +71,16 @@ impl SpatialMemoryStore {
     }
 
     pub fn tag(&self, tag: SpatialMemoryTag) -> Result<SpatialMemoryStatus> {
+        self.tag_scoped(tag, None)
+    }
+
+    pub fn tag_scoped(
+        &self,
+        tag: SpatialMemoryTag,
+        map: Option<MapIdentity>,
+    ) -> Result<SpatialMemoryStatus> {
         let tag = validate_tag(tag)?;
+        let map = validate_map_scope(map, &tag.frame_id)?;
         let now = now_ms();
         let mut records = self.records.lock();
         if let Some(existing) = records
@@ -80,6 +89,7 @@ impl SpatialMemoryStore {
         {
             existing.name = tag.name;
             existing.frame_id = tag.frame_id;
+            existing.map = map;
             existing.x_m = tag.x_m;
             existing.y_m = tag.y_m;
             existing.confidence = tag.confidence;
@@ -89,6 +99,7 @@ impl SpatialMemoryStore {
                 name: tag.name,
                 kind: tag.kind,
                 frame_id: tag.frame_id,
+                map,
                 x_m: tag.x_m,
                 y_m: tag.y_m,
                 observed_at_ms: now,
@@ -233,6 +244,8 @@ struct SpatialMemoryRecord {
     name: String,
     kind: SpatialMemoryKind,
     frame_id: String,
+    #[serde(default)]
+    map: Option<MapIdentity>,
     x_m: f64,
     y_m: f64,
     observed_at_ms: u128,
@@ -309,6 +322,7 @@ fn entry_from_record(record: &SpatialMemoryRecord, now: u128) -> SpatialMemoryEn
         name: record.name.clone(),
         kind: record.kind,
         frame_id: record.frame_id.clone(),
+        map: record.map.clone(),
         x_m: record.x_m,
         y_m: record.y_m,
         observed_at_ms: record.observed_at_ms,
@@ -321,6 +335,21 @@ fn entry_from_record(record: &SpatialMemoryRecord, now: u128) -> SpatialMemoryEn
         },
         stale,
     }
+}
+
+fn validate_map_scope(map: Option<MapIdentity>, frame_id: &str) -> Result<Option<MapIdentity>> {
+    if let Some(map) = &map {
+        if map.map_id.trim().is_empty()
+            || map.map_revision.trim().is_empty()
+            || map.frame_id.trim().is_empty()
+        {
+            bail!("map scope requires map_id, map_revision, and frame_id");
+        }
+        if map.frame_id != frame_id {
+            bail!("map scope frame_id does not match memory frame_id");
+        }
+    }
+    Ok(map)
 }
 
 fn safe_path_segment(value: &str) -> String {

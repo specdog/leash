@@ -355,6 +355,14 @@ mod tests {
                 frame.visualization.localization,
                 frame.telemetry.localization
             );
+            assert_eq!(
+                frame.visualization.localization_provider,
+                frame.telemetry.localization_provider
+            );
+            assert_eq!(
+                frame.telemetry.localization_provider.state,
+                crate::localization::LocalizationProviderState::Tracking
+            );
             assert_eq!(frame.visualization.map, frame.telemetry.map);
             assert_eq!(
                 frame.visualization.occupancy_grid,
@@ -431,6 +439,7 @@ mod tests {
                 imu: Default::default(),
             },
             localization: Default::default(),
+            localization_provider: Default::default(),
             map: Default::default(),
             occupancy_grid: Default::default(),
             costmap: Default::default(),

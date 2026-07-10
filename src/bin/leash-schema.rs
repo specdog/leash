@@ -6,6 +6,10 @@ use serde_json::{json, Value};
 
 use leash_harness::{
     capability::{CapabilityDescriptor, InvocationOrigin, SafetyClass},
+    localization::{
+        LocalizationProviderSnapshot, LocalizationProviderState, LocalizationProviderStatus,
+        LocalizationProviderUpdate,
+    },
     mcp::{
         McpCallResponse, McpModuleToolMap, McpProtocolCallResult, McpProtocolTool,
         McpProtocolToolList, McpStatus, McpTextContent, McpToolDescriptor, McpToolList,
@@ -132,6 +136,10 @@ fn schema_document() -> Result<Value> {
     insert::<LocalizationStatus>(&mut schemas, "LocalizationStatus")?;
     insert::<LocalizationHealth>(&mut schemas, "LocalizationHealth")?;
     insert::<LocalizationFrame>(&mut schemas, "LocalizationFrame")?;
+    insert::<LocalizationProviderState>(&mut schemas, "LocalizationProviderState")?;
+    insert::<LocalizationProviderStatus>(&mut schemas, "LocalizationProviderStatus")?;
+    insert::<LocalizationProviderUpdate>(&mut schemas, "LocalizationProviderUpdate")?;
+    insert::<LocalizationProviderSnapshot>(&mut schemas, "LocalizationProviderSnapshot")?;
     insert::<SpeedMode>(&mut schemas, "SpeedMode")?;
     insert::<ResourceSample>(&mut schemas, "ResourceSample")?;
     insert::<RunLogEntry>(&mut schemas, "RunLogEntry")?;
