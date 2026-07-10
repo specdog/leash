@@ -68,17 +68,24 @@ assert.match(html, /class="patrol-zone"/);
 assert.match(html, /class="patrol-start"/);
 assert.match(html, /class="patrol-stop"/);
 assert.match(html, /metric-motion-events/);
+assert.match(html, /metric-localization/);
+assert.match(html, /metric-map/);
+assert.match(html, /metric-pose/);
+assert.match(html, /metric-covariance/);
 assert.match(html, /id="debug-session"[^>]*hidden/);
 assert.match(html, /src="\/session\.js"/);
 assert.match(css, /orientation: landscape/);
 assert.match(css, /body\.single-operator button\.mobile-estop/);
 assert.match(css, /position: fixed/);
+assert.match(css, /min-height: 48px/);
 
 console.log(JSON.stringify({
   ok: true,
   robots: fleet.robots.length,
   validationErrorsProved: errors.length,
   mobileEstop: "fixed in single-bot mobile view",
+  mobileTouchTargets: "48px controls under 760px",
+  localizationMetrics: "state, map, pose, and covariance",
   patrolControls: "configured zone selector and start/stop controls present",
 }));
 EOF

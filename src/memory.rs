@@ -81,6 +81,7 @@ impl SpatialMemoryStore {
     ) -> Result<SpatialMemoryStatus> {
         let tag = validate_tag(tag)?;
         let map = validate_map_scope(map, &tag.frame_id)?;
+        let active_map = map.clone();
         let now = now_ms();
         let mut records = self.records.lock();
         if let Some(existing) = records
@@ -89,7 +90,7 @@ impl SpatialMemoryStore {
         {
             existing.name = tag.name;
             existing.frame_id = tag.frame_id;
-            existing.map = map;
+            existing.map = map.clone();
             existing.x_m = tag.x_m;
             existing.y_m = tag.y_m;
             existing.confidence = tag.confidence;
@@ -114,15 +115,27 @@ impl SpatialMemoryStore {
                 .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
         });
         self.write_records(&records)?;
-        Ok(self.status_from_records(&records, now))
+        Ok(self.status_from_records(&records, now, active_map.as_ref()))
     }
 
     pub fn list(&self) -> SpatialMemoryStatus {
+        self.list_for_map(None)
+    }
+
+    pub fn list_for_map(&self, active_map: Option<&MapIdentity>) -> SpatialMemoryStatus {
         let records = self.records.lock();
-        self.status_from_records(&records, now_ms())
+        self.status_from_records(&records, now_ms(), active_map)
     }
 
     pub fn query(&self, query: SpatialMemoryQuery) -> Result<SpatialMemoryStatus> {
+        self.query_for_map(query, None)
+    }
+
+    pub fn query_for_map(
+        &self,
+        query: SpatialMemoryQuery,
+        active_map: Option<&MapIdentity>,
+    ) -> Result<SpatialMemoryStatus> {
         if let Some(min_confidence) = query.min_confidence {
             validate_confidence(min_confidence, "min_confidence")?;
         }
@@ -136,7 +149,7 @@ impl SpatialMemoryStore {
         let now = now_ms();
         let entries = records
             .iter()
-            .map(|record| entry_from_record(record, now))
+            .map(|record| entry_from_record(record, now, active_map))
             .filter(|entry| query.kind.is_none_or(|kind| kind == entry.kind))
             .filter(|entry| query.include_stale || !entry.stale)
             .filter(|entry| {
@@ -158,7 +171,7 @@ impl SpatialMemoryStore {
         let mut records = self.records.lock();
         records.clear();
         self.write_records(&records)?;
-        Ok(self.status_from_records(&records, now_ms()))
+        Ok(self.status_from_records(&records, now_ms(), None))
     }
 
     #[cfg(test)]
@@ -184,11 +197,12 @@ impl SpatialMemoryStore {
         &self,
         records: &[SpatialMemoryRecord],
         now: u128,
+        active_map: Option<&MapIdentity>,
     ) -> SpatialMemoryStatus {
         self.status_with_entries(
             records
                 .iter()
-                .map(|record| entry_from_record(record, now))
+                .map(|record| entry_from_record(record, now, active_map))
                 .collect(),
         )
     }
@@ -315,9 +329,19 @@ fn validate_confidence(value: f64, key: &str) -> Result<f64> {
     Ok(value)
 }
 
-fn entry_from_record(record: &SpatialMemoryRecord, now: u128) -> SpatialMemoryEntry {
+fn entry_from_record(
+    record: &SpatialMemoryRecord,
+    now: u128,
+    active_map: Option<&MapIdentity>,
+) -> SpatialMemoryEntry {
     let age_ms = now.saturating_sub(record.updated_at_ms);
-    let stale = age_ms >= SPATIAL_MEMORY_STALE_AFTER_MS;
+    let stale_reason = match (&record.map, active_map) {
+        (Some(_), None) => Some("localization-unavailable".to_string()),
+        (Some(saved), Some(active)) if saved != active => Some("map-replaced".to_string()),
+        _ if age_ms >= SPATIAL_MEMORY_STALE_AFTER_MS => Some("age".to_string()),
+        _ => None,
+    };
+    let stale = stale_reason.is_some();
     SpatialMemoryEntry {
         name: record.name.clone(),
         kind: record.kind,
@@ -334,6 +358,7 @@ fn entry_from_record(record: &SpatialMemoryRecord, now: u128) -> SpatialMemoryEn
             round3(record.confidence)
         },
         stale,
+        stale_reason,
     }
 }
 
@@ -439,6 +464,7 @@ mod tests {
             .unwrap();
         assert_eq!(stale.count, 1);
         assert!(stale.entries[0].stale);
+        assert_eq!(stale.entries[0].stale_reason.as_deref(), Some("age"));
         assert_eq!(stale.entries[0].effective_confidence, 0.4);
 
         let filtered = reloaded
