@@ -1,0 +1,105 @@
+{
+  "format": "leash-sensor-contract-fixture-v1",
+  "cases": [
+    {
+      "name": "valid",
+      "range_scan": {
+        "status": "available",
+        "source": "sim-fixture",
+        "last_ms": 10,
+        "sample": {
+          "ts_ms": 10,
+          "frame_id": "base_scan",
+          "angle_min_rad": -1.5707963267948966,
+          "angle_max_rad": 1.5707963267948966,
+          "angle_increment_rad": 0.7853981633974483,
+          "range_min_m": 0.05,
+          "range_max_m": 12.0,
+          "ranges_m": [2.0, 1.5, 1.0, 1.5, 2.0],
+          "intensities": [10.0, 20.0, 30.0, 20.0, 10.0]
+        },
+        "error": null
+      },
+      "imu": {
+        "status": "available",
+        "source": "sim-fixture",
+        "last_ms": 10,
+        "sample": {
+          "ts_ms": 10,
+          "frame_id": "base_link",
+          "linear_acceleration_mps2": {"x": 0.0, "y": 0.0, "z": 9.80665},
+          "angular_velocity_radps": {"x": 0.0, "y": 0.0, "z": 0.0},
+          "orientation_xyzw": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "malformed",
+      "range_scan": {
+        "status": "malformed",
+        "source": "replay-fixture",
+        "last_ms": 20,
+        "sample": null,
+        "error": "range packet checksum failed"
+      },
+      "imu": {
+        "status": "malformed",
+        "source": "replay-fixture",
+        "last_ms": 20,
+        "sample": null,
+        "error": "IMU sample contained a non-finite value"
+      }
+    },
+    {
+      "name": "stale",
+      "range_scan": {
+        "status": "stale",
+        "source": "replay-fixture",
+        "last_ms": 30,
+        "sample": {
+          "ts_ms": 30,
+          "frame_id": "base_scan",
+          "angle_min_rad": -1.0,
+          "angle_max_rad": 1.0,
+          "angle_increment_rad": 1.0,
+          "range_min_m": 0.05,
+          "range_max_m": 12.0,
+          "ranges_m": [2.0, null, 3.0],
+          "intensities": []
+        },
+        "error": null
+      },
+      "imu": {
+        "status": "stale",
+        "source": "replay-fixture",
+        "last_ms": 30,
+        "sample": {
+          "ts_ms": 30,
+          "frame_id": "base_link",
+          "linear_acceleration_mps2": {"x": 0.0, "y": 0.0, "z": 9.80665},
+          "angular_velocity_radps": {"x": 0.0, "y": 0.0, "z": 0.0},
+          "orientation_xyzw": null
+        },
+        "error": null
+      }
+    },
+    {
+      "name": "disconnected",
+      "range_scan": {
+        "status": "disconnected",
+        "source": "replay-fixture",
+        "last_ms": 40,
+        "sample": null,
+        "error": "range sensor disconnected"
+      },
+      "imu": {
+        "status": "disconnected",
+        "source": "replay-fixture",
+        "last_ms": 40,
+        "sample": null,
+        "error": "IMU disconnected"
+      }
+    }
+  ]
+}

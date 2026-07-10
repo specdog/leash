@@ -1900,6 +1900,246 @@
       "title": "ImageObservation",
       "type": "object"
     },
+    "ImuSample": {
+      "$defs": {
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "angular_velocity_radps": {
+          "$ref": "#/$defs/Vector3Si",
+          "description": "Angular velocity in radians per second."
+        },
+        "frame_id": {
+          "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+          "type": "string"
+        },
+        "linear_acceleration_mps2": {
+          "$ref": "#/$defs/Vector3Si",
+          "description": "Linear acceleration in meters per second squared."
+        },
+        "orientation_xyzw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Quaternion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+        },
+        "ts_ms": {
+          "description": "Sensor capture time in Unix epoch milliseconds.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ts_ms",
+        "frame_id",
+        "linear_acceleration_mps2",
+        "angular_velocity_radps"
+      ],
+      "title": "ImuSample",
+      "type": "object"
+    },
+    "ImuStatus": {
+      "$defs": {
+        "ImuSample": {
+          "properties": {
+            "angular_velocity_radps": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Angular velocity in radians per second."
+            },
+            "frame_id": {
+              "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+              "type": "string"
+            },
+            "linear_acceleration_mps2": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Linear acceleration in meters per second squared."
+            },
+            "orientation_xyzw": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Quaternion"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "linear_acceleration_mps2",
+            "angular_velocity_radps"
+          ],
+          "type": "object"
+        },
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImuSample"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SensorDataStatus"
+        }
+      },
+      "required": [
+        "status",
+        "source"
+      ],
+      "title": "ImuStatus",
+      "type": "object"
+    },
     "InvocationOrigin": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "enum": [
@@ -3747,6 +3987,81 @@
       "title": "PatrolZoneList",
       "type": "object"
     },
+    "PlanarRangeScan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "angle_increment_rad": {
+          "description": "Signed angular separation between adjacent samples in radians.",
+          "format": "double",
+          "type": "number"
+        },
+        "angle_max_rad": {
+          "description": "Angle of the last sample in radians.",
+          "format": "double",
+          "type": "number"
+        },
+        "angle_min_rad": {
+          "description": "Angle of the first sample in radians.",
+          "format": "double",
+          "type": "number"
+        },
+        "frame_id": {
+          "description": "Coordinate frame containing the scan; angles are about positive Z.",
+          "type": "string"
+        },
+        "intensities": {
+          "default": [],
+          "description": "Optional non-negative device intensity values in scan order.",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "range_max_m": {
+          "description": "Maximum valid range in meters.",
+          "format": "double",
+          "type": "number"
+        },
+        "range_min_m": {
+          "description": "Minimum valid range in meters.",
+          "format": "double",
+          "type": "number"
+        },
+        "ranges_m": {
+          "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+          "items": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "ts_ms": {
+          "description": "Sensor capture time in Unix epoch milliseconds.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ts_ms",
+        "frame_id",
+        "angle_min_rad",
+        "angle_max_rad",
+        "angle_increment_rad",
+        "range_min_m",
+        "range_max_m",
+        "ranges_m"
+      ],
+      "title": "PlanarRangeScan",
+      "type": "object"
+    },
     "PlannerGoal": {
       "$defs": {
         "SpeedMode": {
@@ -4042,6 +4357,164 @@
       "title": "Pose2d",
       "type": "object"
     },
+    "Quaternion": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "w": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z",
+        "w"
+      ],
+      "title": "Quaternion",
+      "type": "object"
+    },
+    "RangeScanStatus": {
+      "$defs": {
+        "PlanarRangeScan": {
+          "properties": {
+            "angle_increment_rad": {
+              "description": "Signed angular separation between adjacent samples in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_max_rad": {
+              "description": "Angle of the last sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_min_rad": {
+              "description": "Angle of the first sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "description": "Coordinate frame containing the scan; angles are about positive Z.",
+              "type": "string"
+            },
+            "intensities": {
+              "default": [],
+              "description": "Optional non-negative device intensity values in scan order.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "range_max_m": {
+              "description": "Maximum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "range_min_m": {
+              "description": "Minimum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "ranges_m": {
+              "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "angle_min_rad",
+            "angle_max_rad",
+            "angle_increment_rad",
+            "range_min_m",
+            "range_max_m",
+            "ranges_m"
+          ],
+          "type": "object"
+        },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanarRangeScan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SensorDataStatus"
+        }
+      },
+      "required": [
+        "status",
+        "source"
+      ],
+      "title": "RangeScanStatus",
+      "type": "object"
+    },
     "RawFrameStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -4316,6 +4789,18 @@
       "title": "SavedWaypointList",
       "type": "object"
     },
+    "SensorDataStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "available",
+        "stale",
+        "malformed",
+        "disconnected",
+        "unavailable"
+      ],
+      "title": "SensorDataStatus",
+      "type": "string"
+    },
     "SensorSnapshot": {
       "$defs": {
         "BatteryStatus": {
@@ -4372,6 +4857,89 @@
           ],
           "type": "object"
         },
+        "ImuSample": {
+          "properties": {
+            "angular_velocity_radps": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Angular velocity in radians per second."
+            },
+            "frame_id": {
+              "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+              "type": "string"
+            },
+            "linear_acceleration_mps2": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Linear acceleration in meters per second squared."
+            },
+            "orientation_xyzw": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Quaternion"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "linear_acceleration_mps2",
+            "angular_velocity_radps"
+          ],
+          "type": "object"
+        },
+        "ImuStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ImuSample"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
         "OdometryStatus": {
           "properties": {
             "left_m": {
@@ -4394,6 +4962,148 @@
           },
           "required": [
             "status"
+          ],
+          "type": "object"
+        },
+        "PlanarRangeScan": {
+          "properties": {
+            "angle_increment_rad": {
+              "description": "Signed angular separation between adjacent samples in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_max_rad": {
+              "description": "Angle of the last sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_min_rad": {
+              "description": "Angle of the first sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "description": "Coordinate frame containing the scan; angles are about positive Z.",
+              "type": "string"
+            },
+            "intensities": {
+              "default": [],
+              "description": "Optional non-negative device intensity values in scan order.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "range_max_m": {
+              "description": "Maximum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "range_min_m": {
+              "description": "Minimum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "ranges_m": {
+              "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "angle_min_rad",
+            "angle_max_rad",
+            "angle_increment_rad",
+            "range_min_m",
+            "range_max_m",
+            "ranges_m"
+          ],
+          "type": "object"
+        },
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "RangeScanStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlanarRangeScan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
           ],
           "type": "object"
         },
@@ -4423,6 +5133,38 @@
             "source"
           ],
           "type": "object"
+        },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4433,8 +5175,28 @@
         "camera": {
           "$ref": "#/$defs/CameraStatus"
         },
+        "imu": {
+          "$ref": "#/$defs/ImuStatus",
+          "default": {
+            "error": null,
+            "last_ms": null,
+            "sample": null,
+            "source": "",
+            "status": "unavailable"
+          }
+        },
         "odometry": {
           "$ref": "#/$defs/OdometryStatus"
+        },
+        "range_scan": {
+          "$ref": "#/$defs/RangeScanStatus",
+          "default": {
+            "error": null,
+            "last_ms": null,
+            "sample": null,
+            "source": "",
+            "status": "unavailable"
+          }
         },
         "raw_frame": {
           "$ref": "#/$defs/RawFrameStatus"
@@ -4895,6 +5657,89 @@
           ],
           "type": "object"
         },
+        "ImuSample": {
+          "properties": {
+            "angular_velocity_radps": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Angular velocity in radians per second."
+            },
+            "frame_id": {
+              "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+              "type": "string"
+            },
+            "linear_acceleration_mps2": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Linear acceleration in meters per second squared."
+            },
+            "orientation_xyzw": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Quaternion"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "linear_acceleration_mps2",
+            "angular_velocity_radps"
+          ],
+          "type": "object"
+        },
+        "ImuStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ImuSample"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
         "MotionEvent": {
           "properties": {
             "confidence": {
@@ -4976,6 +5821,148 @@
           ],
           "type": "object"
         },
+        "PlanarRangeScan": {
+          "properties": {
+            "angle_increment_rad": {
+              "description": "Signed angular separation between adjacent samples in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_max_rad": {
+              "description": "Angle of the last sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_min_rad": {
+              "description": "Angle of the first sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "description": "Coordinate frame containing the scan; angles are about positive Z.",
+              "type": "string"
+            },
+            "intensities": {
+              "default": [],
+              "description": "Optional non-negative device intensity values in scan order.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "range_max_m": {
+              "description": "Maximum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "range_min_m": {
+              "description": "Minimum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "ranges_m": {
+              "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "angle_min_rad",
+            "angle_max_rad",
+            "angle_increment_rad",
+            "range_min_m",
+            "range_max_m",
+            "ranges_m"
+          ],
+          "type": "object"
+        },
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "RangeScanStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlanarRangeScan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
         "RawFrameStatus": {
           "properties": {
             "last_ms": {
@@ -5038,6 +6025,16 @@
           ],
           "type": "object"
         },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        },
         "SensorSnapshot": {
           "properties": {
             "battery": {
@@ -5046,8 +6043,28 @@
             "camera": {
               "$ref": "#/$defs/CameraStatus"
             },
+            "imu": {
+              "$ref": "#/$defs/ImuStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
+            },
             "odometry": {
               "$ref": "#/$defs/OdometryStatus"
+            },
+            "range_scan": {
+              "$ref": "#/$defs/RangeScanStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
             },
             "raw_frame": {
               "$ref": "#/$defs/RawFrameStatus"
@@ -5068,6 +6085,28 @@
             "high"
           ],
           "type": "string"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object"
         },
         "VisionResult": {
           "properties": {
@@ -5771,6 +6810,89 @@
           ],
           "type": "object"
         },
+        "ImuSample": {
+          "properties": {
+            "angular_velocity_radps": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Angular velocity in radians per second."
+            },
+            "frame_id": {
+              "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+              "type": "string"
+            },
+            "linear_acceleration_mps2": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Linear acceleration in meters per second squared."
+            },
+            "orientation_xyzw": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Quaternion"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "linear_acceleration_mps2",
+            "angular_velocity_radps"
+          ],
+          "type": "object"
+        },
+        "ImuStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ImuSample"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
         "MapMetadata": {
           "properties": {
             "cell_order": {
@@ -6104,6 +7226,79 @@
           ],
           "type": "string"
         },
+        "PlanarRangeScan": {
+          "properties": {
+            "angle_increment_rad": {
+              "description": "Signed angular separation between adjacent samples in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_max_rad": {
+              "description": "Angle of the last sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_min_rad": {
+              "description": "Angle of the first sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "description": "Coordinate frame containing the scan; angles are about positive Z.",
+              "type": "string"
+            },
+            "intensities": {
+              "default": [],
+              "description": "Optional non-negative device intensity values in scan order.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "range_max_m": {
+              "description": "Maximum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "range_min_m": {
+              "description": "Minimum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "ranges_m": {
+              "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "angle_min_rad",
+            "angle_max_rad",
+            "angle_increment_rad",
+            "range_min_m",
+            "range_max_m",
+            "ranges_m"
+          ],
+          "type": "object"
+        },
         "PlannerGoal": {
           "properties": {
             "frame_id": {
@@ -6197,6 +7392,75 @@
             "x_m",
             "y_m",
             "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "RangeScanStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlanarRangeScan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
           ],
           "type": "object"
         },
@@ -6294,6 +7558,16 @@
           ],
           "type": "object"
         },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        },
         "SensorSnapshot": {
           "properties": {
             "battery": {
@@ -6302,8 +7576,28 @@
             "camera": {
               "$ref": "#/$defs/CameraStatus"
             },
+            "imu": {
+              "$ref": "#/$defs/ImuStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
+            },
             "odometry": {
               "$ref": "#/$defs/OdometryStatus"
+            },
+            "range_scan": {
+              "$ref": "#/$defs/RangeScanStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
             },
             "raw_frame": {
               "$ref": "#/$defs/RawFrameStatus"
@@ -6525,6 +7819,28 @@
             "linear_x_mps",
             "linear_y_mps",
             "angular_z_radps"
+          ],
+          "type": "object"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
           ],
           "type": "object"
         },
@@ -6934,6 +8250,30 @@
         "angular_z_radps"
       ],
       "title": "Twist2d",
+      "type": "object"
+    },
+    "Vector3Si": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "Vector3Si",
       "type": "object"
     },
     "VisionResult": {

@@ -35,7 +35,7 @@ use crate::types::{
 };
 use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
-    adapter::{GimbalAdapter, MobileBaseAdapter},
+    adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{HarnessConfig, Profile},
     memory::{
@@ -49,13 +49,13 @@ use crate::{
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
         Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, MapMetadata, MotionEvent, MotionEventKind,
-        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
-        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus,
-        ResourceSample, SafetyStreamState, SavedWaypointList, SensorSnapshot, SpatialMemoryStatus,
-        SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
-        VisualizationPath, COST_FREE, COST_LETHAL, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-        VISUALIZATION_FRAME_VERSION,
+        DriveOutcome, Health, ImageObservation, ImuStatus, MapMetadata, MotionEvent,
+        MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus,
+        PatrolStrategy, PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState, SavedWaypointList,
+        SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
+        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -349,18 +349,23 @@ struct RawTelemetry {
     source: String,
     last_raw_frame_ms: Option<u128>,
     last_raw_payload: Option<Value>,
+    range_scan: RangeScanStatus,
+    imu: ImuStatus,
 }
 
 impl RawTelemetry {
     fn sim() -> Self {
+        let ts_ms = now_ms();
         Self {
             battery_v: Some(12.3),
             battery_pct: battery_percent_from_voltage(12.3),
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
             source: "sim".to_string(),
-            last_raw_frame_ms: Some(now_ms()),
+            last_raw_frame_ms: Some(ts_ms),
             last_raw_payload: None,
+            range_scan: simulated_range_scan(ts_ms),
+            imu: simulated_imu_sample(ts_ms),
         }
     }
 
@@ -373,6 +378,14 @@ impl RawTelemetry {
             source: source.to_string(),
             last_raw_frame_ms: None,
             last_raw_payload: None,
+            range_scan: RangeScanStatus {
+                source: source.to_string(),
+                ..RangeScanStatus::default()
+            },
+            imu: ImuStatus {
+                source: source.to_string(),
+                ..ImuStatus::default()
+            },
         }
     }
 
@@ -385,6 +398,14 @@ impl RawTelemetry {
             source: "replay".to_string(),
             last_raw_frame_ms: None,
             last_raw_payload: None,
+            range_scan: RangeScanStatus {
+                source: "replay".to_string(),
+                ..RangeScanStatus::default()
+            },
+            imu: ImuStatus {
+                source: "replay".to_string(),
+                ..ImuStatus::default()
+            },
         }
     }
 }
@@ -2095,6 +2116,8 @@ fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
             last_ms: raw.last_raw_frame_ms,
             payload: raw.last_raw_payload.clone(),
         },
+        range_scan: raw.range_scan.clone(),
+        imu: raw.imu.clone(),
     }
 }
 
@@ -2911,6 +2934,38 @@ mod tests {
         assert_eq!(replay_frame.motion_events.len(), 1);
         assert_eq!(replay_frame.motion_events[0].source, "replay-motion");
         assert_eq!(replay_frame.left_cmd, 0.2);
+    }
+
+    #[tokio::test]
+    async fn sim_and_legacy_replay_expose_backward_compatible_sensor_contracts() {
+        let sim = Harness::new(HarnessConfig::default()).unwrap();
+        let sim_sensors = sim.telemetry().sensors;
+        assert_eq!(
+            sim_sensors.range_scan.status,
+            crate::types::SensorDataStatus::Available
+        );
+        assert_eq!(
+            sim_sensors.imu.status,
+            crate::types::SensorDataStatus::Available
+        );
+        sim_sensors.range_scan.validate().unwrap();
+        sim_sensors.imu.validate().unwrap();
+
+        let replay = Harness::new(HarnessConfig {
+            profile: Profile::Replay,
+            replay_source: Some(std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let replay_sensors = replay.telemetry().sensors;
+        assert_eq!(
+            replay_sensors.range_scan.status,
+            crate::types::SensorDataStatus::Unavailable
+        );
+        assert_eq!(
+            replay_sensors.imu.status,
+            crate::types::SensorDataStatus::Unavailable
+        );
     }
 
     #[tokio::test]

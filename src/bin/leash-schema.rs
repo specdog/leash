@@ -21,14 +21,16 @@ use leash_harness::{
         BatteryStatus, CameraRecoveryResponse, CameraStatus, CameraStreamFailure,
         CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
         CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
-        ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapMetadata,
-        MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorSessionEvent,
-        OperatorSessionEventKind, OperatorSessionRecording, OperatorSessionRobot,
-        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal,
-        PlannerStatus, PointCloudMetadata, Pose2d, RawFrameStatus, ResourceSample, RunLogEntry,
-        SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorSnapshot, SpatialMemoryEntry,
-        SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
-        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint,
+        ImuSample, ImuStatus, ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState,
+        MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus,
+        OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording,
+        OperatorSessionRobot, OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZone,
+        PatrolZoneList, PlanarRangeScan, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        Quaternion, RangeScanStatus, RawFrameStatus, ResourceSample, RunLogEntry,
+        SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorDataStatus, SensorSnapshot,
+        SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
+        TelemetryStreamFrame, Twist2d, Vector3Si, VisionResult, VisualizationFrame,
+        VisualizationPath, ZoneBoundaryPoint,
     },
     worker::{
         ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
@@ -117,6 +119,13 @@ fn schema_document() -> Result<Value> {
     insert::<CameraStreamHealth>(&mut schemas, "CameraStreamHealth")?;
     insert::<CameraRecoveryResponse>(&mut schemas, "CameraRecoveryResponse")?;
     insert::<RawFrameStatus>(&mut schemas, "RawFrameStatus")?;
+    insert::<SensorDataStatus>(&mut schemas, "SensorDataStatus")?;
+    insert::<PlanarRangeScan>(&mut schemas, "PlanarRangeScan")?;
+    insert::<RangeScanStatus>(&mut schemas, "RangeScanStatus")?;
+    insert::<Vector3Si>(&mut schemas, "Vector3Si")?;
+    insert::<Quaternion>(&mut schemas, "Quaternion")?;
+    insert::<ImuSample>(&mut schemas, "ImuSample")?;
+    insert::<ImuStatus>(&mut schemas, "ImuStatus")?;
     insert::<SpeedMode>(&mut schemas, "SpeedMode")?;
     insert::<ResourceSample>(&mut schemas, "ResourceSample")?;
     insert::<RunLogEntry>(&mut schemas, "RunLogEntry")?;

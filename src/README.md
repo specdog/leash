@@ -17,7 +17,8 @@ flowchart TB
   lib --> daemon["daemon.rs\nbackground runs and logs"]
   lib --> transport["transport.rs\nmemory and local-pubsub streams"]
   lib --> worker["worker.rs\nexternal worker supervision"]
-  lib --> types["types.rs\nshared API structs"]
+  lib --> types["types.rs\nshared API and sensor structs"]
+  lib --> adapter["adapter.rs\nmobile-base, camera, range-scan, and IMU traits"]
   lib --> accelerator["accelerator.rs\nCPU/CUDA probe model"]
   lib --> agent["agent.rs\nagent model provider glue"]
   lib --> processing["stream_processing.rs\nbackpressure and filtering helpers"]
@@ -43,6 +44,6 @@ flowchart TB
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types, including viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including planar range scans, IMU samples, typed sensor health, viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
 - `worker.rs`: explicit external worker specs, process lifecycle supervision, status, and restart policy.
 - `bin/`: CLI entrypoint crate target.

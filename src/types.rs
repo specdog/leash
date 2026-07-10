@@ -36,6 +36,8 @@ pub const COST_FREE: u8 = 0;
 pub const COST_LETHAL: u8 = 254;
 pub const COST_UNKNOWN: u8 = 255;
 pub const MANIPULATOR_SCHEMA_VERSION: &str = "leash-manipulator-v1";
+pub const MAX_IMU_LINEAR_ACCELERATION_MPS2: f64 = 1_000.0;
+pub const MAX_IMU_ANGULAR_VELOCITY_RADPS: f64 = 1_000.0;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -713,7 +715,348 @@ pub struct SensorSnapshot {
     pub odometry: OdometryStatus,
     pub camera: CameraStatus,
     pub raw_frame: RawFrameStatus,
+    #[serde(default)]
+    pub range_scan: RangeScanStatus,
+    #[serde(default)]
+    pub imu: ImuStatus,
 }
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SensorDataStatus {
+    Available,
+    Stale,
+    Malformed,
+    Disconnected,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PlanarRangeScan {
+    /// Sensor capture time in Unix epoch milliseconds.
+    pub ts_ms: u128,
+    /// Coordinate frame containing the scan; angles are about positive Z.
+    pub frame_id: String,
+    /// Angle of the first sample in radians.
+    pub angle_min_rad: f64,
+    /// Angle of the last sample in radians.
+    pub angle_max_rad: f64,
+    /// Signed angular separation between adjacent samples in radians.
+    pub angle_increment_rad: f64,
+    /// Minimum valid range in meters.
+    pub range_min_m: f64,
+    /// Maximum valid range in meters.
+    pub range_max_m: f64,
+    /// Ranges in scan order. `None` is an explicitly invalid sample.
+    pub ranges_m: Vec<Option<f64>>,
+    /// Optional non-negative device intensity values in scan order.
+    #[serde(default)]
+    pub intensities: Vec<Option<f64>>,
+}
+
+impl PlanarRangeScan {
+    pub fn validate(&self) -> Result<(), SensorContractError> {
+        if self.frame_id.trim().is_empty() {
+            return Err(SensorContractError::EmptyFrameId);
+        }
+        for (name, value) in [
+            ("angle_min_rad", self.angle_min_rad),
+            ("angle_max_rad", self.angle_max_rad),
+            ("angle_increment_rad", self.angle_increment_rad),
+            ("range_min_m", self.range_min_m),
+            ("range_max_m", self.range_max_m),
+        ] {
+            if !value.is_finite() {
+                return Err(SensorContractError::NonFinite(name));
+            }
+        }
+        if self.ranges_m.is_empty() {
+            return Err(SensorContractError::EmptyScan);
+        }
+        if self.angle_increment_rad == 0.0 {
+            return Err(SensorContractError::ZeroAngleIncrement);
+        }
+        if self.range_min_m < 0.0 || self.range_max_m <= self.range_min_m {
+            return Err(SensorContractError::InvalidRangeBounds);
+        }
+        let expected_angle_max =
+            self.angle_min_rad + self.angle_increment_rad * (self.ranges_m.len() - 1) as f64;
+        if (expected_angle_max - self.angle_max_rad).abs() > 1e-6 {
+            return Err(SensorContractError::AngleCountMismatch);
+        }
+        if (self.angle_max_rad - self.angle_min_rad).abs() > std::f64::consts::TAU + 1e-6 {
+            return Err(SensorContractError::ScanSpanExceedsFullTurn);
+        }
+        if !self.intensities.is_empty() && self.intensities.len() != self.ranges_m.len() {
+            return Err(SensorContractError::IntensityCountMismatch);
+        }
+        for (index, range) in self.ranges_m.iter().enumerate() {
+            if let Some(range) = range {
+                if !range.is_finite() || *range < self.range_min_m || *range > self.range_max_m {
+                    return Err(SensorContractError::InvalidRangeSample(index));
+                }
+            }
+        }
+        for (index, intensity) in self.intensities.iter().enumerate() {
+            if intensity.is_some_and(|value| !value.is_finite() || value < 0.0) {
+                return Err(SensorContractError::InvalidIntensitySample(index));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct Vector3Si {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Vector3Si {
+    fn values(self) -> [f64; 3] {
+        [self.x, self.y, self.z]
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct Quaternion {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub w: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ImuSample {
+    /// Sensor capture time in Unix epoch milliseconds.
+    pub ts_ms: u128,
+    /// Right-handed body frame: +X forward, +Y left, +Z up.
+    pub frame_id: String,
+    /// Linear acceleration in meters per second squared.
+    pub linear_acceleration_mps2: Vector3Si,
+    /// Angular velocity in radians per second.
+    pub angular_velocity_radps: Vector3Si,
+    /// Optional body orientation as an approximately unit-length XYZW quaternion.
+    #[serde(default)]
+    pub orientation_xyzw: Option<Quaternion>,
+}
+
+impl ImuSample {
+    pub fn validate(&self) -> Result<(), SensorContractError> {
+        if self.frame_id.trim().is_empty() {
+            return Err(SensorContractError::EmptyFrameId);
+        }
+        for value in self.linear_acceleration_mps2.values() {
+            if !value.is_finite() {
+                return Err(SensorContractError::NonFinite("linear_acceleration_mps2"));
+            }
+            if value.abs() > MAX_IMU_LINEAR_ACCELERATION_MPS2 {
+                return Err(SensorContractError::ImuAccelerationOutOfBounds);
+            }
+        }
+        for value in self.angular_velocity_radps.values() {
+            if !value.is_finite() {
+                return Err(SensorContractError::NonFinite("angular_velocity_radps"));
+            }
+            if value.abs() > MAX_IMU_ANGULAR_VELOCITY_RADPS {
+                return Err(SensorContractError::ImuAngularVelocityOutOfBounds);
+            }
+        }
+        if let Some(orientation) = self.orientation_xyzw {
+            let values = [orientation.x, orientation.y, orientation.z, orientation.w];
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err(SensorContractError::NonFinite("orientation_xyzw"));
+            }
+            let norm_squared = values.iter().map(|value| value * value).sum::<f64>();
+            if !(0.25..=2.25).contains(&norm_squared) {
+                return Err(SensorContractError::InvalidQuaternionNorm);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct RangeScanStatus {
+    pub status: SensorDataStatus,
+    pub source: String,
+    #[serde(default)]
+    pub last_ms: Option<u128>,
+    #[serde(default)]
+    pub sample: Option<PlanarRangeScan>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl RangeScanStatus {
+    pub fn validate(&self) -> Result<(), SensorContractError> {
+        validate_sensor_status(self.status, self.last_ms, self.error.as_deref())?;
+        if matches!(
+            self.status,
+            SensorDataStatus::Available | SensorDataStatus::Stale
+        ) && self.sample.is_none()
+        {
+            return Err(SensorContractError::MissingSample);
+        }
+        if let Some(sample) = &self.sample {
+            sample.validate()?;
+            if self.last_ms.is_some_and(|last_ms| last_ms != sample.ts_ms) {
+                return Err(SensorContractError::TimestampMismatch);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct ImuStatus {
+    pub status: SensorDataStatus,
+    pub source: String,
+    #[serde(default)]
+    pub last_ms: Option<u128>,
+    #[serde(default)]
+    pub sample: Option<ImuSample>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ImuStatus {
+    pub fn validate(&self) -> Result<(), SensorContractError> {
+        validate_sensor_status(self.status, self.last_ms, self.error.as_deref())?;
+        if matches!(
+            self.status,
+            SensorDataStatus::Available | SensorDataStatus::Stale
+        ) && self.sample.is_none()
+        {
+            return Err(SensorContractError::MissingSample);
+        }
+        if let Some(sample) = &self.sample {
+            sample.validate()?;
+            if self.last_ms.is_some_and(|last_ms| last_ms != sample.ts_ms) {
+                return Err(SensorContractError::TimestampMismatch);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_sensor_status(
+    status: SensorDataStatus,
+    last_ms: Option<u128>,
+    error: Option<&str>,
+) -> Result<(), SensorContractError> {
+    if matches!(
+        status,
+        SensorDataStatus::Available | SensorDataStatus::Stale
+    ) && last_ms.is_none()
+    {
+        return Err(SensorContractError::MissingTimestamp);
+    }
+    if matches!(
+        status,
+        SensorDataStatus::Malformed | SensorDataStatus::Disconnected
+    ) && error.is_none_or(|error| error.trim().is_empty())
+    {
+        return Err(SensorContractError::MissingError);
+    }
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SensorContractError {
+    EmptyFrameId,
+    NonFinite(&'static str),
+    EmptyScan,
+    ZeroAngleIncrement,
+    InvalidRangeBounds,
+    AngleCountMismatch,
+    ScanSpanExceedsFullTurn,
+    IntensityCountMismatch,
+    InvalidRangeSample(usize),
+    InvalidIntensitySample(usize),
+    ImuAccelerationOutOfBounds,
+    ImuAngularVelocityOutOfBounds,
+    InvalidQuaternionNorm,
+    MissingSample,
+    MissingTimestamp,
+    TimestampMismatch,
+    MissingError,
+}
+
+impl std::fmt::Display for SensorContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyFrameId => write!(formatter, "sensor frame_id cannot be empty"),
+            Self::NonFinite(field) => write!(formatter, "sensor field {field} must be finite"),
+            Self::EmptyScan => write!(formatter, "range scan cannot be empty"),
+            Self::ZeroAngleIncrement => {
+                write!(formatter, "range scan angle increment cannot be zero")
+            }
+            Self::InvalidRangeBounds => {
+                write!(formatter, "range scan limits must satisfy 0 <= min < max")
+            }
+            Self::AngleCountMismatch => {
+                write!(
+                    formatter,
+                    "range scan angle_max does not match sample count"
+                )
+            }
+            Self::ScanSpanExceedsFullTurn => {
+                write!(formatter, "range scan span exceeds one full turn")
+            }
+            Self::IntensityCountMismatch => write!(
+                formatter,
+                "range scan intensity count does not match range count"
+            ),
+            Self::InvalidRangeSample(index) => write!(
+                formatter,
+                "range scan sample {index} is non-finite or outside declared limits"
+            ),
+            Self::InvalidIntensitySample(index) => write!(
+                formatter,
+                "range scan intensity {index} is non-finite or negative"
+            ),
+            Self::ImuAccelerationOutOfBounds => {
+                write!(formatter, "IMU acceleration exceeds the contract bound")
+            }
+            Self::ImuAngularVelocityOutOfBounds => {
+                write!(formatter, "IMU angular velocity exceeds the contract bound")
+            }
+            Self::InvalidQuaternionNorm => {
+                write!(formatter, "IMU orientation quaternion norm is invalid")
+            }
+            Self::MissingSample => {
+                write!(
+                    formatter,
+                    "available or stale sensor status requires a sample"
+                )
+            }
+            Self::MissingTimestamp => write!(
+                formatter,
+                "available or stale sensor status requires last_ms"
+            ),
+            Self::TimestampMismatch => write!(
+                formatter,
+                "sensor status timestamp does not match the sample timestamp"
+            ),
+            Self::MissingError => write!(
+                formatter,
+                "malformed or disconnected sensor status requires an error"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SensorContractError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -1042,5 +1385,138 @@ mod tests {
         assert_eq!(parsed.map, MapMetadata::default());
         assert_eq!(parsed.costmap, CostmapFrame::default());
         assert_eq!(parsed.autonomy, AutonomyOverlay::default());
+    }
+
+    #[test]
+    fn planar_scan_validation_covers_angles_ranges_and_intensities() {
+        let mut scan = crate::adapter::simulated_range_scan(42).sample.unwrap();
+        scan.validate().unwrap();
+
+        scan.angle_max_rad += 0.1;
+        assert_eq!(
+            scan.validate().unwrap_err(),
+            SensorContractError::AngleCountMismatch
+        );
+        scan.angle_max_rad -= 0.1;
+        scan.ranges_m[2] = Some(scan.range_max_m + 1.0);
+        assert_eq!(
+            scan.validate().unwrap_err(),
+            SensorContractError::InvalidRangeSample(2)
+        );
+        scan.ranges_m[2] = None;
+        scan.intensities.pop();
+        assert_eq!(
+            scan.validate().unwrap_err(),
+            SensorContractError::IntensityCountMismatch
+        );
+    }
+
+    #[test]
+    fn imu_validation_rejects_non_finite_bounds_and_bad_quaternion() {
+        let mut imu = crate::adapter::simulated_imu_sample(7).sample.unwrap();
+        imu.validate().unwrap();
+
+        imu.linear_acceleration_mps2.x = f64::NAN;
+        assert_eq!(
+            imu.validate().unwrap_err(),
+            SensorContractError::NonFinite("linear_acceleration_mps2")
+        );
+        imu.linear_acceleration_mps2.x = MAX_IMU_LINEAR_ACCELERATION_MPS2 + 1.0;
+        assert_eq!(
+            imu.validate().unwrap_err(),
+            SensorContractError::ImuAccelerationOutOfBounds
+        );
+        imu.linear_acceleration_mps2.x = 0.0;
+        imu.orientation_xyzw = Some(Quaternion {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 2.0,
+        });
+        assert_eq!(
+            imu.validate().unwrap_err(),
+            SensorContractError::InvalidQuaternionNorm
+        );
+    }
+
+    #[test]
+    fn sensor_status_validates_timestamp_and_error_state() {
+        let mut scan = crate::adapter::simulated_range_scan(42);
+        scan.validate().unwrap();
+        scan.last_ms = Some(41);
+        assert_eq!(
+            scan.validate().unwrap_err(),
+            SensorContractError::TimestampMismatch
+        );
+
+        let disconnected = ImuStatus {
+            status: SensorDataStatus::Disconnected,
+            source: "fixture".to_string(),
+            last_ms: Some(42),
+            sample: None,
+            error: Some("device disconnected".to_string()),
+        };
+        disconnected.validate().unwrap();
+    }
+
+    #[test]
+    fn older_sensor_snapshot_defaults_new_contracts() {
+        let old = serde_json::json!({
+            "battery": {"status": "available", "voltage_v": 12.3},
+            "odometry": {"status": "available", "left_m": 0.0, "right_m": 0.0},
+            "camera": {
+                "status": "simulated",
+                "health": "healthy",
+                "stream_url": null,
+                "snapshot_url": null
+            },
+            "raw_frame": {"status": "available", "source": "legacy", "last_ms": 1}
+        });
+
+        let parsed: SensorSnapshot = serde_json::from_value(old).unwrap();
+
+        assert_eq!(parsed.range_scan.status, SensorDataStatus::Unavailable);
+        assert_eq!(parsed.imu.status, SensorDataStatus::Unavailable);
+    }
+
+    #[test]
+    fn checked_in_sensor_state_fixture_is_valid() {
+        #[derive(Deserialize)]
+        struct Fixture {
+            format: String,
+            cases: Vec<FixtureCase>,
+        }
+        #[derive(Deserialize)]
+        struct FixtureCase {
+            name: String,
+            range_scan: RangeScanStatus,
+            imu: ImuStatus,
+        }
+
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../examples/replay/sensor-contract-states.json"
+        ))
+        .unwrap();
+
+        assert_eq!(fixture.format, "leash-sensor-contract-fixture-v1");
+        assert_eq!(fixture.cases.len(), 4);
+        for case in &fixture.cases {
+            case.range_scan
+                .validate()
+                .unwrap_or_else(|error| panic!("{} range scan: {error}", case.name));
+            case.imu
+                .validate()
+                .unwrap_or_else(|error| panic!("{} IMU: {error}", case.name));
+        }
+        assert_eq!(fixture.cases[0].name, "valid");
+        assert_eq!(
+            fixture.cases[1].range_scan.status,
+            SensorDataStatus::Malformed
+        );
+        assert_eq!(fixture.cases[2].imu.status, SensorDataStatus::Stale);
+        assert_eq!(
+            fixture.cases[3].range_scan.status,
+            SensorDataStatus::Disconnected
+        );
     }
 }
