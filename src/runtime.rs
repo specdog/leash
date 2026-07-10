@@ -2867,7 +2867,10 @@ mod tests {
             assert!(!harness.health().physical_actuation_enabled);
             if profile == Profile::Replay {
                 assert_eq!(status.status, "replay");
-                assert_eq!(harness.telemetry().left_cmd, 0.0);
+                assert!(harness.planner_status().last_drive.is_none());
+                let command = harness.command.lock();
+                assert_eq!(command.left_cmd, 0.0);
+                assert_eq!(command.right_cmd, 0.0);
             }
         }
     }

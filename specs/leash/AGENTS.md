@@ -21,7 +21,7 @@ leash/
     SPEC.dog            Project overview + user stories
     constitution.dog    Safety + feature-gating rules
     data-model.dog      human-authored entity + relationship source
-    leash.dag           Compiled (27 nodes, 42 edges; agent reads this)
+    leash.dag           Compiled (27 nodes, 43 edges; agent reads this)
   crates/               Rust workspace (planned)
 ```
 
