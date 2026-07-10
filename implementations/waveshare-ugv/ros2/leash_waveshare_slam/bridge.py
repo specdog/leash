@@ -24,6 +24,7 @@ from .contract import (
     build_localization_update,
     imu_contract,
     laser_scan_contract,
+    localization_update_due,
 )
 
 
@@ -68,6 +69,7 @@ class LeashRosBridge(Node):
         self._map_sample: dict[str, Any] | None = None
         self._pose_sample: dict[str, Any] | None = None
         self._last_posted_pose_ms: int | None = None
+        self._last_posted_at_s: float | None = None
         self._last_error_log_s = 0.0
 
         self._scan_publisher = self.create_publisher(
@@ -280,7 +282,13 @@ class LeashRosBridge(Node):
         if self._map_sample is None or self._pose_sample is None:
             return
         pose_ts_ms = int(self._pose_sample["ts_ms"])
-        if self._last_posted_pose_ms == pose_ts_ms:
+        now_s = time.monotonic()
+        if not localization_update_due(
+            self._last_posted_pose_ms,
+            pose_ts_ms,
+            self._last_posted_at_s,
+            now_s,
+        ):
             return
         try:
             if not self._sequence_initialized:
@@ -293,6 +301,7 @@ class LeashRosBridge(Node):
             )
             self._request_json("/localization/update", update)
             self._last_posted_pose_ms = pose_ts_ms
+            self._last_posted_at_s = now_s
         except (KeyError, TypeError, ValueError, OSError, urllib.error.URLError) as error:
             self._log_error_throttled(f"localization update failed: {error}")
 

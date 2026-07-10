@@ -8,6 +8,20 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+LOCALIZATION_HEARTBEAT_INTERVAL_S = 0.5
+
+
+def localization_update_due(
+    last_pose_ts_ms: int | None,
+    pose_ts_ms: int,
+    last_posted_at_s: float | None,
+    now_s: float,
+) -> bool:
+    """Post new poses immediately and heartbeat unchanged stationary poses."""
+    if last_pose_ts_ms != pose_ts_ms or last_posted_at_s is None:
+        return True
+    return now_s - last_posted_at_s >= LOCALIZATION_HEARTBEAT_INTERVAL_S
+
 
 def normalize_angle(value: float) -> float:
     return math.atan2(math.sin(value), math.cos(value))
