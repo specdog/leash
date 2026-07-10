@@ -81,7 +81,11 @@ impl StackBlueprintMetadata {
             stream_transport: config.stream_transport.as_str().to_string(),
             hardware_required: config.profile.is_physical(),
             required_gates: if config.profile.is_physical() {
-                vec!["physical-actuation".to_string()]
+                let mut gates = vec!["physical-actuation".to_string()];
+                if config.allow_physical_navigation {
+                    gates.push("physical-navigation".to_string());
+                }
+                gates
             } else {
                 Vec::new()
             },
@@ -609,6 +613,25 @@ mod tests {
         assert_eq!(graph.blueprint.name, "waveshare-ugv");
         assert!(graph.blueprint.hardware_required);
         assert_eq!(graph.blueprint.required_gates, vec!["physical-actuation"]);
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[test]
+    fn physical_navigation_graph_declares_both_independent_gates() {
+        let graph = default_module_graph(
+            &HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_physical_actuation: true,
+                allow_physical_navigation: true,
+                ..HarnessConfig::default()
+            },
+            vec!["planner_set_goal".to_string()],
+        );
+
+        assert_eq!(
+            graph.blueprint.required_gates,
+            vec!["physical-actuation", "physical-navigation"]
+        );
     }
 
     #[test]

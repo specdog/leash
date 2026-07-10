@@ -64,6 +64,8 @@ pub struct Health {
     pub deadman_ok: bool,
     pub physical_actuation_enabled: bool,
     #[serde(default)]
+    pub physical_navigation_enabled: bool,
+    #[serde(default)]
     pub operator_token: OperatorTokenStatus,
     pub accelerator: AcceleratorStatus,
     pub modules: Vec<ModuleInfo>,
@@ -78,6 +80,8 @@ pub struct Capabilities {
     pub role: String,
     pub profile: String,
     pub physical: bool,
+    #[serde(default)]
+    pub physical_navigation_enabled: bool,
     pub adapter: AdapterProfile,
     pub stream_transport: String,
     pub endpoints: Vec<String>,
@@ -325,6 +329,8 @@ pub struct SafetyStreamState {
     pub soft_odometry_limited: bool,
     pub soft_odometry_limit_m: f64,
     pub physical_actuation_enabled: bool,
+    #[serde(default)]
+    pub physical_navigation_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

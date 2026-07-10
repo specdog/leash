@@ -25,11 +25,13 @@ leash mcp call invoke_capability --json \
   '{"capability":"start_patrol_zone","zone_id":"front","speed_mode":"low"}'
 ```
 
-Zone execution is deliberately limited to simulation and replay. Simulation
-uses the local planner. Replay selects the ordered zone path and reports active
-status without issuing drive commands. Physical profiles reject zone starts,
-and a latched e-stop always rejects a new start. `POST /patrol/stop` and e-stop
-cancel the active patrol before any later control action.
+Simulation uses the local planner. Replay selects the ordered zone path and
+reports active status without issuing drive commands. Physical mobile-base
+profiles reject zone starts by default; the independent compile/runtime gate,
+freshness requirements, policy lease, and reusable checklist are in
+[`PHYSICAL_NAVIGATION.md`](PHYSICAL_NAVIGATION.md). A latched e-stop always
+rejects a new start. `POST /patrol/stop` and e-stop cancel the active patrol
+before any later control action.
 
 The HTTP surface provides `GET /waypoints`, `GET /patrol/zones`,
 `POST /patrol/zones/:zone_id/start`, `GET /patrol/status`, and

@@ -35,7 +35,7 @@ jobs:
           - name: http-sim
             command: cargo check --no-default-features --features sim,http
           - name: hardware-adapter
-            command: cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,mavlink-drone,manipulator,bridge-compat
+            command: cargo check --no-default-features --features sim,http,mcp,waveshare-ugv,mavlink-drone,manipulator,physical-navigation,bridge-compat
           - name: all-features
             command: cargo check --all-features
     steps:

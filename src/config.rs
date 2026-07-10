@@ -114,6 +114,7 @@ pub struct HarnessConfig {
     pub listen: SocketAddr,
     pub allow_untokened_drive: bool,
     pub allow_physical_actuation: bool,
+    pub allow_physical_navigation: bool,
     pub deadman_ms: u64,
     pub soft_odometry_limit_m: f64,
     pub serial_port: String,
@@ -153,6 +154,8 @@ pub struct PartialHarnessConfig {
     pub allow_untokened_drive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_physical_actuation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_physical_navigation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadman_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -225,6 +228,7 @@ pub struct ResolvedHarnessConfig {
     pub config: HarnessConfig,
     pub physical: bool,
     pub physical_actuation_enabled: bool,
+    pub physical_navigation_enabled: bool,
     pub network_bind: String,
     pub config_file: Option<String>,
     pub precedence: Vec<&'static str>,
@@ -255,6 +259,7 @@ struct ConfigBuilder {
     listen: Resolved<SocketAddr>,
     allow_untokened_drive: Resolved<bool>,
     allow_physical_actuation: Resolved<bool>,
+    allow_physical_navigation: Resolved<bool>,
     deadman_ms: Resolved<u64>,
     soft_odometry_limit_m: Resolved<f64>,
     serial_port: Resolved<String>,
@@ -285,6 +290,7 @@ impl Default for HarnessConfig {
             listen: SocketAddr::from_str(DEFAULT_LISTEN).expect("valid default listen address"),
             allow_untokened_drive: true,
             allow_physical_actuation: false,
+            allow_physical_navigation: false,
             deadman_ms: 400,
             soft_odometry_limit_m: 0.0,
             serial_port: "/dev/ttyTHS1".to_string(),
@@ -321,6 +327,17 @@ impl HarnessConfig {
         }
         if self.profile == Profile::Replay && self.replay_source.is_none() {
             anyhow::bail!("profile 'replay' requires --replay-source or LEASH_REPLAY_SOURCE");
+        }
+        if self.allow_physical_navigation && !cfg!(feature = "physical-navigation") {
+            anyhow::bail!(
+                "physical navigation requires the 'physical-navigation' compile-time feature"
+            );
+        }
+        if self.allow_physical_navigation && !self.profile.is_physical() {
+            anyhow::bail!("physical navigation runtime opt-in requires a physical profile");
+        }
+        if self.allow_physical_navigation && self.profile != Profile::WaveshareUgv {
+            anyhow::bail!("physical navigation runtime opt-in requires a mobile-base profile");
         }
         if self.replay_source.is_some() && self.profile != Profile::Replay {
             anyhow::bail!("replay_source requires profile 'replay'");
@@ -413,6 +430,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         listen: parse_env(env, "LEASH_LISTEN", parse_socket_addr)?,
         allow_untokened_drive: parse_env(env, "LEASH_ALLOW_UNTOKENED_DRIVE", parse_bool)?,
         allow_physical_actuation: parse_env(env, "LEASH_ALLOW_PHYSICAL_ACTUATION", parse_bool)?,
+        allow_physical_navigation: parse_env(env, "LEASH_ALLOW_PHYSICAL_NAVIGATION", parse_bool)?,
         deadman_ms: parse_env(env, "LEASH_DEADMAN_MS", parse_u64)?,
         soft_odometry_limit_m: parse_env(env, "LEASH_SOFT_ODOMETRY_LIMIT_M", parse_f64)?,
         serial_port: env.get("LEASH_SERIAL_PORT").cloned(),
@@ -527,6 +545,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "listen" => "LEASH_LISTEN",
         "allow_untokened_drive" => "LEASH_ALLOW_UNTOKENED_DRIVE",
         "allow_physical_actuation" => "LEASH_ALLOW_PHYSICAL_ACTUATION",
+        "allow_physical_navigation" => "LEASH_ALLOW_PHYSICAL_NAVIGATION",
         "deadman_ms" => "LEASH_DEADMAN_MS",
         "soft_odometry_limit_m" => "LEASH_SOFT_ODOMETRY_LIMIT_M",
         "serial_port" => "LEASH_SERIAL_PORT",
@@ -559,6 +578,7 @@ impl Default for ConfigBuilder {
             listen: Resolved::defaulted(config.listen),
             allow_untokened_drive: Resolved::defaulted(config.allow_untokened_drive),
             allow_physical_actuation: Resolved::defaulted(config.allow_physical_actuation),
+            allow_physical_navigation: Resolved::defaulted(config.allow_physical_navigation),
             deadman_ms: Resolved::defaulted(config.deadman_ms),
             soft_odometry_limit_m: Resolved::defaulted(config.soft_odometry_limit_m),
             serial_port: Resolved::defaulted(config.serial_port),
@@ -625,6 +645,10 @@ impl ConfigBuilder {
         if let Some(value) = partial.allow_physical_actuation {
             self.allow_physical_actuation
                 .set(value, source("allow_physical_actuation"));
+        }
+        if let Some(value) = partial.allow_physical_navigation {
+            self.allow_physical_navigation
+                .set(value, source("allow_physical_navigation"));
         }
         if let Some(value) = partial.deadman_ms {
             self.deadman_ms.set(value, source("deadman_ms"));
@@ -715,6 +739,7 @@ impl ConfigBuilder {
             listen: self.listen.value,
             allow_untokened_drive: self.allow_untokened_drive.value,
             allow_physical_actuation: self.allow_physical_actuation.value,
+            allow_physical_navigation: self.allow_physical_navigation.value,
             deadman_ms: self.deadman_ms.value,
             soft_odometry_limit_m: self.soft_odometry_limit_m.value,
             serial_port: self.serial_port.value,
@@ -734,6 +759,10 @@ impl ConfigBuilder {
         };
         let physical = config.profile.is_physical();
         let physical_actuation_enabled = config.allow_physical_actuation;
+        let physical_navigation_enabled = cfg!(feature = "physical-navigation")
+            && physical
+            && config.allow_physical_navigation
+            && physical_actuation_enabled;
         let network_bind = config.listen.to_string();
         let fields = vec![
             field("role", json!(config.role), self.role.source, None),
@@ -781,6 +810,12 @@ impl ConfigBuilder {
                 json!(config.allow_physical_actuation),
                 self.allow_physical_actuation.source,
                 Some("physical-actuation"),
+            ),
+            field(
+                "allow_physical_navigation",
+                json!(config.allow_physical_navigation),
+                self.allow_physical_navigation.source,
+                Some("physical-navigation"),
             ),
             field(
                 "deadman_ms",
@@ -888,6 +923,7 @@ impl ConfigBuilder {
             config,
             physical,
             physical_actuation_enabled,
+            physical_navigation_enabled,
             network_bind,
             config_file: self.config_file,
             precedence: vec![
@@ -1257,6 +1293,21 @@ mod config_tests {
             .unwrap()
             .source
             .clone()
+    }
+
+    #[cfg(not(feature = "physical-navigation"))]
+    #[test]
+    fn physical_navigation_runtime_gate_requires_compile_time_feature() {
+        let error = HarnessConfig {
+            profile: Profile::WaveshareUgv,
+            allow_physical_actuation: true,
+            allow_physical_navigation: true,
+            ..HarnessConfig::default()
+        }
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("'physical-navigation' compile-time feature"));
     }
 
     fn attention_for<'a>(resolved: &'a ResolvedHarnessConfig, name: &str) -> Option<&'a str> {
