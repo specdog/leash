@@ -13,6 +13,7 @@ flowchart TB
   docs --> adapters["ADAPTERS.md\nRust contracts and second-UGV checklist"]
   docs --> adapterSmoke["ADAPTER_SMOKE_TEMPLATE.md\nreusable pre-fleet proof"]
   docs --> sessions["OPERATOR_SESSIONS.md\nsafe recording and offline GUI replay"]
+  docs --> defaultBranch["DEFAULT_BRANCH_RECOVERY.md\ndefault-branch audit and recovery proof"]
 
   bot --> service["systemd user service\n~/.config/systemd/user/leash.service"]
   release --> proof["cargo, smoke scripts, package checks"]
@@ -30,3 +31,4 @@ flowchart TB
 - `ADAPTERS.md`: mobile-base, gimbal, and camera contracts plus the second-UGV implementation checklist.
 - `ADAPTER_SMOKE_TEMPLATE.md`: reusable no-hardware, bench, camera, telemetry, soak, and sign-off checklist.
 - `OPERATOR_SESSIONS.md`: safe operator event recording and offline GUI timeline replay.
+- `DEFAULT_BRANCH_RECOVERY.md`: the audited `main` default-branch recovery, DotDog proof, and repeatable recovery procedure.
