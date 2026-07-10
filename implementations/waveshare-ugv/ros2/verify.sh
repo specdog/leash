@@ -70,5 +70,10 @@ bash -n \
 grep -Fq -- '--clock-reference-epoch' "$ros_dir/slam-stack.sh"
 grep -Fq -- '--clock-reference-epoch' "$ros_dir/ros-soak.sh"
 grep -Fq -- 'delta <= 5' "$ros_dir/clock-gate.sh"
+grep -Fq -- 'compose up -d --no-build' "$ros_dir/slam-stack.sh"
+if grep -Fq -- 'compose up -d --build' "$ros_dir/slam-stack.sh"; then
+  echo "SLAM start must use the prebuilt pinned image without an online rebuild" >&2
+  exit 1
+fi
 
 printf '{"ok":true,"ros_distro":"humble","bridge_fixture":true,"motor_access":false,"device_access":false}\n'

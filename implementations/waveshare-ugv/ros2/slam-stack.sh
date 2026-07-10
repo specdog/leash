@@ -78,7 +78,7 @@ case "$command" in
   start)
     stop_leash
     require_trusted_clock "$clock_reference_epoch"
-    compose up -d --build
+    compose up -d --no-build
     stop_leash
     ;;
   stop)
