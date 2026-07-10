@@ -9,6 +9,7 @@ from leash_waveshare_slam.contract import (
     covariance_3x3,
     imu_contract,
     laser_scan_contract,
+    localization_update_due,
 )
 
 
@@ -91,6 +92,12 @@ class BridgeContractTests(unittest.TestCase):
     def test_covariance_rejects_wrong_shape(self):
         with self.assertRaisesRegex(ValueError, "36"):
             covariance_3x3([0.0] * 9)
+
+    def test_stationary_localization_heartbeats_before_provider_stales(self):
+        self.assertTrue(localization_update_due(None, 2_000, None, 10.0))
+        self.assertTrue(localization_update_due(2_000, 2_100, 10.0, 10.1))
+        self.assertFalse(localization_update_due(2_000, 2_000, 10.0, 10.49))
+        self.assertTrue(localization_update_due(2_000, 2_000, 10.0, 10.5))
 
 
 if __name__ == "__main__":
