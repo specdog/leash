@@ -2152,6 +2152,227 @@
       "title": "InvocationOrigin",
       "type": "string"
     },
+    "LocalizationFrame": {
+      "$defs": {
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "health": {
+          "$ref": "#/$defs/LocalizationHealth",
+          "default": {
+            "error": null,
+            "last_update_ms": null,
+            "message": "",
+            "status": "unavailable"
+          }
+        },
+        "map": {
+          "$ref": "#/$defs/MapIdentity",
+          "default": {
+            "frame_id": "",
+            "map_id": "",
+            "map_revision": ""
+          }
+        },
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PoseWithCovariance2d"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "default": "leash-localization-v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts_ms"
+      ],
+      "title": "LocalizationFrame",
+      "type": "object"
+    },
+    "LocalizationHealth": {
+      "$defs": {
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_update_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/LocalizationStatus"
+        }
+      },
+      "required": [
+        "status",
+        "message"
+      ],
+      "title": "LocalizationHealth",
+      "type": "object"
+    },
+    "LocalizationStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "initializing",
+        "tracking",
+        "degraded",
+        "stale",
+        "lost",
+        "unavailable"
+      ],
+      "title": "LocalizationStatus",
+      "type": "string"
+    },
     "ManipulatorCommandStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -2286,6 +2507,27 @@
         "joints"
       ],
       "title": "ManipulatorJointState",
+      "type": "object"
+    },
+    "MapIdentity": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "map_id": {
+          "type": "string"
+        },
+        "map_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "map_id",
+        "map_revision",
+        "frame_id"
+      ],
+      "title": "MapIdentity",
       "type": "object"
     },
     "MapMetadata": {
@@ -4357,6 +4599,62 @@
       "title": "Pose2d",
       "type": "object"
     },
+    "PoseWithCovariance2d": {
+      "$defs": {
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "covariance": {
+          "description": "Row-major 3x3 covariance for x, y, and yaw.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "pose": {
+          "$ref": "#/$defs/Pose2d"
+        }
+      },
+      "required": [
+        "pose",
+        "covariance"
+      ],
+      "title": "PoseWithCovariance2d",
+      "type": "object"
+    },
     "Quaternion": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -5200,6 +5498,10 @@
         },
         "raw_frame": {
           "$ref": "#/$defs/RawFrameStatus"
+        },
+        "version": {
+          "default": "leash-sensors-v1",
+          "type": "string"
         }
       },
       "required": [
@@ -5532,6 +5834,73 @@
           ],
           "type": "object"
         },
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
         "DetectionFrame": {
           "properties": {
             "confidence": {
@@ -5740,6 +6109,158 @@
           ],
           "type": "object"
         },
+        "LocalizationFrame": {
+          "properties": {
+            "health": {
+              "$ref": "#/$defs/LocalizationHealth",
+              "default": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapIdentity",
+              "default": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              }
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-localization-v1",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ts_ms"
+          ],
+          "type": "object"
+        },
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
         "MotionEvent": {
           "properties": {
             "confidence": {
@@ -5795,6 +6316,73 @@
             "cleared"
           ],
           "type": "string"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
         },
         "OdometryStatus": {
           "properties": {
@@ -5891,6 +6479,58 @@
             "range_min_m",
             "range_max_m",
             "ranges_m"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
           ],
           "type": "object"
         },
@@ -6068,6 +6708,10 @@
             },
             "raw_frame": {
               "$ref": "#/$defs/RawFrameStatus"
+            },
+            "version": {
+              "default": "leash-sensors-v1",
+              "type": "string"
             }
           },
           "required": [
@@ -6184,6 +6828,40 @@
             "null"
           ]
         },
+        "costmap": {
+          "$ref": "#/$defs/CostmapFrame",
+          "default": {
+            "costs": [],
+            "frame_id": "",
+            "height": 0,
+            "metadata": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
         "deadman_ok": {
           "type": "boolean"
         },
@@ -6193,6 +6871,44 @@
         "left_cmd": {
           "format": "double",
           "type": "number"
+        },
+        "localization": {
+          "$ref": "#/$defs/LocalizationFrame",
+          "default": {
+            "health": {
+              "error": null,
+              "last_update_ms": null,
+              "message": "",
+              "status": "unavailable"
+            },
+            "map": {
+              "frame_id": "",
+              "map_id": "",
+              "map_revision": ""
+            },
+            "pose": null,
+            "ts_ms": 0,
+            "version": "leash-localization-v1"
+          }
+        },
+        "map": {
+          "$ref": "#/$defs/MapMetadata",
+          "default": {
+            "cell_order": "",
+            "frame_id": "",
+            "height": 0,
+            "map_id": "",
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
         },
         "max_speed": {
           "format": "double",
@@ -6204,6 +6920,40 @@
             "$ref": "#/$defs/MotionEvent"
           },
           "type": "array"
+        },
+        "occupancy_grid": {
+          "$ref": "#/$defs/OccupancyGridFrame",
+          "default": {
+            "cells": [],
+            "frame_id": "",
+            "height": 0,
+            "metadata": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
         },
         "odometry_left": {
           "format": "double",
@@ -6893,6 +7643,112 @@
           ],
           "type": "object"
         },
+        "LocalizationFrame": {
+          "properties": {
+            "health": {
+              "$ref": "#/$defs/LocalizationHealth",
+              "default": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapIdentity",
+              "default": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              }
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-localization-v1",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ts_ms"
+          ],
+          "type": "object"
+        },
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
         "MapMetadata": {
           "properties": {
             "cell_order": {
@@ -7395,6 +8251,26 @@
           ],
           "type": "object"
         },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
+          ],
+          "type": "object"
+        },
         "Quaternion": {
           "properties": {
             "w": {
@@ -7601,6 +8477,10 @@
             },
             "raw_frame": {
               "$ref": "#/$defs/RawFrameStatus"
+            },
+            "version": {
+              "default": "leash-sensors-v1",
+              "type": "string"
             }
           },
           "required": [
@@ -7667,6 +8547,40 @@
                 "null"
               ]
             },
+            "costmap": {
+              "$ref": "#/$defs/CostmapFrame",
+              "default": {
+                "costs": [],
+                "frame_id": "",
+                "height": 0,
+                "metadata": {
+                  "cell_order": "",
+                  "frame_id": "",
+                  "height": 0,
+                  "map_id": "",
+                  "origin": {
+                    "frame_id": "",
+                    "ts_ms": 0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_rad": 0.0
+                  },
+                  "resolution_m": 0.0,
+                  "ts_ms": 0,
+                  "width": 0
+                },
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
             "deadman_ok": {
               "type": "boolean"
             },
@@ -7676,6 +8590,44 @@
             "left_cmd": {
               "format": "double",
               "type": "number"
+            },
+            "localization": {
+              "$ref": "#/$defs/LocalizationFrame",
+              "default": {
+                "health": {
+                  "error": null,
+                  "last_update_ms": null,
+                  "message": "",
+                  "status": "unavailable"
+                },
+                "map": {
+                  "frame_id": "",
+                  "map_id": "",
+                  "map_revision": ""
+                },
+                "pose": null,
+                "ts_ms": 0,
+                "version": "leash-localization-v1"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
             },
             "max_speed": {
               "format": "double",
@@ -7687,6 +8639,40 @@
                 "$ref": "#/$defs/MotionEvent"
               },
               "type": "array"
+            },
+            "occupancy_grid": {
+              "$ref": "#/$defs/OccupancyGridFrame",
+              "default": {
+                "cells": [],
+                "frame_id": "",
+                "height": 0,
+                "metadata": {
+                  "cell_order": "",
+                  "frame_id": "",
+                  "height": 0,
+                  "map_id": "",
+                  "origin": {
+                    "frame_id": "",
+                    "ts_ms": 0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_rad": 0.0
+                  },
+                  "resolution_m": 0.0,
+                  "ts_ms": 0,
+                  "width": 0
+                },
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
             },
             "odometry_left": {
               "format": "double",
@@ -7945,6 +8931,35 @@
               },
               "type": "array"
             },
+            "imu": {
+              "$ref": "#/$defs/ImuStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
+            },
+            "localization": {
+              "$ref": "#/$defs/LocalizationFrame",
+              "default": {
+                "health": {
+                  "error": null,
+                  "last_update_ms": null,
+                  "message": "",
+                  "status": "unavailable"
+                },
+                "map": {
+                  "frame_id": "",
+                  "map_id": "",
+                  "map_revision": ""
+                },
+                "pose": null,
+                "ts_ms": 0,
+                "version": "leash-localization-v1"
+              }
+            },
             "map": {
               "$ref": "#/$defs/MapMetadata",
               "default": {
@@ -7978,6 +8993,16 @@
             },
             "profile": {
               "type": "string"
+            },
+            "range_scan": {
+              "$ref": "#/$defs/RangeScanStatus",
+              "default": {
+                "error": null,
+                "last_ms": null,
+                "sample": null,
+                "source": "",
+                "status": "unavailable"
+              }
             },
             "robot": {
               "type": "string"
@@ -8127,6 +9152,29 @@
               "width": 0
             },
             "detections": [],
+            "imu": {
+              "error": null,
+              "last_ms": null,
+              "sample": null,
+              "source": "",
+              "status": "unavailable"
+            },
+            "localization": {
+              "health": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              },
+              "map": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              },
+              "pose": null,
+              "ts_ms": 0,
+              "version": "leash-localization-v1"
+            },
             "map": {
               "cell_order": "",
               "frame_id": "",
@@ -8194,6 +9242,13 @@
               "yaw_rad": 0.0
             },
             "profile": "",
+            "range_scan": {
+              "error": null,
+              "last_ms": null,
+              "sample": null,
+              "source": "",
+              "status": "unavailable"
+            },
             "robot": "",
             "ts_ms": 0,
             "twist": {
@@ -8581,6 +9636,195 @@
           ],
           "type": "object"
         },
+        "ImuSample": {
+          "properties": {
+            "angular_velocity_radps": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Angular velocity in radians per second."
+            },
+            "frame_id": {
+              "description": "Right-handed body frame: +X forward, +Y left, +Z up.",
+              "type": "string"
+            },
+            "linear_acceleration_mps2": {
+              "$ref": "#/$defs/Vector3Si",
+              "description": "Linear acceleration in meters per second squared."
+            },
+            "orientation_xyzw": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Quaternion"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional body orientation as an approximately unit-length XYZW quaternion."
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "linear_acceleration_mps2",
+            "angular_velocity_radps"
+          ],
+          "type": "object"
+        },
+        "ImuStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ImuSample"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
+        "LocalizationFrame": {
+          "properties": {
+            "health": {
+              "$ref": "#/$defs/LocalizationHealth",
+              "default": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapIdentity",
+              "default": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              }
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-localization-v1",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ts_ms"
+          ],
+          "type": "object"
+        },
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
         "MapMetadata": {
           "properties": {
             "cell_order": {
@@ -8702,6 +9946,79 @@
           ],
           "type": "string"
         },
+        "PlanarRangeScan": {
+          "properties": {
+            "angle_increment_rad": {
+              "description": "Signed angular separation between adjacent samples in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_max_rad": {
+              "description": "Angle of the last sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "angle_min_rad": {
+              "description": "Angle of the first sample in radians.",
+              "format": "double",
+              "type": "number"
+            },
+            "frame_id": {
+              "description": "Coordinate frame containing the scan; angles are about positive Z.",
+              "type": "string"
+            },
+            "intensities": {
+              "default": [],
+              "description": "Optional non-negative device intensity values in scan order.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "range_max_m": {
+              "description": "Maximum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "range_min_m": {
+              "description": "Minimum valid range in meters.",
+              "format": "double",
+              "type": "number"
+            },
+            "ranges_m": {
+              "description": "Ranges in scan order. `None` is an explicitly invalid sample.",
+              "items": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "description": "Sensor capture time in Unix epoch milliseconds.",
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ts_ms",
+            "frame_id",
+            "angle_min_rad",
+            "angle_max_rad",
+            "angle_increment_rad",
+            "range_min_m",
+            "range_max_m",
+            "ranges_m"
+          ],
+          "type": "object"
+        },
         "PlannerGoal": {
           "properties": {
             "frame_id": {
@@ -8798,6 +10115,105 @@
           ],
           "type": "object"
         },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
+          ],
+          "type": "object"
+        },
+        "Quaternion": {
+          "properties": {
+            "w": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "w"
+          ],
+          "type": "object"
+        },
+        "RangeScanStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sample": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PlanarRangeScan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/SensorDataStatus"
+            }
+          },
+          "required": [
+            "status",
+            "source"
+          ],
+          "type": "object"
+        },
+        "SensorDataStatus": {
+          "enum": [
+            "available",
+            "stale",
+            "malformed",
+            "disconnected",
+            "unavailable"
+          ],
+          "type": "string"
+        },
         "SpeedMode": {
           "enum": [
             "low",
@@ -8835,6 +10251,28 @@
             "linear_x_mps",
             "linear_y_mps",
             "angular_z_radps"
+          ],
+          "type": "object"
+        },
+        "Vector3Si": {
+          "properties": {
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "y": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z"
           ],
           "type": "object"
         },
@@ -8920,6 +10358,35 @@
           },
           "type": "array"
         },
+        "imu": {
+          "$ref": "#/$defs/ImuStatus",
+          "default": {
+            "error": null,
+            "last_ms": null,
+            "sample": null,
+            "source": "",
+            "status": "unavailable"
+          }
+        },
+        "localization": {
+          "$ref": "#/$defs/LocalizationFrame",
+          "default": {
+            "health": {
+              "error": null,
+              "last_update_ms": null,
+              "message": "",
+              "status": "unavailable"
+            },
+            "map": {
+              "frame_id": "",
+              "map_id": "",
+              "map_revision": ""
+            },
+            "pose": null,
+            "ts_ms": 0,
+            "version": "leash-localization-v1"
+          }
+        },
         "map": {
           "$ref": "#/$defs/MapMetadata",
           "default": {
@@ -8953,6 +10420,16 @@
         },
         "profile": {
           "type": "string"
+        },
+        "range_scan": {
+          "$ref": "#/$defs/RangeScanStatus",
+          "default": {
+            "error": null,
+            "last_ms": null,
+            "sample": null,
+            "source": "",
+            "status": "unavailable"
+          }
         },
         "robot": {
           "type": "string"

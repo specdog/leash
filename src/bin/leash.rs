@@ -1133,12 +1133,52 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
     frame.telemetry.source = "replay".to_string();
     frame.telemetry.sensors.raw_frame.source = "replay".to_string();
     frame.telemetry.sensors.raw_frame.last_ms = Some(ts_ms);
+    if frame.telemetry.sensors.range_scan.last_ms.is_some() {
+        frame.telemetry.sensors.range_scan.last_ms = Some(ts_ms);
+    }
+    if let Some(scan) = &mut frame.telemetry.sensors.range_scan.sample {
+        scan.ts_ms = ts_ms;
+    }
+    if frame.telemetry.sensors.imu.last_ms.is_some() {
+        frame.telemetry.sensors.imu.last_ms = Some(ts_ms);
+    }
+    if let Some(imu) = &mut frame.telemetry.sensors.imu.sample {
+        imu.ts_ms = ts_ms;
+    }
+    frame.telemetry.localization.ts_ms = ts_ms;
+    if let Some(localized) = &mut frame.telemetry.localization.pose {
+        localized.pose.ts_ms = ts_ms;
+        frame.telemetry.localization.health.last_update_ms = Some(ts_ms);
+    }
+    frame.telemetry.map.ts_ms = ts_ms;
+    frame.telemetry.map.origin.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.origin.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.metadata.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.metadata.origin.ts_ms = ts_ms;
+    frame.telemetry.costmap.ts_ms = ts_ms;
+    frame.telemetry.costmap.origin.ts_ms = ts_ms;
+    frame.telemetry.costmap.metadata.ts_ms = ts_ms;
+    frame.telemetry.costmap.metadata.origin.ts_ms = ts_ms;
     frame.health.mode = "replay".to_string();
     frame.health.replay = true;
     frame.health.profile = "replay".to_string();
     frame.health.uptime_ms = ts_ms;
     frame.health.physical_actuation_enabled = false;
     frame.safety.physical_actuation_enabled = false;
+    frame.visualization.ts_ms = ts_ms;
+    frame.visualization.map.ts_ms = ts_ms;
+    frame.visualization.pose.ts_ms = ts_ms;
+    frame.visualization.twist.ts_ms = ts_ms;
+    frame.visualization.path.ts_ms = ts_ms;
+    frame.visualization.occupancy_grid.ts_ms = ts_ms;
+    frame.visualization.costmap.ts_ms = ts_ms;
+    frame.visualization.range_scan = frame.telemetry.sensors.range_scan.clone();
+    frame.visualization.imu = frame.telemetry.sensors.imu.clone();
+    frame.visualization.localization = frame.telemetry.localization.clone();
+    frame.visualization.map = frame.telemetry.map.clone();
+    frame.visualization.occupancy_grid = frame.telemetry.occupancy_grid.clone();
+    frame.visualization.costmap = frame.telemetry.costmap.clone();
 }
 
 #[cfg(feature = "http")]

@@ -49,13 +49,15 @@ use crate::{
     types::{
         AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
         Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, ImuStatus, MapMetadata, MotionEvent,
-        MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus,
-        PatrolStrategy, PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState, SavedWaypointList,
-        SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
-        Twist2d, VisionResult, VisualizationFrame, VisualizationPath, COST_FREE, COST_LETHAL,
-        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, VISUALIZATION_FRAME_VERSION,
+        DriveOutcome, Health, ImageObservation, ImuStatus, LocalizationFrame, LocalizationHealth,
+        LocalizationStatus, MapIdentity, MapMetadata, MotionEvent, MotionEventKind,
+        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
+        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
+        SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
+        TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
+        COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
+        SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
     },
 };
 
@@ -982,6 +984,20 @@ impl Harness {
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
+        let localization = if self.config.profile == Profile::Sim {
+            simulated_localization_frame(now, &raw)
+        } else {
+            LocalizationFrame::default()
+        };
+        let (map, occupancy_grid, costmap) = if self.config.profile == Profile::Sim {
+            simulated_map_frames(now)
+        } else {
+            (
+                MapMetadata::default(),
+                OccupancyGridFrame::default(),
+                CostmapFrame::default(),
+            )
+        };
         let resource = self.config.resource_sampling.then(current_resource_sample);
         let workers = if self.config.profile == Profile::Sim {
             vec![crate::worker::simulated_perception_worker_status()]
@@ -1007,6 +1023,10 @@ impl Harness {
             speed_mode: command.speed_mode,
             max_speed: command.speed_mode.cap(),
             sensors,
+            localization,
+            map,
+            occupancy_grid,
+            costmap,
             vision: VisionResult::default(),
             workers,
             motion_events: Vec::new(),
@@ -1096,31 +1116,20 @@ impl Harness {
         let right_m = telemetry.odometry_right.unwrap_or_default();
         let x_m = round3((left_m + right_m) / 2.0);
         let yaw_rad = round3((right_m - left_m) * 0.25);
-        let map_origin = Pose2d {
-            ts_ms: telemetry.ts_ms,
-            frame_id: "map".to_string(),
-            x_m: -0.5,
-            y_m: -0.5,
-            yaw_rad: 0.0,
-        };
-        let map = MapMetadata {
-            ts_ms: telemetry.ts_ms,
-            map_id: "sim-local".to_string(),
-            frame_id: "map".to_string(),
-            width: 4,
-            height: 4,
-            resolution_m: 0.25,
-            origin: map_origin.clone(),
-            cell_order: "row-major".to_string(),
-        };
+        let map = telemetry.map.clone();
         let planner_path = self.planner.lock().path.clone();
-        let pose = Pose2d {
-            ts_ms: telemetry.ts_ms,
-            frame_id: "map".to_string(),
-            x_m,
-            y_m: 0.0,
-            yaw_rad,
-        };
+        let pose = telemetry
+            .localization
+            .pose
+            .as_ref()
+            .map(|localized| localized.pose.clone())
+            .unwrap_or(Pose2d {
+                ts_ms: telemetry.ts_ms,
+                frame_id: "map".to_string(),
+                x_m,
+                y_m: 0.0,
+                yaw_rad,
+            });
         let twist = Twist2d {
             ts_ms: telemetry.ts_ms,
             frame_id: "base_link".to_string(),
@@ -1158,26 +1167,8 @@ impl Harness {
             } else {
                 planner_path
             },
-            occupancy_grid: OccupancyGridFrame {
-                ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
-                width: 4,
-                height: 4,
-                resolution_m: 0.25,
-                origin: map_origin.clone(),
-                metadata: map.clone(),
-                cells: planner_occupancy_cells(),
-            },
-            costmap: CostmapFrame {
-                ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
-                width: 4,
-                height: 4,
-                resolution_m: 0.25,
-                origin: map_origin,
-                metadata: map,
-                costs: planner_costs(),
-            },
+            occupancy_grid: telemetry.occupancy_grid.clone(),
+            costmap: telemetry.costmap.clone(),
             point_cloud: PointCloudMetadata {
                 ts_ms: telemetry.ts_ms,
                 frame_id: "base_link".to_string(),
@@ -1195,6 +1186,9 @@ impl Harness {
                 estop: telemetry.estop,
             },
             autonomy: self.autonomy_overlay(telemetry.ts_ms),
+            range_scan: telemetry.sensors.range_scan.clone(),
+            imu: telemetry.sensors.imu.clone(),
+            localization: telemetry.localization.clone(),
         }
     }
 
@@ -2084,6 +2078,7 @@ fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
     };
 
     SensorSnapshot {
+        version: SENSOR_CONTRACT_VERSION.to_string(),
         battery: BatteryStatus {
             status: if raw.battery_v.is_some() || raw.battery_pct.is_some() {
                 "available"
@@ -2119,6 +2114,78 @@ fn sensor_snapshot(raw: &RawTelemetry) -> SensorSnapshot {
         range_scan: raw.range_scan.clone(),
         imu: raw.imu.clone(),
     }
+}
+
+fn simulated_localization_frame(ts_ms: u128, raw: &RawTelemetry) -> LocalizationFrame {
+    let left_m = raw.odometry_left.unwrap_or_default();
+    let right_m = raw.odometry_right.unwrap_or_default();
+    let pose = Pose2d {
+        ts_ms,
+        frame_id: "map".to_string(),
+        x_m: round3((left_m + right_m) / 2.0),
+        y_m: 0.0,
+        yaw_rad: round3((right_m - left_m) * 0.25),
+    };
+    LocalizationFrame {
+        version: LOCALIZATION_FRAME_VERSION.to_string(),
+        ts_ms,
+        map: MapIdentity {
+            map_id: "sim-local".to_string(),
+            map_revision: "sim-grid-v1".to_string(),
+            frame_id: "map".to_string(),
+        },
+        pose: Some(PoseWithCovariance2d {
+            pose,
+            covariance: vec![0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02],
+        }),
+        health: LocalizationHealth {
+            status: LocalizationStatus::Tracking,
+            last_update_ms: Some(ts_ms),
+            message: "sim localization healthy".to_string(),
+            error: None,
+        },
+    }
+}
+
+fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, CostmapFrame) {
+    let origin = Pose2d {
+        ts_ms,
+        frame_id: "map".to_string(),
+        x_m: -0.5,
+        y_m: -0.5,
+        yaw_rad: 0.0,
+    };
+    let map = MapMetadata {
+        ts_ms,
+        map_id: "sim-local".to_string(),
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        cell_order: "row-major".to_string(),
+    };
+    let occupancy_grid = OccupancyGridFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        metadata: map.clone(),
+        cells: planner_occupancy_cells(),
+    };
+    let costmap = CostmapFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin,
+        metadata: map.clone(),
+        costs: planner_costs(),
+    };
+    (map, occupancy_grid, costmap)
 }
 
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
@@ -2629,6 +2696,14 @@ mod tests {
         assert_eq!(message.stream, "telemetry");
         assert_eq!(message.payload["kind"], "telemetry");
         assert_eq!(message.payload["telemetry"]["profile"], "sim");
+        assert_eq!(
+            message.payload["telemetry"]["sensors"]["version"],
+            SENSOR_CONTRACT_VERSION
+        );
+        assert_eq!(
+            message.payload["telemetry"]["localization"]["health"]["status"],
+            "tracking"
+        );
         assert_eq!(message.payload["telemetry"]["vision"]["status"], "ok");
         assert_eq!(
             message.payload["telemetry"]["workers"][0]["name"],
@@ -2672,6 +2747,25 @@ mod tests {
             frame.visualization.map
         );
         assert_eq!(frame.visualization.costmap.costs.len(), 16);
+        assert_eq!(
+            frame.visualization.localization.health.status,
+            LocalizationStatus::Tracking
+        );
+        assert_eq!(
+            frame.visualization.localization.map.map_id,
+            frame.visualization.map.map_id
+        );
+        assert_eq!(frame.telemetry.map, frame.visualization.map);
+        assert_eq!(
+            frame.telemetry.occupancy_grid,
+            frame.visualization.occupancy_grid
+        );
+        assert_eq!(frame.telemetry.costmap, frame.visualization.costmap);
+        assert_eq!(
+            frame.visualization.range_scan,
+            frame.telemetry.sensors.range_scan
+        );
+        assert_eq!(frame.visualization.imu, frame.telemetry.sensors.imu);
         assert_eq!(
             frame.visualization.costmap.metadata,
             frame.visualization.map
@@ -2950,6 +3044,9 @@ mod tests {
         );
         sim_sensors.range_scan.validate().unwrap();
         sim_sensors.imu.validate().unwrap();
+        let sim_localization = sim.telemetry().localization;
+        sim_localization.validate().unwrap();
+        assert_eq!(sim_localization.health.status, LocalizationStatus::Tracking);
 
         let replay = Harness::new(HarnessConfig {
             profile: Profile::Replay,
@@ -2965,6 +3062,10 @@ mod tests {
         assert_eq!(
             replay_sensors.imu.status,
             crate::types::SensorDataStatus::Unavailable
+        );
+        assert_eq!(
+            replay.telemetry().localization.health.status,
+            LocalizationStatus::Unavailable
         );
     }
 

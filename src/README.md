@@ -39,11 +39,11 @@ flowchart TB
 - `mcp_bridge.rs`: stdio MCP bridge that proxies local agent tools to a remote Leash `/mcp/call` surface.
 - `module.rs`: module graph, states, health, dependencies, and graph export.
 - `perception.rs`: pluggable perception adapter boundary, fake detector, and provider isolation.
-- `replay.rs`: replay recording format and playback timing.
+- `replay.rs`: replay recording format, inner-contract validation, deterministic ordering, and playback timing.
 - `runtime.rs`: `Harness`, command state, drivers, telemetry, capture, estop, deadman, sim planner, sim patrol, perception, and spatial memory ownership.
 - `stack.rs`: built-in stack catalog such as `sim-http`, `sim-mcp`, and `waveshare-ugv-http`.
 - `stream_processing.rs`: generic latest-value, rate-limit, quality, and timestamp pairing helpers.
 - `transport.rs`: stream transport interface plus memory and local pubsub implementations.
-- `types.rs`: serialized HTTP/MCP/replay/API payload types, including planar range scans, IMU samples, typed sensor health, viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
+- `types.rs`: serialized HTTP/MCP/replay/API payload types, including planar range scans, IMU samples, map identity, localized pose/covariance and health, typed sensor health, viewer visualization, pose, twist, path, occupancy-grid, costmap, detection, vision, planner, patrol, spatial memory, autonomy overlay, and map metadata frames.
 - `worker.rs`: explicit external worker specs, process lifecycle supervision, status, and restart policy.
 - `bin/`: CLI entrypoint crate target.

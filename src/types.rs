@@ -36,6 +36,8 @@ pub const COST_FREE: u8 = 0;
 pub const COST_LETHAL: u8 = 254;
 pub const COST_UNKNOWN: u8 = 255;
 pub const MANIPULATOR_SCHEMA_VERSION: &str = "leash-manipulator-v1";
+pub const SENSOR_CONTRACT_VERSION: &str = "leash-sensors-v1";
+pub const LOCALIZATION_FRAME_VERSION: &str = "leash-localization-v1";
 pub const MAX_IMU_LINEAR_ACCELERATION_MPS2: f64 = 1_000.0;
 pub const MAX_IMU_ANGULAR_VELOCITY_RADPS: f64 = 1_000.0;
 
@@ -108,6 +110,14 @@ pub struct TelemetryFrame {
     pub speed_mode: SpeedMode,
     pub max_speed: f64,
     pub sensors: SensorSnapshot,
+    #[serde(default)]
+    pub localization: LocalizationFrame,
+    #[serde(default)]
+    pub map: MapMetadata,
+    #[serde(default)]
+    pub occupancy_grid: OccupancyGridFrame,
+    #[serde(default)]
+    pub costmap: CostmapFrame,
     #[serde(default)]
     pub vision: VisionResult,
     #[serde(default)]
@@ -185,6 +195,113 @@ pub struct TelemetryStreamFrame {
     pub visualization: VisualizationFrame,
 }
 
+impl TelemetryStreamFrame {
+    pub fn validate(&self) -> Result<(), TelemetryContractError> {
+        if self.kind != "telemetry" {
+            return Err(TelemetryContractError::InvalidKind);
+        }
+        if self.ts_ms != self.telemetry.ts_ms {
+            return Err(TelemetryContractError::TimestampMismatch);
+        }
+        if self.telemetry.sensors.version != SENSOR_CONTRACT_VERSION {
+            return Err(TelemetryContractError::UnsupportedSensorVersion);
+        }
+        if self.visualization.version != VISUALIZATION_FRAME_VERSION {
+            return Err(TelemetryContractError::UnsupportedVisualizationVersion);
+        }
+        self.telemetry
+            .sensors
+            .range_scan
+            .validate()
+            .map_err(TelemetryContractError::RangeScan)?;
+        self.telemetry
+            .sensors
+            .imu
+            .validate()
+            .map_err(TelemetryContractError::Imu)?;
+        self.telemetry
+            .localization
+            .validate()
+            .map_err(TelemetryContractError::Localization)?;
+        self.visualization
+            .localization
+            .validate()
+            .map_err(TelemetryContractError::VisualizationLocalization)?;
+        if self.telemetry.map != self.visualization.map
+            || self.telemetry.occupancy_grid != self.visualization.occupancy_grid
+            || self.telemetry.costmap != self.visualization.costmap
+            || self.telemetry.localization != self.visualization.localization
+            || self.telemetry.sensors.range_scan != self.visualization.range_scan
+            || self.telemetry.sensors.imu != self.visualization.imu
+        {
+            return Err(TelemetryContractError::VisualizationMismatch);
+        }
+        if self.telemetry.occupancy_grid.cells.len()
+            != self.telemetry.occupancy_grid.width as usize
+                * self.telemetry.occupancy_grid.height as usize
+            || self.telemetry.costmap.costs.len()
+                != self.telemetry.costmap.width as usize * self.telemetry.costmap.height as usize
+        {
+            return Err(TelemetryContractError::GridSizeMismatch);
+        }
+        if !self.telemetry.localization.map.map_id.is_empty()
+            && self.telemetry.localization.map.map_id != self.telemetry.map.map_id
+        {
+            return Err(TelemetryContractError::MapIdentityMismatch);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TelemetryContractError {
+    InvalidKind,
+    TimestampMismatch,
+    UnsupportedSensorVersion,
+    UnsupportedVisualizationVersion,
+    RangeScan(SensorContractError),
+    Imu(SensorContractError),
+    Localization(LocalizationContractError),
+    VisualizationLocalization(LocalizationContractError),
+    VisualizationMismatch,
+    GridSizeMismatch,
+    MapIdentityMismatch,
+}
+
+impl std::fmt::Display for TelemetryContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidKind => formatter.write_str("stream frame kind must be telemetry"),
+            Self::TimestampMismatch => {
+                formatter.write_str("stream and telemetry timestamps do not match")
+            }
+            Self::UnsupportedSensorVersion => {
+                formatter.write_str("unsupported sensor contract version")
+            }
+            Self::UnsupportedVisualizationVersion => {
+                formatter.write_str("unsupported visualization frame version")
+            }
+            Self::RangeScan(error) => write!(formatter, "invalid range scan: {error}"),
+            Self::Imu(error) => write!(formatter, "invalid IMU: {error}"),
+            Self::Localization(error) => write!(formatter, "invalid localization: {error}"),
+            Self::VisualizationLocalization(error) => {
+                write!(formatter, "invalid visualization localization: {error}")
+            }
+            Self::VisualizationMismatch => {
+                formatter.write_str("telemetry and visualization mapping fields do not match")
+            }
+            Self::GridSizeMismatch => {
+                formatter.write_str("mapping grid dimensions do not match cell counts")
+            }
+            Self::MapIdentityMismatch => {
+                formatter.write_str("localization and map identity do not match")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TelemetryContractError {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct CommandStreamState {
@@ -227,6 +344,12 @@ pub struct VisualizationFrame {
     pub command: CommandOverlay,
     #[serde(default)]
     pub autonomy: AutonomyOverlay,
+    #[serde(default)]
+    pub range_scan: RangeScanStatus,
+    #[serde(default)]
+    pub imu: ImuStatus,
+    #[serde(default)]
+    pub localization: LocalizationFrame,
 }
 
 impl Default for VisualizationFrame {
@@ -246,6 +369,9 @@ impl Default for VisualizationFrame {
             detections: Vec::new(),
             command: CommandOverlay::default(),
             autonomy: AutonomyOverlay::default(),
+            range_scan: RangeScanStatus::default(),
+            imu: ImuStatus::default(),
+            localization: LocalizationFrame::default(),
         }
     }
 }
@@ -294,6 +420,166 @@ pub struct MapMetadata {
     pub origin: Pose2d,
     pub cell_order: String,
 }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct MapIdentity {
+    pub map_id: String,
+    pub map_revision: String,
+    pub frame_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct PoseWithCovariance2d {
+    pub pose: Pose2d,
+    /// Row-major 3x3 covariance for x, y, and yaw.
+    pub covariance: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum LocalizationStatus {
+    Initializing,
+    Tracking,
+    Degraded,
+    Stale,
+    Lost,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct LocalizationHealth {
+    pub status: LocalizationStatus,
+    #[serde(default)]
+    pub last_update_ms: Option<u128>,
+    pub message: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct LocalizationFrame {
+    #[serde(default = "default_localization_frame_version")]
+    pub version: String,
+    pub ts_ms: u128,
+    #[serde(default)]
+    pub map: MapIdentity,
+    #[serde(default)]
+    pub pose: Option<PoseWithCovariance2d>,
+    #[serde(default)]
+    pub health: LocalizationHealth,
+}
+
+impl Default for LocalizationFrame {
+    fn default() -> Self {
+        Self {
+            version: default_localization_frame_version(),
+            ts_ms: 0,
+            map: MapIdentity::default(),
+            pose: None,
+            health: LocalizationHealth::default(),
+        }
+    }
+}
+
+impl LocalizationFrame {
+    pub fn validate(&self) -> Result<(), LocalizationContractError> {
+        if self.version != LOCALIZATION_FRAME_VERSION {
+            return Err(LocalizationContractError::UnsupportedVersion);
+        }
+        let needs_pose = matches!(
+            self.health.status,
+            LocalizationStatus::Tracking | LocalizationStatus::Degraded | LocalizationStatus::Stale
+        );
+        if needs_pose && self.pose.is_none() {
+            return Err(LocalizationContractError::MissingPose);
+        }
+        if matches!(self.health.status, LocalizationStatus::Lost)
+            && self
+                .health
+                .error
+                .as_deref()
+                .is_none_or(|error| error.trim().is_empty())
+        {
+            return Err(LocalizationContractError::MissingError);
+        }
+        if needs_pose
+            && (self.map.map_id.trim().is_empty()
+                || self.map.map_revision.trim().is_empty()
+                || self.map.frame_id.trim().is_empty())
+        {
+            return Err(LocalizationContractError::EmptyMapIdentity);
+        }
+        if let Some(localized_pose) = &self.pose {
+            if localized_pose.pose.frame_id != self.map.frame_id {
+                return Err(LocalizationContractError::PoseFrameMismatch);
+            }
+            if localized_pose.covariance.len() != 9 {
+                return Err(LocalizationContractError::InvalidCovarianceLength);
+            }
+            if localized_pose
+                .covariance
+                .iter()
+                .any(|value| !value.is_finite())
+            {
+                return Err(LocalizationContractError::NonFiniteCovariance);
+            }
+            if [0, 4, 8]
+                .into_iter()
+                .any(|index| localized_pose.covariance[index] < 0.0)
+            {
+                return Err(LocalizationContractError::NegativeCovariance);
+            }
+            if self.health.last_update_ms != Some(localized_pose.pose.ts_ms) {
+                return Err(LocalizationContractError::TimestampMismatch);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_localization_frame_version() -> String {
+    LOCALIZATION_FRAME_VERSION.to_string()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LocalizationContractError {
+    UnsupportedVersion,
+    MissingPose,
+    MissingError,
+    EmptyMapIdentity,
+    PoseFrameMismatch,
+    InvalidCovarianceLength,
+    NonFiniteCovariance,
+    NegativeCovariance,
+    TimestampMismatch,
+}
+
+impl std::fmt::Display for LocalizationContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::UnsupportedVersion => "unsupported localization frame version",
+            Self::MissingPose => "localization state requires a pose",
+            Self::MissingError => "lost localization state requires an error",
+            Self::EmptyMapIdentity => "localized pose requires a complete map identity",
+            Self::PoseFrameMismatch => "localized pose frame does not match map frame",
+            Self::InvalidCovarianceLength => "localized pose covariance must contain 9 values",
+            Self::NonFiniteCovariance => "localized pose covariance must be finite",
+            Self::NegativeCovariance => "localized pose covariance diagonal cannot be negative",
+            Self::TimestampMismatch => {
+                "localization health timestamp does not match the pose timestamp"
+            }
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for LocalizationContractError {}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -711,6 +997,8 @@ pub struct CommandOverlay {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct SensorSnapshot {
+    #[serde(default = "default_sensor_contract_version")]
+    pub version: String,
     pub battery: BatteryStatus,
     pub odometry: OdometryStatus,
     pub camera: CameraStatus,
@@ -719,6 +1007,10 @@ pub struct SensorSnapshot {
     pub range_scan: RangeScanStatus,
     #[serde(default)]
     pub imu: ImuStatus,
+}
+
+fn default_sensor_contract_version() -> String {
+    SENSOR_CONTRACT_VERSION.to_string()
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1310,6 +1602,9 @@ mod tests {
                 estop: false,
             },
             autonomy: AutonomyOverlay::default(),
+            range_scan: RangeScanStatus::default(),
+            imu: ImuStatus::default(),
+            localization: LocalizationFrame::default(),
         };
 
         let value = serde_json::to_value(&frame).unwrap();
@@ -1385,6 +1680,7 @@ mod tests {
         assert_eq!(parsed.map, MapMetadata::default());
         assert_eq!(parsed.costmap, CostmapFrame::default());
         assert_eq!(parsed.autonomy, AutonomyOverlay::default());
+        assert_eq!(parsed.localization, LocalizationFrame::default());
     }
 
     #[test]
@@ -1475,8 +1771,86 @@ mod tests {
 
         let parsed: SensorSnapshot = serde_json::from_value(old).unwrap();
 
+        assert_eq!(parsed.version, SENSOR_CONTRACT_VERSION);
         assert_eq!(parsed.range_scan.status, SensorDataStatus::Unavailable);
         assert_eq!(parsed.imu.status, SensorDataStatus::Unavailable);
+    }
+
+    #[test]
+    fn localization_frame_validates_version_pose_covariance_and_health() {
+        let mut frame = LocalizationFrame {
+            version: LOCALIZATION_FRAME_VERSION.to_string(),
+            ts_ms: 42,
+            map: MapIdentity {
+                map_id: "map-a".to_string(),
+                map_revision: "revision-1".to_string(),
+                frame_id: "map".to_string(),
+            },
+            pose: Some(PoseWithCovariance2d {
+                pose: Pose2d {
+                    ts_ms: 42,
+                    frame_id: "map".to_string(),
+                    x_m: 1.0,
+                    y_m: 2.0,
+                    yaw_rad: 0.25,
+                },
+                covariance: vec![0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03],
+            }),
+            health: LocalizationHealth {
+                status: LocalizationStatus::Tracking,
+                last_update_ms: Some(42),
+                message: "tracking".to_string(),
+                error: None,
+            },
+        };
+        frame.validate().unwrap();
+
+        frame.version = "old".to_string();
+        assert_eq!(
+            frame.validate().unwrap_err(),
+            LocalizationContractError::UnsupportedVersion
+        );
+        frame.version = LOCALIZATION_FRAME_VERSION.to_string();
+        frame.pose.as_mut().unwrap().covariance.pop();
+        assert_eq!(
+            frame.validate().unwrap_err(),
+            LocalizationContractError::InvalidCovarianceLength
+        );
+        frame.pose = None;
+        assert_eq!(
+            frame.validate().unwrap_err(),
+            LocalizationContractError::MissingPose
+        );
+
+        frame.health.status = LocalizationStatus::Lost;
+        frame.health.error = Some("provider disconnected".to_string());
+        frame.validate().unwrap();
+    }
+
+    #[test]
+    fn checked_in_localization_fixture_covers_tracking_stale_and_lost() {
+        #[derive(Deserialize)]
+        struct Fixture {
+            format: String,
+            frames: Vec<LocalizationFrame>,
+        }
+
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../examples/replay/localization-contract-states.json"
+        ))
+        .unwrap();
+
+        assert_eq!(fixture.format, "leash-localization-fixture-v1");
+        assert_eq!(fixture.frames.len(), 3);
+        for frame in &fixture.frames {
+            frame.validate().unwrap();
+        }
+        assert_eq!(
+            fixture.frames[0].health.status,
+            LocalizationStatus::Tracking
+        );
+        assert_eq!(fixture.frames[1].health.status, LocalizationStatus::Stale);
+        assert_eq!(fixture.frames[2].health.status, LocalizationStatus::Lost);
     }
 
     #[test]
