@@ -1,0 +1,40 @@
+{
+  "schema": "leash-waveshare-ugv-calibration-v1",
+  "profile": "pinkie-v1",
+  "status": "unmeasured",
+  "measurement": {
+    "procedure_revision": "issue-166-v1",
+    "measured_at": null,
+    "evidence_sha256": []
+  },
+  "wheels": {
+    "track_width_m": null,
+    "distance_scale": null
+  },
+  "lidar": {
+    "transform": {
+      "x_m": null,
+      "y_m": null,
+      "z_m": null,
+      "yaw_rad": null
+    },
+    "yaw_offset_deg": null,
+    "clockwise": null,
+    "body_masks_deg": []
+  },
+  "camera": {
+    "transform": {
+      "x_m": null,
+      "y_m": null,
+      "z_m": null,
+      "yaw_rad": null
+    }
+  },
+  "imu": {
+    "accel_lsb_per_g": null,
+    "gyro_dps_per_lsb": null,
+    "axis_map": null,
+    "accel_bias_mps2": null,
+    "gyro_bias_radps": null
+  }
+}

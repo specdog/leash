@@ -183,6 +183,12 @@ identity, device paths, calibration evidence, deployment, rollback, and field
 proof outside the reusable core. ROS 2 is an implementation adapter for mapping
 and localization, never a parallel motor owner.
 
+Pinkie's measured transforms, bounded calibration lease, verified-zero evidence,
+map-lineage reload proof, and Stage 1 acceptance manifest live in the
+[calibration guide](implementations/waveshare-ugv/calibration/README.md). Stage 1
+can mark calibration and mapping ready; autonomous exploration remains disabled
+until its independent watchdog proofs pass.
+
 ## Core Surfaces
 
 ### MCP tools
@@ -295,3 +301,4 @@ binaries, then creates a draft GitHub release.
 ## License
 
 MIT
+

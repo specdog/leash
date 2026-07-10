@@ -154,6 +154,8 @@ impl WaveshareSensorConfig {
             accel_lsb_per_g: number(&mut lookup, "LEASH_UGV_IMU_ACCEL_LSB_PER_G", 8192.0_f64)?,
             gyro_dps_per_lsb: number(&mut lookup, "LEASH_UGV_IMU_GYRO_DPS_PER_LSB", 0.0164_f64)?,
             axis_map: AxisMap::parse(&text(&mut lookup, "LEASH_UGV_IMU_AXIS_MAP", "x,y,z"))?,
+            accel_bias_mps2: vector3(&mut lookup, "LEASH_UGV_IMU_ACCEL_BIAS_MPS2", "0,0,0")?,
+            gyro_bias_radps: vector3(&mut lookup, "LEASH_UGV_IMU_GYRO_BIAS_RADPS", "0,0,0")?,
             stale_after_ms: number(&mut lookup, "LEASH_UGV_IMU_STALE_MS", 500_u64)?,
         };
         let config = Self { lidar, imu };
@@ -335,7 +337,40 @@ pub(crate) struct ImuConfig {
     accel_lsb_per_g: f64,
     gyro_dps_per_lsb: f64,
     axis_map: AxisMap,
+    accel_bias_mps2: Vector3Si,
+    gyro_bias_radps: Vector3Si,
     pub(crate) stale_after_ms: u64,
+}
+
+fn vector3(
+    lookup: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: &str,
+) -> Result<Vector3Si> {
+    let value = text(lookup, key, default);
+    let components = value
+        .split(',')
+        .map(|component| component.trim().parse::<f64>())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("{key} must contain three comma-separated numbers"))?;
+    if components.len() != 3 || components.iter().any(|component| !component.is_finite()) {
+        return Err(anyhow!(
+            "{key} must contain three finite comma-separated numbers"
+        ));
+    }
+    Ok(Vector3Si {
+        x: components[0],
+        y: components[1],
+        z: components[2],
+    })
+}
+
+fn subtract_bias(value: Vector3Si, bias: Vector3Si) -> Vector3Si {
+    Vector3Si {
+        x: value.x - bias.x,
+        y: value.y - bias.y,
+        z: value.z - bias.z,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,19 +598,21 @@ fn decode_imu(frame: &Value, config: &ImuConfig, received_ms: u128) -> Option<Im
     };
     let acceleration_scale = STANDARD_GRAVITY_MPS2 / config.accel_lsb_per_g;
     let gyro_scale = config.gyro_dps_per_lsb.to_radians();
+    let acceleration = config.axis_map.apply([
+        values[0] * acceleration_scale,
+        values[1] * acceleration_scale,
+        values[2] * acceleration_scale,
+    ]);
+    let angular_velocity = config.axis_map.apply([
+        values[3] * gyro_scale,
+        values[4] * gyro_scale,
+        values[5] * gyro_scale,
+    ]);
     let sample = ImuSample {
         ts_ms: received_ms,
         frame_id: config.frame_id.clone(),
-        linear_acceleration_mps2: config.axis_map.apply([
-            values[0] * acceleration_scale,
-            values[1] * acceleration_scale,
-            values[2] * acceleration_scale,
-        ]),
-        angular_velocity_radps: config.axis_map.apply([
-            values[3] * gyro_scale,
-            values[4] * gyro_scale,
-            values[5] * gyro_scale,
-        ]),
+        linear_acceleration_mps2: subtract_bias(acceleration, config.accel_bias_mps2),
+        angular_velocity_radps: subtract_bias(angular_velocity, config.gyro_bias_radps),
         orientation_xyzw: None,
     };
     let status = ImuStatus {
@@ -1126,6 +1163,13 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("COLLISION_THRESHOLD"));
+
+        let error = WaveshareSensorConfig::from_lookup(|key| {
+            (key == "LEASH_UGV_IMU_GYRO_BIAS_RADPS").then(|| "0,nan,0".to_string())
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("three finite"));
     }
 
     #[test]
@@ -1155,6 +1199,47 @@ mod tests {
         assert!((sample.angular_velocity_radps.y + (1.64_f64).to_radians()).abs() < 1e-9);
         assert_eq!(sample.ts_ms, 123);
         assert_eq!(sample.orientation_xyzw, None);
+    }
+
+    #[test]
+    fn base_frame_subtracts_body_frame_imu_biases() {
+        let config = WaveshareSensorConfig::from_lookup(|key| match key {
+            "LEASH_UGV_IMU_ACCEL_BIAS_MPS2" => Some("0.1,-0.2,0.3".to_string()),
+            "LEASH_UGV_IMU_GYRO_BIAS_RADPS" => Some("0.01,-0.02,0.03".to_string()),
+            _ => None,
+        })
+        .unwrap();
+        let update = decode_base_frame(
+            json!({
+                "T": 1001,
+                "ax": 0,
+                "ay": 0,
+                "az": 8192,
+                "gx": 0,
+                "gy": 0,
+                "gz": 0
+            }),
+            &config.imu,
+            123,
+        )
+        .unwrap();
+        let sample = update.imu.unwrap().sample.unwrap();
+        assert_eq!(
+            sample.linear_acceleration_mps2,
+            Vector3Si {
+                x: -0.1,
+                y: 0.2,
+                z: STANDARD_GRAVITY_MPS2 - 0.3,
+            }
+        );
+        assert_eq!(
+            sample.angular_velocity_radps,
+            Vector3Si {
+                x: -0.01,
+                y: 0.02,
+                z: -0.03,
+            }
+        );
     }
 
     #[test]
