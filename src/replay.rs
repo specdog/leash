@@ -463,6 +463,7 @@ mod tests {
                 estop: false,
                 deadman_ok: true,
                 physical_actuation_enabled: false,
+                physical_navigation_enabled: false,
                 operator_token: Default::default(),
                 accelerator: crate::accelerator::resolve_accelerator(
                     AcceleratorBackend::None,
@@ -485,6 +486,7 @@ mod tests {
                 soft_odometry_limited: false,
                 soft_odometry_limit_m: 0.0,
                 physical_actuation_enabled: false,
+                physical_navigation_enabled: false,
             },
             visualization: Default::default(),
         }

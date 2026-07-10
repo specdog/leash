@@ -18,6 +18,7 @@ for (const key of [
   "LEASH_AGENT_PROVIDER",
   "LEASH_AGENT_TIMEOUT_MS",
   "LEASH_ALLOW_UNTOKENED_DRIVE",
+  "LEASH_ALLOW_PHYSICAL_NAVIGATION",
   "LEASH_BRIDGE_URL",
   "LEASH_CONFIG",
   "LEASH_LISTEN",
@@ -98,7 +99,7 @@ const checks = [
   {
     name: "physical-gate",
     argv: ["bash", "scripts/smoke-physical-gate.sh"],
-    proof: "physical profile refused to start without the explicit actuation gate",
+    proof: "physical profiles refused without actuation and physical navigation refused without its independent compile gate",
   },
   {
     name: "daemon-lifecycle",
