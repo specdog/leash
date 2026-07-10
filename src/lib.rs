@@ -35,8 +35,9 @@ pub mod worker;
 
 pub use accelerator::{AcceleratorProbe, AcceleratorProvider, AcceleratorStatus};
 pub use adapter::{
-    CameraAdapter, CameraCommandPlan, CameraInputConfig, CameraStreamCodec,
-    FfmpegV4l2CameraAdapter, GimbalAdapter, MobileBaseAdapter,
+    simulated_imu_sample, simulated_range_scan, CameraAdapter, CameraCommandPlan,
+    CameraInputConfig, CameraStreamCodec, FfmpegV4l2CameraAdapter, GimbalAdapter, ImuAdapter,
+    MobileBaseAdapter, RangeScanAdapter,
 };
 pub use agent::complete as complete_agent_prompt;
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
@@ -77,14 +78,16 @@ pub use transport::{
 pub use types::{
     AgentModelResponse, AutonomyOverlay, CameraRecoveryResponse, CameraStreamFailure,
     CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CostmapFrame, DetectionFrame,
-    Health, ImageObservation, MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame,
-    OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording, OperatorSessionRobot,
-    PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList, PlannerGoal, PlannerStatus,
-    PointCloudMetadata, Pose2d, ResourceSample, RunLogEntry, SavedWaypoint, SavedWaypointList,
-    SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-    TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-    ZoneBoundaryPoint, COST_FREE, COST_LETHAL, COST_UNKNOWN, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-    OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
+    Health, ImageObservation, ImuSample, ImuStatus, MapMetadata, MotionEvent, MotionEventKind,
+    OccupancyGridFrame, OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording,
+    OperatorSessionRobot, PatrolStatus, PatrolStrategy, PatrolZone, PatrolZoneList,
+    PlanarRangeScan, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, Quaternion,
+    RangeScanStatus, ResourceSample, RunLogEntry, SavedWaypoint, SavedWaypointList,
+    SensorContractError, SensorDataStatus, SpatialMemoryEntry, SpatialMemoryKind,
+    SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si,
+    VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint, COST_FREE, COST_LETHAL,
+    COST_UNKNOWN, MAX_IMU_ANGULAR_VELOCITY_RADPS, MAX_IMU_LINEAR_ACCELERATION_MPS2, OCCUPANCY_FREE,
+    OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN, VISUALIZATION_FRAME_VERSION,
 };
 pub use worker::{
     simulated_perception_worker_status, ExternalWorkerSpec, ExternalWorkerState,

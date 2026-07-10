@@ -1,5 +1,9 @@
 use anyhow::{anyhow, Result};
 
+use crate::types::{
+    ImuSample, ImuStatus, PlanarRangeScan, Quaternion, RangeScanStatus, SensorDataStatus, Vector3Si,
+};
+
 pub trait MobileBaseAdapter: Send + Sync {
     fn drive(&self, left: f64, right: f64) -> Result<()>;
 
@@ -45,6 +49,63 @@ pub trait CameraAdapter: Send + Sync {
         config: &CameraInputConfig,
         codec: CameraStreamCodec,
     ) -> CameraCommandPlan;
+}
+
+/// Middleware-neutral source of timestamped planar range scans.
+pub trait RangeScanAdapter: Send + Sync {
+    fn range_scan(&self) -> RangeScanStatus;
+}
+
+/// Middleware-neutral source of timestamped SI-unit IMU samples.
+pub trait ImuAdapter: Send + Sync {
+    fn imu_sample(&self) -> ImuStatus;
+}
+
+pub fn simulated_range_scan(ts_ms: u128) -> RangeScanStatus {
+    let sample = PlanarRangeScan {
+        ts_ms,
+        frame_id: "base_scan".to_string(),
+        angle_min_rad: -std::f64::consts::FRAC_PI_2,
+        angle_max_rad: std::f64::consts::FRAC_PI_2,
+        angle_increment_rad: std::f64::consts::FRAC_PI_4,
+        range_min_m: 0.05,
+        range_max_m: 12.0,
+        ranges_m: vec![Some(2.0), Some(1.5), Some(1.0), Some(1.5), Some(2.0)],
+        intensities: vec![Some(10.0), Some(20.0), Some(30.0), Some(20.0), Some(10.0)],
+    };
+    RangeScanStatus {
+        status: SensorDataStatus::Available,
+        source: "sim".to_string(),
+        last_ms: Some(ts_ms),
+        sample: Some(sample),
+        error: None,
+    }
+}
+
+pub fn simulated_imu_sample(ts_ms: u128) -> ImuStatus {
+    let sample = ImuSample {
+        ts_ms,
+        frame_id: "base_link".to_string(),
+        linear_acceleration_mps2: Vector3Si {
+            x: 0.0,
+            y: 0.0,
+            z: 9.80665,
+        },
+        angular_velocity_radps: Vector3Si::default(),
+        orientation_xyzw: Some(Quaternion {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        }),
+    };
+    ImuStatus {
+        status: SensorDataStatus::Available,
+        source: "sim".to_string(),
+        last_ms: Some(ts_ms),
+        sample: Some(sample),
+        error: None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -212,5 +273,18 @@ mod tests {
             .windows(2)
             .any(|args| args == ["-boundary_tag", "leashframe"]));
         assert!(stream.content_type.contains("leashframe"));
+    }
+
+    #[test]
+    fn simulated_sensor_fixtures_are_valid_and_deterministic() {
+        let range_scan = simulated_range_scan(42);
+        let imu = simulated_imu_sample(42);
+
+        assert_eq!(range_scan, simulated_range_scan(42));
+        assert_eq!(imu, simulated_imu_sample(42));
+        range_scan.validate().unwrap();
+        imu.validate().unwrap();
+        assert_eq!(range_scan.sample.unwrap().ranges_m.len(), 5);
+        assert_eq!(imu.sample.unwrap().frame_id, "base_link");
     }
 }
