@@ -1064,6 +1064,9 @@ pub struct PlanarRangeScan {
     /// Optional non-negative device intensity values in scan order.
     #[serde(default)]
     pub intensities: Vec<Option<f64>>,
+    /// Optional measured revolutions per second for the completed scan.
+    #[serde(default)]
+    pub scan_rate_hz: Option<f64>,
 }
 
 impl PlanarRangeScan {
@@ -1101,6 +1104,12 @@ impl PlanarRangeScan {
         }
         if !self.intensities.is_empty() && self.intensities.len() != self.ranges_m.len() {
             return Err(SensorContractError::IntensityCountMismatch);
+        }
+        if self
+            .scan_rate_hz
+            .is_some_and(|scan_rate_hz| !scan_rate_hz.is_finite() || scan_rate_hz <= 0.0)
+        {
+            return Err(SensorContractError::InvalidScanRate);
         }
         for (index, range) in self.ranges_m.iter().enumerate() {
             if let Some(range) = range {
@@ -1290,6 +1299,7 @@ pub enum SensorContractError {
     AngleCountMismatch,
     ScanSpanExceedsFullTurn,
     IntensityCountMismatch,
+    InvalidScanRate,
     InvalidRangeSample(usize),
     InvalidIntensitySample(usize),
     ImuAccelerationOutOfBounds,
@@ -1326,6 +1336,9 @@ impl std::fmt::Display for SensorContractError {
                 formatter,
                 "range scan intensity count does not match range count"
             ),
+            Self::InvalidScanRate => {
+                write!(formatter, "range scan rate must be positive and finite")
+            }
             Self::InvalidRangeSample(index) => write!(
                 formatter,
                 "range scan sample {index} is non-finite or outside declared limits"

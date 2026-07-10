@@ -377,6 +377,31 @@ mod tests {
     }
 
     #[test]
+    fn bundled_waveshare_sensor_fixture_round_trips_generic_contracts() {
+        let text = include_str!("../examples/replay/waveshare-ugv-sensors.jsonl");
+        let recording = ReplayRecording::from_jsonl(text).unwrap();
+        let event = recording
+            .events()
+            .iter()
+            .find(|event| event.kind == ReplayEventKind::Sensors)
+            .unwrap();
+        let sensors: SensorSnapshot = serde_json::from_value(event.data.clone()).unwrap();
+        sensors.range_scan.validate().unwrap();
+        sensors.imu.validate().unwrap();
+        assert_eq!(
+            sensors.range_scan.sample.as_ref().unwrap().ranges_m.len(),
+            36
+        );
+        assert_eq!(
+            sensors.range_scan.sample.as_ref().unwrap().scan_rate_hz,
+            Some(10.0)
+        );
+        let encoded = serde_json::to_value(&sensors).unwrap();
+        let decoded: SensorSnapshot = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+
+    #[test]
     fn replay_rejects_invalid_inner_contract_versions() {
         let text = include_str!("../examples/replay/sim-mapping.jsonl");
         let recording = ReplayRecording::from_jsonl(text).unwrap();
