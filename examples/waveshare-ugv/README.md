@@ -1,5 +1,8 @@
 # Waveshare Ubuntu UGV Example
 
+The complete implementation, including private-safe deployment baseline and
+rollback, lives in [`implementations/waveshare-ugv/`](../../implementations/waveshare-ugv/).
+
 This adapter matches the original Ubuntu UGV / Jetson Orin NX demo shape:
 
 ```mermaid
