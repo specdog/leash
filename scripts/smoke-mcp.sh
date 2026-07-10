@@ -78,6 +78,9 @@ async function main() {
   if (payload.ok !== true || payload.profile !== "sim") {
     fail(`bad health payload: ${JSON.stringify(payload)}`);
   }
+  if (payload.physical_navigation_enabled !== false) {
+    fail(`sim unexpectedly enabled physical navigation: ${JSON.stringify(payload)}`);
+  }
   if (!Array.isArray(payload.modules) || payload.modules.length < 3) {
     fail(`missing health modules: ${JSON.stringify(payload)}`);
   }

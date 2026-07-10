@@ -149,7 +149,13 @@ impl CapabilityRegistry {
             .iter()
             .find(|descriptor| descriptor.name == name)
             .ok_or_else(|| anyhow!("unknown capability '{name}'"))?;
-        let safety = descriptor.safety;
+        let safety = if self.harness.config().profile.is_physical()
+            && is_navigation_start_capability(name)
+        {
+            SafetyClass::PhysicalMotion
+        } else {
+            descriptor.safety
+        };
         let mut args = args_object(args)?;
         let approval = optional_bool_removed(&mut args, "approval")?.unwrap_or(false);
         let decision = self.policy_decision(name, safety, &args, approval, context)?;
@@ -166,7 +172,7 @@ impl CapabilityRegistry {
             }));
         }
 
-        let result = self.invoke_unchecked(name, args);
+        let result = self.invoke_unchecked(name, args, approval);
         if safety.is_physical_action() {
             match &result {
                 Ok(_) => self.log_policy_approved(name, safety, context, false),
@@ -176,7 +182,12 @@ impl CapabilityRegistry {
         result
     }
 
-    fn invoke_unchecked(&self, name: &str, args: Map<String, Value>) -> Result<Value> {
+    fn invoke_unchecked(
+        &self,
+        name: &str,
+        args: Map<String, Value>,
+        approval: bool,
+    ) -> Result<Value> {
         match name {
             "health" => {
                 ensure_fields(&args, &[])?;
@@ -262,8 +273,16 @@ impl CapabilityRegistry {
             "planner_set_goal" => {
                 ensure_fields(
                     &args,
-                    &["frame_id", "x_m", "y_m", "tolerance_m", "speed_mode"],
+                    &[
+                        "token",
+                        "frame_id",
+                        "x_m",
+                        "y_m",
+                        "tolerance_m",
+                        "speed_mode",
+                    ],
                 )?;
+                let token = optional_string(&args, "token")?;
                 let goal = PlannerGoal {
                     frame_id: optional_string(&args, "frame_id")?
                         .unwrap_or_else(|| "map".to_string()),
@@ -272,7 +291,12 @@ impl CapabilityRegistry {
                     tolerance_m: optional_f64(&args, "tolerance_m")?.unwrap_or(0.1),
                     speed_mode: optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low),
                 };
-                serde_json::to_value(self.harness.set_planner_goal(goal)?).map_err(Into::into)
+                serde_json::to_value(self.harness.set_planner_goal_authorized(
+                    goal,
+                    token.as_deref(),
+                    approval,
+                )?)
+                .map_err(Into::into)
             }
             "planner_cancel" => {
                 ensure_fields(&args, &[])?;
@@ -283,12 +307,18 @@ impl CapabilityRegistry {
                 serde_json::to_value(self.harness.planner_status()).map_err(Into::into)
             }
             "start_patrol" => {
-                ensure_fields(&args, &["strategy", "speed_mode"])?;
+                ensure_fields(&args, &["token", "strategy", "speed_mode"])?;
+                let token = optional_string(&args, "token")?;
                 let strategy = optional_patrol_strategy(&args, "strategy")?.unwrap_or_default();
                 let speed_mode =
                     optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low);
-                serde_json::to_value(self.harness.start_patrol(strategy, speed_mode)?)
-                    .map_err(Into::into)
+                serde_json::to_value(self.harness.start_patrol_authorized(
+                    strategy,
+                    speed_mode,
+                    token.as_deref(),
+                    approval,
+                )?)
+                .map_err(Into::into)
             }
             "stop_patrol" => {
                 ensure_fields(&args, &[])?;
@@ -343,12 +373,18 @@ impl CapabilityRegistry {
                 serde_json::to_value(self.harness.delete_patrol_zone(&id)?).map_err(Into::into)
             }
             "start_patrol_zone" => {
-                ensure_fields(&args, &["zone_id", "speed_mode"])?;
+                ensure_fields(&args, &["token", "zone_id", "speed_mode"])?;
+                let token = optional_string(&args, "token")?;
                 let zone_id = required_string(&args, "zone_id")?;
                 let speed_mode =
                     optional_speed_mode(&args, "speed_mode")?.unwrap_or(SpeedMode::Low);
-                serde_json::to_value(self.harness.start_patrol_zone(&zone_id, speed_mode)?)
-                    .map_err(Into::into)
+                serde_json::to_value(self.harness.start_patrol_zone_authorized(
+                    &zone_id,
+                    speed_mode,
+                    token.as_deref(),
+                    approval,
+                )?)
+                .map_err(Into::into)
             }
             "memory_tag_location" => {
                 ensure_fields(
@@ -638,6 +674,13 @@ impl CapabilityRegistry {
     }
 }
 
+fn is_navigation_start_capability(name: &str) -> bool {
+    matches!(
+        name,
+        "planner_set_goal" | "start_patrol" | "start_patrol_zone"
+    )
+}
+
 pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
     let descriptors = vec![
         descriptor(
@@ -739,14 +782,16 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
         ),
         descriptor(
             "planner_set_goal",
-            "Set a sim-only waypoint goal and begin local planner drive commands",
+            "Set a waypoint goal; physical profiles require compile/runtime gates, token, approval, and fresh localization/lidar",
             SafetyClass::SimControl,
             object_schema(&[
+                ("token", "string", false),
                 ("frame_id", "string", false),
                 ("x_m", "number", true),
                 ("y_m", "number", true),
                 ("tolerance_m", "number", false),
                 ("speed_mode", "SpeedMode", false),
+                ("approval", "boolean", false),
             ]),
             "PlannerStatus",
         ),
@@ -766,11 +811,13 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
         ),
         descriptor(
             "start_patrol",
-            "Start a sim-only patrol using coverage, frontier, or random goal selection",
+            "Start patrol; physical profiles require compile/runtime gates, token, approval, and fresh localization/lidar",
             SafetyClass::SimControl,
             object_schema(&[
+                ("token", "string", false),
                 ("strategy", "PatrolStrategy", false),
                 ("speed_mode", "SpeedMode", false),
+                ("approval", "boolean", false),
             ]),
             "PatrolStatus",
         ),
@@ -846,11 +893,13 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
         ),
         descriptor(
             "start_patrol_zone",
-            "Start a saved patrol zone in sim or replay without enabling physical actuation",
+            "Start a saved patrol zone; physical profiles require compile/runtime gates, token, approval, and fresh localization/lidar",
             SafetyClass::SimControl,
             object_schema(&[
+                ("token", "string", false),
                 ("zone_id", "string", true),
                 ("speed_mode", "SpeedMode", false),
+                ("approval", "boolean", false),
             ]),
             "PatrolStatus",
         ),
@@ -1325,7 +1374,11 @@ fn optional_spatial_memory_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(any(feature = "mavlink-drone", feature = "manipulator"))]
+    #[cfg(any(
+        feature = "mavlink-drone",
+        feature = "manipulator",
+        feature = "physical-navigation"
+    ))]
     use crate::config::Profile;
     use crate::{config::PolicyMode, types::TelemetryFrame, HarnessConfig};
 
@@ -1355,6 +1408,75 @@ mod tests {
         ] {
             assert!(classes.contains(&safety), "missing {safety:?}");
         }
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn physical_navigation_start_is_dynamically_policy_gated() {
+        let sim_telemetry = Harness::new(HarnessConfig::default()).unwrap().telemetry();
+        let harness = Harness::new_with_test_driver(HarnessConfig {
+            profile: Profile::WaveshareUgv,
+            allow_untokened_drive: false,
+            allow_physical_actuation: true,
+            allow_physical_navigation: true,
+            deadman_ms: 5_000,
+            policy_mode: PolicyMode::RequireApproval,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        harness
+            .submit_localization_update(crate::LocalizationProviderUpdate::from_telemetry(
+                1,
+                &sim_telemetry,
+            ))
+            .unwrap();
+        harness
+            .update_range_scan_status(sim_telemetry.sensors.range_scan)
+            .unwrap();
+        for _ in 0..1_000 {
+            if harness.localization_provider_status().sequence == Some(1) {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        harness
+            .authorize("nav-token".to_string(), 30, SpeedMode::Low)
+            .unwrap();
+        let registry = CapabilityRegistry::new(harness.clone());
+
+        let error = registry
+            .invoke_value(
+                "planner_set_goal",
+                json!({"token": "nav-token", "x_m": 0.25, "y_m": 0.0}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("policy require-approval"));
+
+        let error = registry
+            .invoke_value(
+                "planner_set_goal",
+                json!({"approval": true, "x_m": 0.25, "y_m": 0.0}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("pilot token"));
+
+        let started = registry
+            .invoke_value(
+                "planner_set_goal",
+                json!({
+                    "token": "nav-token",
+                    "approval": true,
+                    "x_m": 0.25,
+                    "y_m": 0.0,
+                    "speed_mode": "high"
+                }),
+            )
+            .unwrap();
+        assert_eq!(started["active"], true);
+        assert_eq!(started["goal"]["speed_mode"], "low");
+        assert!(harness.planner_status().last_drive.is_some());
     }
 
     #[tokio::test]

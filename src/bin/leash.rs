@@ -131,6 +131,9 @@ struct RuntimeArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     allow_physical_actuation: bool,
 
+    #[arg(long, action = ArgAction::SetTrue)]
+    allow_physical_navigation: bool,
+
     #[arg(long)]
     deadman_ms: Option<u64>,
 
@@ -990,6 +993,7 @@ impl RuntimeArgs {
                 None
             },
             allow_physical_actuation: self.allow_physical_actuation.then_some(true),
+            allow_physical_navigation: self.allow_physical_navigation.then_some(true),
             deadman_ms: self.deadman_ms,
             soft_odometry_limit_m: self.soft_odometry_limit_m,
             serial_port: self.serial_port,
@@ -1181,7 +1185,9 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
     frame.health.profile = "replay".to_string();
     frame.health.uptime_ms = ts_ms;
     frame.health.physical_actuation_enabled = false;
+    frame.health.physical_navigation_enabled = false;
     frame.safety.physical_actuation_enabled = false;
+    frame.safety.physical_navigation_enabled = false;
     frame.visualization.ts_ms = ts_ms;
     frame.visualization.map.ts_ms = ts_ms;
     frame.visualization.pose.ts_ms = ts_ms;
@@ -1339,6 +1345,9 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     }
     if config.allow_physical_actuation {
         args.push("--allow-physical-actuation".to_string());
+    }
+    if config.allow_physical_navigation {
+        args.push("--allow-physical-navigation".to_string());
     }
     if let Some(path) = &config.replay_source {
         args.push("--replay-source".to_string());

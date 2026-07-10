@@ -31,4 +31,19 @@ check_refuses_without_gate "mavlink-drone" \
 check_refuses_without_gate "manipulator" \
   cargo run --quiet --features manipulator -- serve http --profile manipulator --listen 127.0.0.1:18083
 
+set +e
+navigation_output="$(cargo run --quiet --features waveshare-ugv -- serve http --profile waveshare-ugv --listen 127.0.0.1:18084 --allow-physical-actuation --allow-physical-navigation 2>&1)"
+navigation_status=$?
+set -e
+
+if [[ "$navigation_status" -eq 0 ]]; then
+  echo "expected physical navigation to require its compile-time feature" >&2
+  exit 1
+fi
+if [[ "$navigation_output" != *"'physical-navigation' compile-time feature"* ]]; then
+  echo "expected physical navigation compile-time gate error" >&2
+  echo "$navigation_output" >&2
+  exit 1
+fi
+
 echo "physical gate smoke ok"

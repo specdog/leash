@@ -10,6 +10,7 @@ flowchart TB
   docs --> mcp["MCP_HTTP.md\nstandard and compatibility HTTP paths"]
   docs --> camera["CAMERA.md\ncapture, stream, recovery, and encoder tuning"]
   docs --> navigation["NAVIGATION.md\nsaved waypoints, patrol zones, and motion events"]
+  navigation --> physicalNav["PHYSICAL_NAVIGATION.md\nindependent gates and reusable smoke checklist"]
   docs --> adapters["ADAPTERS.md\nRust contracts and second-UGV checklist"]
   docs --> adapterSmoke["ADAPTER_SMOKE_TEMPLATE.md\nreusable pre-fleet proof"]
   docs --> sessions["OPERATOR_SESSIONS.md\nsafe recording and offline GUI replay"]
@@ -31,6 +32,7 @@ flowchart TB
 - `MCP_HTTP.md`: MCP Streamable HTTP requests, safety behavior, and legacy REST compatibility.
 - `CAMERA.md`: camera ownership, health and recovery routes, capture settings, and Jetson encoder tuning.
 - `NAVIGATION.md`: persistent waypoints and patrol zones, sim/replay execution, operator controls, and passive motion events.
+- `PHYSICAL_NAVIGATION.md`: compile/runtime gates, policy lease, freshness/cancellation behavior, and generic physical-navigation smoke checklist.
 - `ADAPTERS.md`: mobile-base, gimbal, and camera contracts plus the second-UGV implementation checklist.
 - `ADAPTER_SMOKE_TEMPLATE.md`: reusable no-hardware, bench, camera, telemetry, soak, and sign-off checklist.
 - `OPERATOR_SESSIONS.md`: safe operator event recording and offline GUI timeline replay.

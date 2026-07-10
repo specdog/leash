@@ -45,6 +45,7 @@ parse_json() {
 
 assert_capabilities_streams() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.physical_navigation_enabled !== false) throw new Error("sim unexpectedly enabled physical navigation");
 for (const endpoint of ["WS /ws/telemetry", "GET /events/telemetry", "GET /sse/telemetry"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing endpoint: ${endpoint}`);
 }

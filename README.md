@@ -161,15 +161,18 @@ emits the active patrol goal/path in telemetry visualization frames.
 
 Saved navigation adds persistent waypoint and patrol-zone CRUD plus
 `start_patrol_zone`. Saved zones execute through the planner in simulation and
-as non-actuating path selection in replay; physical profiles refuse them. The
-operator lists configured zones and offers start/stop controls while keeping
-e-stop priority. Passive external motion-worker events are emitted in
+as non-actuating path selection in replay. Physical mobile-base execution is
+off by default and requires the independent compile/runtime gate documented in
+[docs/PHYSICAL_NAVIGATION.md](docs/PHYSICAL_NAVIGATION.md). The operator lists
+configured zones and offers start/stop controls while keeping e-stop priority.
+Passive external motion-worker events are emitted in
 `TelemetryFrame.motion_events`. See [docs/NAVIGATION.md](docs/NAVIGATION.md).
 
 Planner movement calls the same `drive` capability as manual control, so speed
-caps, deadman state, estop state, and the soft odometry limit still apply. The
-grid-strategy patrol loop is a sim-only demo surface; saved zone execution is
-available in sim and non-actuating replay.
+caps, deadman state, estop state, and the soft odometry limit still apply.
+Physical providers cannot bypass Leash-owned policy, low-speed cap, 10 Hz
+command limit, localization/lidar freshness, or cancellation. Replay remains
+non-actuating.
 
 ## Spatial Memory
 
@@ -424,6 +427,7 @@ operation.
 | `http` | HTTP server + WebSocket | ✓ |
 | `mcp` | MCP stdio server | ✓ |
 | `waveshare-ugv` | Waveshare UGV physical adapter | opt-in |
+| `physical-navigation` | Physical goal/patrol execution safety gate | opt-in |
 | `mavlink-drone` | MAVLink drone adapter skeleton, sim/replay proof, and gated physical profile | opt-in |
 | `manipulator` | Manipulator adapter skeleton, mock arm teleop, and gated physical profile | opt-in |
 | `bridge-compat` | Legacy robot bridge compatibility | opt-in |

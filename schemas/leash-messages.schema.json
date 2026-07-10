@@ -936,6 +936,10 @@
         "physical": {
           "type": "boolean"
         },
+        "physical_navigation_enabled": {
+          "default": false,
+          "type": "boolean"
+        },
         "profile": {
           "type": "string"
         },
@@ -1816,6 +1820,10 @@
           }
         },
         "physical_actuation_enabled": {
+          "type": "boolean"
+        },
+        "physical_navigation_enabled": {
+          "default": false,
           "type": "boolean"
         },
         "profile": {
@@ -5855,6 +5863,10 @@
         "physical_actuation_enabled": {
           "type": "boolean"
         },
+        "physical_navigation_enabled": {
+          "default": false,
+          "type": "boolean"
+        },
         "soft_odometry_limit_m": {
           "format": "double",
           "type": "number"
@@ -8659,6 +8671,10 @@
             "physical_actuation_enabled": {
               "type": "boolean"
             },
+            "physical_navigation_enabled": {
+              "default": false,
+              "type": "boolean"
+            },
             "profile": {
               "type": "string"
             },
@@ -9617,6 +9633,10 @@
               "type": "boolean"
             },
             "physical_actuation_enabled": {
+              "type": "boolean"
+            },
+            "physical_navigation_enabled": {
+              "default": false,
               "type": "boolean"
             },
             "soft_odometry_limit_m": {
