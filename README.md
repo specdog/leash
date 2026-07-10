@@ -92,7 +92,10 @@ flowchart LR
 Start with the implementation guide for private configuration, pinned container
 builds, stationary sensor proof, map save/load, rollback, and supervised field
 gates. Pinkie's measured transforms and loop-closure acceptance live in the
-[calibration guide](implementations/waveshare-ugv/calibration/README.md).
+[calibration guide](implementations/waveshare-ugv/calibration/README.md). After
+those gates pass, the implementation-owned half-meter, three-goal, and bounded
+patrol workflow is in the
+[Pinkie physical-navigation guide](implementations/waveshare-ugv/navigation/README.md).
 Generic extension authors should instead use
 [the adapter guide](docs/ADAPTERS.md) and
 [localization-provider contract](docs/LOCALIZATION_PROVIDERS.md).
@@ -203,8 +206,8 @@ Passive external motion-worker events are emitted in
 Planner movement calls the same `drive` capability as manual control, so speed
 caps, deadman state, estop state, and the soft odometry limit still apply.
 Physical providers cannot bypass Leash-owned policy, low-speed cap, 10 Hz
-command limit, localization/lidar freshness, or cancellation. Replay remains
-non-actuating.
+command limit, localization/lidar freshness, pose-covariance ceiling, active-map
+lease, bounded-zone checks, or cancellation. Replay remains non-actuating.
 
 ## Spatial Memory
 
@@ -265,6 +268,14 @@ POST /camera/aim           { token, pan_deg, tilt_deg, speed, accel, approval }
 GET  /agent                Local web input form
 GET  /agent/messages       Recent agent input messages
 POST /agent/messages       { source, text }
+GET  /waypoints            List saved map-scoped waypoints
+POST /planner/goal         { token, frame_id, x_m, y_m, tolerance_m, speed_mode, approval }
+GET  /planner/status       Current goal, path, and terminal state
+POST /planner/cancel       Cancel goal and send zero speed
+GET  /patrol/zones         List saved patrol zones
+POST /patrol/zones/:zone_id/start  { token, speed_mode, approval }
+GET  /patrol/status        Current patrol and terminal waypoint state
+POST /patrol/stop          Stop patrol and planner
 POST /drive               { token, left, right, speed_mode, approval }
 POST /estop                Latch emergency stop
 POST /estop/reset          { token, approval } Clear estop

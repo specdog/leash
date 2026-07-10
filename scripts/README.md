@@ -22,7 +22,7 @@ flowchart TB
 
 - `install-bot.sh`: builds a Leash binary and installs a user `systemd` service plus env file on a bot host.
 - `smoke-all.sh`: aggregate no-hardware release proof; CI runs this and checks generated schemas.
-- `smoke-http.sh`: HTTP, WebSocket/SSE, visualization frame, map/costmap contracts, external clients, agent input, capture, drive, and policy checks.
+- `smoke-http.sh`: HTTP, WebSocket/SSE, visualization frame, map/costmap contracts, guarded planner goal/status/cancel, external clients, agent input, capture, drive, and policy checks.
 - `smoke-mcp.sh`: stdio MCP initialization and tool calls.
 - `smoke-mcp-http.sh`: localhost MCP HTTP routes, `leash mcp` CLI calls, sim planner set/status calls, and sim patrol start/status/stop calls.
 - `smoke-mcp-bridge.sh`: Rust stdio MCP bridge against a localhost `leash serve mcp-http` bot surface.

@@ -76,6 +76,10 @@ const PHYSICAL_NAV_COMMAND_INTERVAL_MS: u64 = 100;
 const PHYSICAL_NAV_SENSOR_FRESH_MS: u128 = 500;
 #[cfg(feature = "physical-navigation")]
 const PHYSICAL_NAV_MIN_CLEARANCE_M: f64 = 0.15;
+#[cfg(feature = "physical-navigation")]
+const PHYSICAL_NAV_MAX_POSITION_SIGMA_M: f64 = 0.15;
+#[cfg(feature = "physical-navigation")]
+const PHYSICAL_NAV_MAX_YAW_SIGMA_RAD: f64 = 0.174_532_925_199_432_95;
 pub const CAMERA_PAN_MIN_DEG: f64 = -180.0;
 pub const CAMERA_PAN_MAX_DEG: f64 = 180.0;
 pub const CAMERA_TILT_MIN_DEG: f64 = -30.0;
@@ -248,6 +252,7 @@ struct CommandState {
 struct PhysicalNavigationLease {
     token: String,
     approval: bool,
+    map: MapIdentity,
     last_command_at: Option<Instant>,
 }
 
@@ -350,6 +355,7 @@ pub struct Harness {
     dashboard_events: Arc<Mutex<VecDeque<String>>>,
     planner: Arc<Mutex<PlannerStatus>>,
     patrol: Arc<Mutex<PatrolState>>,
+    sim_navigation_token: Arc<Mutex<Option<String>>>,
     spatial_memory: Arc<SpatialMemoryStore>,
     navigation: Arc<NavigationStore>,
     perception: PerceptionRuntime,
@@ -477,6 +483,7 @@ impl Harness {
             dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
             patrol: Arc::new(Mutex::new(PatrolState::default())),
+            sim_navigation_token: Arc::new(Mutex::new(None)),
             spatial_memory,
             navigation,
             perception: PerceptionRuntime::fake(),
@@ -607,6 +614,11 @@ impl Harness {
     }
 
     pub fn set_planner_goal(&self, goal: PlannerGoal) -> Result<PlannerStatus> {
+        self.set_sim_navigation_token(None)?;
+        self.set_sim_planner_goal(goal)
+    }
+
+    fn set_sim_planner_goal(&self, goal: PlannerGoal) -> Result<PlannerStatus> {
         if self.config.profile != Profile::Sim {
             return Err(anyhow!("planner is only available for the sim profile"));
         }
@@ -672,7 +684,8 @@ impl Harness {
         approval: bool,
     ) -> Result<PlannerStatus> {
         if !self.config.profile.is_physical() {
-            return self.set_planner_goal(goal);
+            self.set_sim_navigation_token(token)?;
+            return self.set_sim_planner_goal(goal);
         }
         #[cfg(feature = "physical-navigation")]
         {
@@ -688,6 +701,7 @@ impl Harness {
     }
 
     pub fn cancel_planner_goal(&self) -> Result<PlannerStatus> {
+        self.clear_sim_navigation_token();
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("stopped", "patrol stopped by planner cancel");
         self.cancel_planner_state("cancelled", "planner goal cancelled");
@@ -803,6 +817,11 @@ impl Harness {
     }
 
     pub fn start_patrol_zone(&self, zone_id: &str, speed_mode: SpeedMode) -> Result<PatrolStatus> {
+        self.set_sim_navigation_token(None)?;
+        self.start_sim_patrol_zone(zone_id, speed_mode)
+    }
+
+    fn start_sim_patrol_zone(&self, zone_id: &str, speed_mode: SpeedMode) -> Result<PatrolStatus> {
         if !matches!(self.config.profile, Profile::Sim | Profile::Replay) {
             return Err(anyhow!(
                 "patrol zones are only available for sim and replay profiles"
@@ -844,7 +863,7 @@ impl Harness {
         };
 
         let planner = if self.config.profile == Profile::Sim {
-            self.set_planner_goal(goal.clone())?
+            self.set_sim_planner_goal(goal.clone())?
         } else {
             let status = PlannerStatus {
                 ok: true,
@@ -902,7 +921,8 @@ impl Harness {
         approval: bool,
     ) -> Result<PatrolStatus> {
         if !self.config.profile.is_physical() {
-            return self.start_patrol_zone(zone_id, speed_mode);
+            self.set_sim_navigation_token(token)?;
+            return self.start_sim_patrol_zone(zone_id, speed_mode);
         }
         #[cfg(feature = "physical-navigation")]
         {
@@ -918,6 +938,15 @@ impl Harness {
     }
 
     pub fn start_patrol(
+        &self,
+        strategy: PatrolStrategy,
+        speed_mode: SpeedMode,
+    ) -> Result<PatrolStatus> {
+        self.set_sim_navigation_token(None)?;
+        self.start_sim_patrol(strategy, speed_mode)
+    }
+
+    fn start_sim_patrol(
         &self,
         strategy: PatrolStrategy,
         speed_mode: SpeedMode,
@@ -956,7 +985,7 @@ impl Harness {
         };
 
         let goal = planner_goal_for_cell(goal_cell, speed_mode);
-        let planner = self.set_planner_goal(goal.clone())?;
+        let planner = self.set_sim_planner_goal(goal.clone())?;
         let mut patrol = self.patrol.lock();
         if planner.ok && planner.active {
             patrol.status = patrol_status(PatrolStatusUpdate {
@@ -992,7 +1021,8 @@ impl Harness {
         approval: bool,
     ) -> Result<PatrolStatus> {
         if !self.config.profile.is_physical() {
-            return self.start_patrol(strategy, speed_mode);
+            self.set_sim_navigation_token(token)?;
+            return self.start_sim_patrol(strategy, speed_mode);
         }
         #[cfg(feature = "physical-navigation")]
         {
@@ -1057,6 +1087,7 @@ impl Harness {
         *self.physical_navigation_lease.lock() = Some(PhysicalNavigationLease {
             token,
             approval,
+            map: snapshot.localization.map.clone(),
             last_command_at: None,
         });
         {
@@ -1115,19 +1146,38 @@ impl Harness {
             .navigation
             .zone(zone_id)
             .ok_or_else(|| anyhow!("patrol zone '{zone_id}' does not exist"))?;
-        let waypoint_id = zone
-            .waypoint_ids
-            .first()
-            .ok_or_else(|| anyhow!("patrol zone '{zone_id}' has no waypoints"))?;
-        let waypoint = self
-            .navigation
-            .waypoint(waypoint_id)
-            .ok_or_else(|| anyhow!("patrol zone waypoint '{waypoint_id}' does not exist"))?;
-        if waypoint.map.as_ref() != Some(&snapshot.localization.map) {
+        if zone.boundary.len() < 3 {
             return Err(anyhow!(
-                "physical patrol waypoint map identity does not match the active provider map"
+                "physical patrol zone requires an explicit boundary with at least three points"
             ));
         }
+        let mut waypoints = Vec::with_capacity(zone.waypoint_ids.len());
+        for waypoint_id in &zone.waypoint_ids {
+            let waypoint = self
+                .navigation
+                .waypoint(waypoint_id)
+                .ok_or_else(|| anyhow!("patrol zone waypoint '{waypoint_id}' does not exist"))?;
+            if waypoint.map.as_ref() != Some(&snapshot.localization.map) {
+                return Err(anyhow!(
+                    "physical patrol waypoint map identity does not match the active provider map"
+                ));
+            }
+            if waypoint.frame_id != zone.frame_id {
+                return Err(anyhow!(
+                    "physical patrol waypoint frame does not match the zone frame"
+                ));
+            }
+            if !point_in_polygon_or_boundary(waypoint.x_m, waypoint.y_m, &zone.boundary) {
+                return Err(anyhow!(
+                    "physical patrol waypoint '{waypoint_id}' is outside the bounded zone"
+                ));
+            }
+            waypoints.push(waypoint);
+        }
+        let waypoint = waypoints
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("patrol zone '{zone_id}' has no waypoints"))?;
         let goal = PlannerGoal {
             frame_id: waypoint.frame_id,
             x_m: waypoint.x_m,
@@ -1217,6 +1267,33 @@ impl Harness {
         {
             return Err(anyhow!(
                 "physical navigation requires fresh tracking localization"
+            ));
+        }
+        let covariance = &snapshot
+            .localization
+            .pose
+            .as_ref()
+            .expect("tracking readiness requires a pose")
+            .covariance;
+        if covariance.len() != 9
+            || covariance.iter().any(|value| !value.is_finite())
+            || covariance[0] < 0.0
+            || covariance[4] < 0.0
+            || covariance[8] < 0.0
+        {
+            return Err(anyhow!(
+                "physical navigation requires a finite 3x3 pose covariance"
+            ));
+        }
+        let x_sigma = covariance[0].sqrt();
+        let y_sigma = covariance[4].sqrt();
+        let yaw_sigma = covariance[8].sqrt();
+        if x_sigma > PHYSICAL_NAV_MAX_POSITION_SIGMA_M
+            || y_sigma > PHYSICAL_NAV_MAX_POSITION_SIGMA_M
+            || yaw_sigma > PHYSICAL_NAV_MAX_YAW_SIGMA_RAD
+        {
+            return Err(anyhow!(
+                "physical navigation pose covariance exceeds the low-speed acceptance threshold"
             ));
         }
         let range_scan = self.raw.read().range_scan.clone();
@@ -1352,6 +1429,9 @@ impl Harness {
                 "POST /agent/messages".to_string(),
                 "POST /pilot/authorize".to_string(),
                 "GET /waypoints".to_string(),
+                "POST /planner/goal".to_string(),
+                "GET /planner/status".to_string(),
+                "POST /planner/cancel".to_string(),
                 "GET /patrol/zones".to_string(),
                 "POST /patrol/zones/:zone_id/start".to_string(),
                 "GET /patrol/status".to_string(),
@@ -1833,6 +1913,7 @@ impl Harness {
             command.right_cmd = 0.0;
             command.last_cmd_at = Some(Instant::now());
         }
+        self.clear_sim_navigation_token();
         self.clear_physical_navigation_lease();
         self.cancel_planner_state(
             "collision-stop",
@@ -1878,6 +1959,7 @@ impl Harness {
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
+        self.clear_sim_navigation_token();
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("stopped", "patrol movement stopped");
         self.cancel_planner_state("stopped", "planner movement stopped");
@@ -1903,6 +1985,7 @@ impl Harness {
     }
 
     pub fn estop(&self) -> Result<()> {
+        self.clear_sim_navigation_token();
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
@@ -1957,6 +2040,9 @@ impl Harness {
         if goal_distance <= goal.tolerance_m {
             self.cancel_planner_state("reached", "planner goal reached");
             let _ = self.stop_without_planner_cancel();
+            if !self.patrol.lock().status.active {
+                self.clear_sim_navigation_token();
+            }
             return;
         }
 
@@ -1974,11 +2060,13 @@ impl Harness {
             });
         let (left, right) = planner_drive_command(&current, &next);
 
-        match self.drive(None, left, right, Some(goal.speed_mode)) {
+        let token = self.sim_navigation_token.lock().clone();
+        match self.drive(token.as_deref(), left, right, Some(goal.speed_mode)) {
             Ok(outcome) => {
                 let mut planner = self.planner.lock();
                 planner.last_drive = Some(outcome.clone());
                 if outcome.soft_odometry_limited {
+                    self.clear_sim_navigation_token();
                     planner.ok = false;
                     planner.active = false;
                     planner.status = "limited".to_string();
@@ -1991,6 +2079,7 @@ impl Harness {
                 }
             }
             Err(err) => {
+                self.clear_sim_navigation_token();
                 let mut planner = self.planner.lock();
                 planner.ok = false;
                 planner.active = false;
@@ -2037,6 +2126,13 @@ impl Harness {
                 return;
             }
         };
+        if snapshot.localization.map != lease.map {
+            self.fail_physical_navigation(
+                "map-replaced",
+                "physical navigation stopped because the active map identity changed",
+            );
+            return;
+        }
         let current = snapshot
             .localization
             .pose
@@ -2183,7 +2279,7 @@ impl Harness {
         };
 
         let (goal, strategy, speed_mode) = next;
-        let planner = match self.set_planner_goal(goal.clone()) {
+        let planner = match self.set_sim_planner_goal(goal.clone()) {
             Ok(planner) => planner,
             Err(err) => {
                 let mut patrol = self.patrol.lock();
@@ -2229,6 +2325,14 @@ impl Harness {
                 return;
             }
         }
+        let (zone_id, waypoint_index, strategy) = {
+            let patrol = self.patrol.lock();
+            (
+                patrol.status.zone_id.clone(),
+                patrol.status.waypoint_index,
+                patrol.status.strategy.unwrap_or_default(),
+            )
+        };
         let current_lease = { self.physical_navigation_lease.lock().clone() };
         let Some(lease) = current_lease else {
             self.fail_physical_navigation(
@@ -2237,7 +2341,19 @@ impl Harness {
             );
             return;
         };
-        let strategy = self.patrol.lock().status.strategy.unwrap_or_default();
+        if let Some(zone_id) = zone_id {
+            if let Err(error) = self.advance_physical_patrol_zone(
+                &zone_id,
+                waypoint_index.unwrap_or_default(),
+                &lease,
+            ) {
+                self.fail_physical_navigation(
+                    "safety-stop",
+                    &format!("physical patrol zone stopped: {error}"),
+                );
+            }
+            return;
+        }
         let snapshot = match self.physical_navigation_snapshot() {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -2271,6 +2387,70 @@ impl Harness {
                 &format!("physical patrol stopped: {error}"),
             ),
         }
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    fn advance_physical_patrol_zone(
+        &self,
+        zone_id: &str,
+        current_index: usize,
+        lease: &PhysicalNavigationLease,
+    ) -> Result<()> {
+        let zone = self
+            .navigation
+            .zone(zone_id)
+            .ok_or_else(|| anyhow!("patrol zone '{zone_id}' no longer exists"))?;
+        let next_index = current_index.saturating_add(1);
+        if next_index >= zone.waypoint_ids.len() {
+            self.stop_without_planner_cancel()?;
+            self.clear_physical_navigation_lease();
+            let mut patrol = self.patrol.lock();
+            patrol.status.ok = true;
+            patrol.status.active = false;
+            patrol.status.status = "completed".to_string();
+            patrol.status.message =
+                "physical patrol zone completed its terminal waypoint and stopped".to_string();
+            return Ok(());
+        }
+
+        let snapshot = self.physical_navigation_snapshot()?;
+        let waypoint_id = &zone.waypoint_ids[next_index];
+        let waypoint = self
+            .navigation
+            .waypoint(waypoint_id)
+            .ok_or_else(|| anyhow!("patrol zone waypoint '{waypoint_id}' no longer exists"))?;
+        if waypoint.map.as_ref() != Some(&snapshot.localization.map) {
+            return Err(anyhow!(
+                "next waypoint map identity does not match the active provider map"
+            ));
+        }
+        if waypoint.frame_id != zone.frame_id
+            || !point_in_polygon_or_boundary(waypoint.x_m, waypoint.y_m, &zone.boundary)
+        {
+            return Err(anyhow!(
+                "next waypoint is outside the active bounded patrol zone"
+            ));
+        }
+        let goal = PlannerGoal {
+            frame_id: waypoint.frame_id,
+            x_m: waypoint.x_m,
+            y_m: waypoint.y_m,
+            tolerance_m: waypoint.tolerance_m,
+            speed_mode: SpeedMode::Low,
+        };
+        let planner =
+            self.set_physical_planner_goal(goal.clone(), Some(&lease.token), lease.approval)?;
+        let mut patrol = self.patrol.lock();
+        patrol.status.goal = Some(goal);
+        patrol.status.path = planner.path;
+        patrol.status.status = planner.status;
+        patrol.status.message = format!(
+            "physical patrol zone selected waypoint {} of {}",
+            next_index + 1,
+            zone.waypoint_ids.len()
+        );
+        patrol.status.waypoint_index = Some(next_index);
+        Ok(())
     }
 
     fn cancel_patrol_state(&self, status: &str, message: &str) {
@@ -2442,6 +2622,16 @@ impl Harness {
         Ok(Some(session))
     }
 
+    fn set_sim_navigation_token(&self, token: Option<&str>) -> Result<()> {
+        self.validate_session(token)?;
+        *self.sim_navigation_token.lock() = token.map(ToOwned::to_owned);
+        Ok(())
+    }
+
+    fn clear_sim_navigation_token(&self) {
+        *self.sim_navigation_token.lock() = None;
+    }
+
     #[cfg(feature = "physical-navigation")]
     fn validate_required_session(&self, token: &str) -> Result<PilotSession> {
         let mut sessions = self.sessions.lock();
@@ -2506,6 +2696,7 @@ impl Harness {
                     command.right_cmd = 0.0;
                     command.stopped_by_deadman = true;
                     drop(command);
+                    harness.clear_sim_navigation_token();
                     harness.clear_physical_navigation_lease();
                     harness
                         .cancel_planner_state("deadman", "planner movement cancelled by deadman");
@@ -2853,6 +3044,39 @@ fn active_map_from_snapshot(
         && !map.map_revision.trim().is_empty()
         && !map.frame_id.trim().is_empty())
     .then(|| map.clone())
+}
+
+#[cfg(feature = "physical-navigation")]
+fn point_in_polygon_or_boundary(
+    x_m: f64,
+    y_m: f64,
+    boundary: &[crate::types::ZoneBoundaryPoint],
+) -> bool {
+    if boundary.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut previous = boundary.len() - 1;
+    for current in 0..boundary.len() {
+        let a = &boundary[previous];
+        let b = &boundary[current];
+        let cross = (x_m - a.x_m) * (b.y_m - a.y_m) - (y_m - a.y_m) * (b.x_m - a.x_m);
+        let on_segment = cross.abs() <= 1e-9
+            && x_m >= a.x_m.min(b.x_m) - 1e-9
+            && x_m <= a.x_m.max(b.x_m) + 1e-9
+            && y_m >= a.y_m.min(b.y_m) - 1e-9
+            && y_m <= a.y_m.max(b.y_m) + 1e-9;
+        if on_segment {
+            return true;
+        }
+        if (a.y_m > y_m) != (b.y_m > y_m)
+            && x_m < (b.x_m - a.x_m) * (y_m - a.y_m) / (b.y_m - a.y_m) + a.x_m
+        {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    inside
 }
 
 #[cfg(feature = "physical-navigation")]
@@ -3418,6 +3642,30 @@ mod tests {
     }
 
     #[cfg(feature = "physical-navigation")]
+    fn update_physical_localization(
+        harness: &Harness,
+        update: impl FnOnce(&mut LocalizationProviderUpdate),
+    ) {
+        let sequence = harness
+            .localization_provider
+            .snapshot(now_ms())
+            .status
+            .sequence
+            .unwrap_or_default()
+            + 1;
+        let mut localization =
+            LocalizationProviderUpdate::from_telemetry(sequence, &harness.telemetry());
+        update(&mut localization);
+        harness
+            .localization_provider
+            .apply_at(localization, now_ms())
+            .unwrap();
+        harness
+            .update_range_scan_status(simulated_range_scan(now_ms()))
+            .unwrap();
+    }
+
+    #[cfg(feature = "physical-navigation")]
     fn assert_physical_navigation_stopped(harness: &Harness, expected: &str) {
         harness.planner_step();
         let planner = harness.planner_status();
@@ -3526,6 +3774,18 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("blocked by lidar"));
+
+        let harness = physical_navigation_harness();
+        update_physical_localization(&harness, |update| {
+            update.localization.pose.as_mut().unwrap().covariance[0] = 0.09;
+        });
+        assert!(harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap_err()
+            .to_string()
+            .contains("covariance exceeds"));
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
     }
 
     #[cfg(feature = "physical-navigation")]
@@ -3570,6 +3830,15 @@ mod tests {
         harness
             .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
             .unwrap();
+        harness
+            .authorize("replacement-token".to_string(), 30, SpeedMode::Low)
+            .unwrap();
+        assert_physical_navigation_stopped(&harness, "invalid pilot token");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
         harness.command.lock().stopped_by_deadman = true;
         assert_physical_navigation_stopped(&harness, "deadman stop");
 
@@ -3598,6 +3867,47 @@ mod tests {
             .update_range_scan_status(simulated_range_scan(stale_ts))
             .unwrap();
         assert_physical_navigation_stopped(&harness, "lidar is stale");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
+        harness
+            .update_range_scan_status(RangeScanStatus {
+                status: crate::types::SensorDataStatus::Disconnected,
+                source: "test".to_string(),
+                error: Some("lidar disconnected".to_string()),
+                ..RangeScanStatus::default()
+            })
+            .unwrap();
+        assert_physical_navigation_stopped(&harness, "available lidar");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
+        let mut blocked = simulated_range_scan(now_ms());
+        blocked.sample.as_mut().unwrap().ranges_m[0] = Some(0.1);
+        harness.update_range_scan_status(blocked).unwrap();
+        assert_physical_navigation_stopped(&harness, "blocked by lidar");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
+        update_physical_localization(&harness, |update| {
+            update.localization.pose.as_mut().unwrap().covariance[4] = 0.09;
+        });
+        assert_physical_navigation_stopped(&harness, "covariance exceeds");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
+        update_physical_localization(&harness, |update| {
+            update.localization.map.map_revision = "replacement-map".to_string();
+        });
+        assert_physical_navigation_stopped(&harness, "active map identity changed");
 
         let harness = physical_navigation_harness();
         harness
@@ -3644,12 +3954,57 @@ mod tests {
             })
             .unwrap();
         harness
+            .create_waypoint(WaypointSpec {
+                id: "turn".to_string(),
+                name: "Turn".to_string(),
+                frame_id: "map".to_string(),
+                x_m: 0.25,
+                y_m: 0.25,
+                tolerance_m: 0.05,
+            })
+            .unwrap();
+        harness
+            .create_patrol_zone(PatrolZoneSpec {
+                id: "unbounded-zone".to_string(),
+                name: "Unbounded zone".to_string(),
+                frame_id: "map".to_string(),
+                waypoint_ids: vec!["dock".to_string()],
+                boundary: Vec::new(),
+            })
+            .unwrap();
+        assert!(
+            harness
+                .start_patrol_zone_authorized(
+                    "unbounded-zone",
+                    SpeedMode::Low,
+                    Some("nav-token"),
+                    true,
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("explicit boundary")
+        );
+        harness
             .create_patrol_zone(PatrolZoneSpec {
                 id: "dock-zone".to_string(),
                 name: "Dock zone".to_string(),
                 frame_id: "map".to_string(),
-                waypoint_ids: vec!["dock".to_string()],
-                boundary: Vec::new(),
+                waypoint_ids: vec!["dock".to_string(), "turn".to_string()],
+                boundary: vec![
+                    crate::types::ZoneBoundaryPoint {
+                        x_m: -0.1,
+                        y_m: -0.1,
+                    },
+                    crate::types::ZoneBoundaryPoint {
+                        x_m: 0.5,
+                        y_m: -0.1,
+                    },
+                    crate::types::ZoneBoundaryPoint { x_m: 0.5, y_m: 0.5 },
+                    crate::types::ZoneBoundaryPoint {
+                        x_m: -0.1,
+                        y_m: 0.5,
+                    },
+                ],
             })
             .unwrap();
         let zone = harness
@@ -3659,17 +4014,36 @@ mod tests {
         assert_eq!(zone.zone_id.as_deref(), Some("dock-zone"));
         assert_eq!(zone.speed_mode, SpeedMode::Low);
 
+        update_physical_localization(&harness, |update| {
+            let pose = &mut update.localization.pose.as_mut().unwrap().pose;
+            pose.x_m = 0.25;
+            pose.y_m = 0.0;
+        });
+        harness.planner_step();
+        harness.physical_patrol_step();
+        let second = harness.patrol_status();
+        assert!(second.active);
+        assert_eq!(second.waypoint_index, Some(1));
+        assert_eq!(second.goal.as_ref().unwrap().y_m, 0.25);
+
+        update_physical_localization(&harness, |update| {
+            let pose = &mut update.localization.pose.as_mut().unwrap().pose;
+            pose.x_m = 0.25;
+            pose.y_m = 0.25;
+        });
+        harness.planner_step();
+        harness.physical_patrol_step();
+        let completed = harness.patrol_status();
+        assert!(!completed.active);
+        assert_eq!(completed.status, "completed");
+        assert!(harness.physical_navigation_lease.lock().is_none());
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+
         harness.stop().unwrap();
-        let telemetry = harness.telemetry();
-        let mut replacement = LocalizationProviderUpdate::from_telemetry(2, &telemetry);
-        replacement.localization.map.map_revision = "replacement-map".to_string();
-        harness
-            .localization_provider
-            .apply_at(replacement, now_ms())
-            .unwrap();
-        harness
-            .update_range_scan_status(simulated_range_scan(now_ms()))
-            .unwrap();
+        update_physical_localization(&harness, |update| {
+            update.localization.map.map_revision = "replacement-map".to_string();
+        });
         assert!(harness
             .start_patrol_zone_authorized("dock-zone", SpeedMode::Low, Some("nav-token"), true,)
             .unwrap_err()

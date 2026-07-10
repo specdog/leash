@@ -56,10 +56,11 @@ done
 
 implementations/waveshare-ugv/ros2/verify.sh
 implementations/waveshare-ugv/calibration/verify.sh
+implementations/waveshare-ugv/navigation/verify.sh
 
 if grep -R -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)' docs/ADAPTERS.md docs/ADAPTER_SMOKE_TEMPLATE.md implementations/waveshare-ugv; then
   echo "adapter docs contain a private address" >&2
   exit 1
 fi
 
-printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true,"ugv_calibration":true}\n'
+printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true,"ugv_calibration":true,"ugv_physical_navigation":true}\n'

@@ -146,6 +146,11 @@ offline acceptance tools are in [`calibration/`](calibration/README.md). The
 checked-in profile stays explicitly unmeasured until the issue #166 field gates
 and evidence digests have passed.
 
+Only after that calibration and the read-only SLAM proof pass, use the
+[`navigation/`](navigation/README.md) workflow for the supervised half-meter,
+three-goal, and bounded-patrol evidence. It is separately gated and does not
+turn this implementation directory into a reusable navigation library.
+
 The LD06 parser accepts the vendor 47-byte `0x54 0x2c` packet, checks CRC-8,
 interpolates its 12 angles from packet start/end, applies the configured body
 transform and masks, and assembles an evenly binned full revolution. Invalid
@@ -326,3 +331,6 @@ Run the no-hardware contract gate anywhere with:
 ```bash
 implementations/waveshare-ugv/ros2/verify.sh
 ```
+
+The later supervised motion gate and evidence aggregator are documented in the
+[physical-navigation implementation guide](navigation/README.md).

@@ -187,6 +187,17 @@ struct DriveReq {
 }
 
 #[derive(Debug, Deserialize)]
+struct PlannerGoalReq {
+    token: Option<String>,
+    frame_id: Option<String>,
+    x_m: f64,
+    y_m: f64,
+    tolerance_m: Option<f64>,
+    speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 struct CameraAimReq {
     token: Option<String>,
     pan_deg: f64,
@@ -210,7 +221,9 @@ struct AgentMessageReq {
 
 #[derive(Debug, Default, Deserialize)]
 struct PatrolZoneStartReq {
+    token: Option<String>,
     speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -271,6 +284,9 @@ pub fn router(harness: Harness) -> Router {
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
         .route("/waypoints", get(waypoints))
+        .route("/planner/goal", post(planner_goal))
+        .route("/planner/status", get(planner_status))
+        .route("/planner/cancel", post(planner_cancel))
         .route("/patrol/zones", get(patrol_zones))
         .route("/patrol/zones/:zone_id/start", post(patrol_zone_start))
         .route("/patrol/status", get(patrol_status))
@@ -329,14 +345,43 @@ async fn patrol_status(State(harness): State<Harness>) -> Json<crate::types::Pat
     Json(harness.patrol_status())
 }
 
+async fn planner_goal(
+    State(harness): State<Harness>,
+    Json(req): Json<PlannerGoalReq>,
+) -> Result<Json<crate::types::PlannerStatus>, HttpError> {
+    Ok(Json(harness.set_planner_goal_authorized(
+        crate::types::PlannerGoal {
+            frame_id: req.frame_id.unwrap_or_else(|| "map".to_string()),
+            x_m: req.x_m,
+            y_m: req.y_m,
+            tolerance_m: req.tolerance_m.unwrap_or(0.1),
+            speed_mode: req.speed_mode.unwrap_or(SpeedMode::Low),
+        },
+        req.token.as_deref(),
+        req.approval.unwrap_or(false),
+    )?))
+}
+
+async fn planner_status(State(harness): State<Harness>) -> Json<crate::types::PlannerStatus> {
+    Json(harness.planner_status())
+}
+
+async fn planner_cancel(
+    State(harness): State<Harness>,
+) -> Result<Json<crate::types::PlannerStatus>, HttpError> {
+    Ok(Json(harness.cancel_planner_goal()?))
+}
+
 async fn patrol_zone_start(
     AxumPath(zone_id): AxumPath<String>,
     State(harness): State<Harness>,
     Json(req): Json<PatrolZoneStartReq>,
 ) -> Result<Json<crate::types::PatrolStatus>, HttpError> {
-    Ok(Json(harness.start_patrol_zone(
+    Ok(Json(harness.start_patrol_zone_authorized(
         &zone_id,
         req.speed_mode.unwrap_or(SpeedMode::Low),
+        req.token.as_deref(),
+        req.approval.unwrap_or(false),
     )?))
 }
 
