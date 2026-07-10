@@ -183,6 +183,9 @@ identity, device paths, calibration evidence, deployment, rollback, and field
 proof outside the reusable core. ROS 2 is an implementation adapter for mapping
 and localization, never a parallel motor owner.
 
+Pinkie's measured transforms and loop-closure acceptance live in the
+[calibration guide](implementations/waveshare-ugv/calibration/README.md).
+
 ## Core Surfaces
 
 ### MCP tools
