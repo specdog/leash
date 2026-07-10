@@ -166,3 +166,136 @@ It sends stop before and after the run and never sends drive. It requires one
 unchanged service PID, available/fresh lidar and IMU samples, positive scan
 rate, stable point count, and bounded RSS spread. Keep the output private; it
 contains live process measurements.
+
+## ROS 2 Humble SLAM adapter
+
+The [`ros2/`](ros2/) directory is an implementation-only adapter. Its container
+polls generic Leash telemetry, publishes ROS sensor topics, runs
+`robot_localization` and SLAM Toolbox, then submits map/pose/covariance through
+the generic localization-provider update. It never opens a device, subscribes
+to a velocity-command topic, or calls a Leash movement endpoint.
+
+```mermaid
+flowchart LR
+  leash["Leash HTTP\nsole serial owner"] -->|"GET telemetry"| bridge["read-only ROS bridge"]
+  bridge --> scan["/scan"]
+  bridge --> imu["/imu/data_raw"]
+  bridge --> wheel["/wheel/odometry"]
+  bridge --> static["/tf_static"]
+  wheel --> ekf["robot_localization"]
+  imu --> ekf
+  ekf -->|"odom to base_link"| slam["SLAM Toolbox"]
+  scan --> slam
+  static --> slam
+  slam --> map["map, map to odom, pose/covariance"]
+  map --> bridge
+  bridge -->|"authenticated generic update"| provider["Leash localization provider"]
+  provider --> tools["telemetry, visualization, MCP, replay"]
+```
+
+The image is pinned to the official ARM64-capable Humble ROS base manifest and
+pins the installed Humble packages. The current top-level pins are
+`robot_localization 3.5.4`, `slam_toolbox 2.6.10`, `tf2 0.25.20`,
+`launch_ros 0.19.13`, and ROS interfaces `4.9.1`; the complete Debian build
+versions are checked against [`ros2/packages.lock`](ros2/packages.lock) during
+every [`ros2/Dockerfile`](ros2/Dockerfile) build.
+
+### Boundary and topics
+
+| Direction | Topic or route | Contract |
+| --- | --- | --- |
+| Leash to ROS | `/scan` | `sensor_msgs/LaserScan`, capture timestamp and `base_scan` frame preserved. |
+| Leash to ROS | `/imu/data_raw` | `sensor_msgs/Imu` in SI units; unknown orientation is explicitly marked unavailable. |
+| Leash to ROS | `/wheel/odometry` | Differential wheel pose/twist from Leash distances and measured track/scale. |
+| Adapter | `/tf_static` | Measured `base_link` to lidar/camera transforms from private environment. |
+| EKF | `/odometry/filtered`, `/tf` | Continuous `odom` to `base_link` estimate. |
+| SLAM | `/map`, `/pose`, `/tf` | Occupancy grid, pose/covariance, and `map` to `odom`. |
+| ROS to Leash | `POST /localization/update` | Versioned generic provider update; bearer token read from a private file. |
+
+The EKF fuses wheel x/y/yaw, forward velocity, wheel yaw velocity, and IMU yaw
+velocity. The bridge publishes conservative wheel pose/twist and IMU covariance
+inputs; [`ros2/config/ekf.yaml`](ros2/config/ekf.yaml) documents exactly which
+state dimensions are fused. Issue #166 replaces provisional scale, track, pose,
+mask, and covariance values with measured calibration.
+
+### Private setup
+
+The host Leash service and the container must read the same random token without
+placing it in Git, process arguments, or Compose output:
+
+```bash
+install -d -m 700 ~/.config/leash ~/.local/state/leash/waveshare-ugv-slam/maps
+openssl rand -hex 32 > ~/.config/leash/localization-token
+chmod 600 ~/.config/leash/localization-token
+```
+
+Add only this path to the private Leash service environment, then restart Leash
+while the UGV is stopped:
+
+```bash
+LEASH_LOCALIZATION_INGRESS_TOKEN_FILE=/home/<user>/.config/leash/localization-token
+```
+
+Copy [`ros2/.env.example`](ros2/.env.example) to a private file outside the
+repository. Set the token/state paths and explicit provisional transform/track
+values. Provisional values are for stationary read-only bring-up only; do not
+claim calibration from them. Ensure UID 1000 can write the private map-state
+directory. Starting the system Docker daemon may require the local operator's
+sudo authorization.
+
+### Build and lifecycle
+
+Run these commands on the UGV host. Every lifecycle command sends Leash stop
+before and after it, and none sends drive:
+
+```bash
+export LEASH_ROS_ENV_FILE=~/.config/leash/waveshare-ros.env
+implementations/waveshare-ugv/ros2/slam-stack.sh build
+implementations/waveshare-ugv/ros2/slam-stack.sh start
+implementations/waveshare-ugv/ros2/slam-stack.sh status
+implementations/waveshare-ugv/ros2/slam-stack.sh restart
+implementations/waveshare-ugv/ros2/slam-stack.sh stop
+```
+
+`status` requires the bridge, EKF, and SLAM nodes; lists only the expected
+sensor/map/TF topics; and shows Leash provider state. If the bridge or SLAM
+container stops, Leash's generic provider becomes stale and physical navigation
+rejects execution. Restart the container, require provider state `tracking`, and
+send stop before any later supervised work.
+
+### Save and load maps
+
+Names are restricted to short filename-safe values. Outputs stay in the private
+map-state bind mount:
+
+```bash
+implementations/waveshare-ugv/ros2/slam-stack.sh save first-room
+implementations/waveshare-ugv/ros2/slam-stack.sh load first-room
+```
+
+`save` writes both the occupancy-map output and serialized pose graph. `load`
+sends stop, calls SLAM Toolbox deserialization with a zero initial pose, and
+sends stop again. After load, verify map identity, provider tracking, covariance,
+and the current pose before allowing any later navigation ticket.
+
+### Thirty-minute read-only proof
+
+With the UGV stationary and the container already healthy:
+
+```bash
+implementations/waveshare-ugv/ros2/ros-soak.sh \
+  --env-file ~/.config/leash/waveshare-ros.env \
+  --duration-secs 1800 \
+  --output ~/.local/state/leash/waveshare-ugv-ros-soak.json
+```
+
+The proof requires one unchanged Leash service PID and container, no restart or
+OOM event, fresh lidar/IMU, tracking localization after warmup, and recorded
+container CPU/RSS. The robot is stopped before and after. Keep the JSON private;
+attach only scrubbed totals to the ticket or pull request.
+
+Run the no-hardware contract gate anywhere with:
+
+```bash
+implementations/waveshare-ugv/ros2/verify.sh
+```

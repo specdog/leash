@@ -69,6 +69,31 @@ flowchart LR
   registry --> safety["Safety gates\ntoken, approval, dry-run, deny, estop, deadman"]
 ```
 
+## Waveshare UGV implementation
+
+Leash stays reusable; the concrete motor, camera, lidar, IMU, ROS 2 SLAM,
+calibration, deployment, and field proof live under the
+[Waveshare UGV implementation](implementations/waveshare-ugv/README.md). ROS is
+an implementation adapter, not a Leash core dependency or motor-control path.
+
+```mermaid
+flowchart LR
+  devices["UGV devices"] --> leash["Leash\nsole device owner"]
+  leash --> generic["generic sensor contracts"]
+  generic --> ros["implementation-only\nROS 2 Humble adapter"]
+  ros --> slam["robot_localization\nand SLAM Toolbox"]
+  slam --> provider["generic localization\nprovider update"]
+  provider --> leash
+  leash --> tools["telemetry, replay, MCP,\nvisualization, memory"]
+  ros -. "no serial devices or motor commands" .-> devices
+```
+
+Start with the implementation guide for private configuration, pinned container
+builds, stationary sensor proof, map save/load, rollback, and supervised field
+gates. Generic extension authors should instead use
+[the adapter guide](docs/ADAPTERS.md) and
+[localization-provider contract](docs/LOCALIZATION_PROVIDERS.md).
+
 ## Quick Start
 
 ```bash
@@ -214,6 +239,8 @@ POST /dashboard/capture    Capture frame through shared capability registry
 GET  /health              Harness health
 GET  /capabilities         Endpoints + tools + stream transport
 GET  /telemetry            Latest TelemetryFrame
+GET  /localization         Localization provider status
+POST /localization/update  Token-protected generic provider update
 GET  /events/telemetry     Server-sent telemetry stream
 GET  /sse/telemetry        Alias for /events/telemetry
 GET  /camera/status        Camera and gimbal status
