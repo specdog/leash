@@ -409,6 +409,43 @@ const checks = [
       return "replay source config resolved as non-physical";
     },
   },
+  {
+    name: "mapping-replay-fixture",
+    argv: [
+      "cargo",
+      "run",
+      "--quiet",
+      "--",
+      "replay",
+      "examples/replay/sim-mapping.jsonl",
+      "--speed",
+      "100",
+    ],
+    validate: (stdout) => {
+      const events = stdout
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const telemetry = events.filter((event) => event.kind === "telemetry");
+      if (events.length !== 12 || telemetry.length !== 3) {
+        throw new Error("mapping replay did not preserve event counts");
+      }
+      for (const event of telemetry) {
+        const frame = event.data;
+        if (frame.telemetry?.sensors?.version !== "leash-sensors-v1") {
+          throw new Error("mapping replay sensor version was missing");
+        }
+        if (frame.telemetry?.localization?.health?.status !== "tracking") {
+          throw new Error("mapping replay localization was missing");
+        }
+        if (frame.visualization?.localization?.map?.map_id !== frame.telemetry.localization.map.map_id) {
+          throw new Error("mapping replay visualization lost map identity");
+        }
+      }
+      return "versioned sensor, localization, covariance, map, and visualization frames replayed deterministically";
+    },
+  },
 ];
 
 function snippet(text) {

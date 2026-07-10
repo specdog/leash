@@ -106,6 +106,9 @@ async function main() {
   if (telemetry.sensors?.imu?.status !== "available" || telemetry.sensors?.imu?.sample?.frame_id !== "base_link") {
     fail(`missing IMU in observe payload: ${JSON.stringify(telemetry.sensors)}`);
   }
+  if (telemetry.localization?.version !== "leash-localization-v1" || telemetry.localization?.health?.status !== "tracking") {
+    fail(`missing localization in observe payload: ${JSON.stringify(telemetry.localization)}`);
+  }
 
   console.log("mcp smoke ok");
 }

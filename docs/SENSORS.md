@@ -4,6 +4,11 @@ Leash exposes middleware-neutral contracts for a planar range scan and an IMU
 sample. These types carry SI units and frame conventions through normal telemetry
 without importing a robot SDK, device path, or ROS message dependency.
 
+`SensorSnapshot.version` is `leash-sensors-v1`. Range-scan and IMU status objects
+are serialized unchanged through telemetry, HTTP, MCP, streams, recording,
+replay, and visualization. See [LOCALIZATION.md](LOCALIZATION.md) for the paired
+map/pose/covariance contract and cross-surface compatibility rules.
+
 ```mermaid
 flowchart LR
   adapter["RangeScanAdapter / ImuAdapter"] --> status["typed status\navailable, stale, malformed, disconnected, unavailable"]

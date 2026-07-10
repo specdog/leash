@@ -585,6 +585,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telemetry_contract_round_trips_over_tcp_jsonl_without_field_renaming() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let telemetry = crate::Harness::new(crate::HarnessConfig::default())
+            .unwrap()
+            .telemetry_stream_frame();
+        let expected = StreamMessage {
+            stream: "telemetry".to_string(),
+            payload: serde_json::to_value(&telemetry).unwrap(),
+        };
+        let server =
+            tokio::spawn(async move { accept_tcp_jsonl_stream_message(&listener).await.unwrap() });
+
+        send_tcp_jsonl_stream_message(addr, &expected)
+            .await
+            .unwrap();
+        let received = server.await.unwrap();
+        let decoded: crate::TelemetryStreamFrame =
+            serde_json::from_value(received.payload).unwrap();
+
+        decoded.validate().unwrap();
+        assert_eq!(
+            decoded.telemetry.sensors.range_scan,
+            telemetry.telemetry.sensors.range_scan
+        );
+        assert_eq!(
+            decoded.telemetry.sensors.imu,
+            telemetry.telemetry.sensors.imu
+        );
+        assert_eq!(
+            decoded.telemetry.localization,
+            telemetry.telemetry.localization
+        );
+        assert_eq!(
+            decoded.visualization.localization,
+            telemetry.visualization.localization
+        );
+    }
+
+    #[tokio::test]
     async fn network_stream_frame_rejects_unsupported_versions() {
         let bytes =
             br#"{"schema_version":"old","stream":"telemetry","payload":{"seq":1}}"#.as_slice();

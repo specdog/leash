@@ -117,12 +117,24 @@ if (sensors.imu.sample?.frame_id !== "base_link") throw new Error("IMU frame was
 if (typeof sensors.imu.sample?.linear_acceleration_mps2?.z !== "number") throw new Error("IMU SI acceleration was missing");'
 }
 
+assert_localization_contract() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+const localization = payload.localization;
+if (localization?.version !== "leash-localization-v1") throw new Error("localization version was missing");
+if (localization.health?.status !== "tracking") throw new Error("localization status was not tracking");
+if (localization.map?.map_id !== "sim-local" || localization.map?.frame_id !== "map") throw new Error("map identity was wrong");
+if (localization.pose?.pose?.frame_id !== "map") throw new Error("localized pose was missing");
+if (!Array.isArray(localization.pose?.covariance) || localization.pose.covariance.length !== 9) throw new Error("pose covariance was missing");'
+}
+
 assert_stream_frame() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.kind !== "telemetry") throw new Error(`unexpected stream kind: ${payload.kind}`);
 if (!payload.telemetry || payload.telemetry.profile !== "sim") throw new Error("stream telemetry payload was missing");
 if (payload.telemetry.sensors?.range_scan?.status !== "available") throw new Error("stream range scan was missing");
 if (payload.telemetry.sensors?.imu?.status !== "available") throw new Error("stream IMU was missing");
+if (payload.telemetry.localization?.health?.status !== "tracking") throw new Error("stream localization health was missing");
+if (payload.visualization?.localization?.map?.map_id !== payload.telemetry.localization.map.map_id) throw new Error("visualization localization did not match telemetry");
 if (!payload.health || !Array.isArray(payload.health.modules)) throw new Error("stream health modules were missing");
 if (!payload.command || typeof payload.command.left_cmd !== "number") throw new Error("stream command state was missing");
 if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");
@@ -317,6 +329,7 @@ curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | assert_sensor_contracts
+curl -fsS "$base/telemetry" | assert_localization_contract
 curl -fsS "$base/waypoints" | parse_json
 curl -fsS "$base/patrol/zones" | parse_json
 curl -fsS "$base/patrol/status" | parse_json

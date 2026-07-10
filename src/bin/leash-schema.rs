@@ -21,15 +21,16 @@ use leash_harness::{
         BatteryStatus, CameraRecoveryResponse, CameraStatus, CameraStreamFailure,
         CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
         CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
-        ImuSample, ImuStatus, ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState,
+        ImuSample, ImuStatus, LocalizationFrame, LocalizationHealth, LocalizationStatus,
+        ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapIdentity,
         MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus,
         OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording,
         OperatorSessionRobot, OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZone,
         PatrolZoneList, PlanarRangeScan, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        Quaternion, RangeScanStatus, RawFrameStatus, ResourceSample, RunLogEntry,
-        SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorDataStatus, SensorSnapshot,
-        SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, Vector3Si, VisionResult, VisualizationFrame,
+        PoseWithCovariance2d, Quaternion, RangeScanStatus, RawFrameStatus, ResourceSample,
+        RunLogEntry, SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorDataStatus,
+        SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
+        TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si, VisionResult, VisualizationFrame,
         VisualizationPath, ZoneBoundaryPoint,
     },
     worker::{
@@ -126,6 +127,11 @@ fn schema_document() -> Result<Value> {
     insert::<Quaternion>(&mut schemas, "Quaternion")?;
     insert::<ImuSample>(&mut schemas, "ImuSample")?;
     insert::<ImuStatus>(&mut schemas, "ImuStatus")?;
+    insert::<MapIdentity>(&mut schemas, "MapIdentity")?;
+    insert::<PoseWithCovariance2d>(&mut schemas, "PoseWithCovariance2d")?;
+    insert::<LocalizationStatus>(&mut schemas, "LocalizationStatus")?;
+    insert::<LocalizationHealth>(&mut schemas, "LocalizationHealth")?;
+    insert::<LocalizationFrame>(&mut schemas, "LocalizationFrame")?;
     insert::<SpeedMode>(&mut schemas, "SpeedMode")?;
     insert::<ResourceSample>(&mut schemas, "ResourceSample")?;
     insert::<RunLogEntry>(&mut schemas, "RunLogEntry")?;

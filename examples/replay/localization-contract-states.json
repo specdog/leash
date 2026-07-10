@@ -1,0 +1,32 @@
+{
+  "format": "leash-localization-fixture-v1",
+  "frames": [
+    {
+      "version": "leash-localization-v1",
+      "ts_ms": 0,
+      "map": {"map_id": "fixture-map", "map_revision": "revision-1", "frame_id": "map"},
+      "pose": {
+        "pose": {"ts_ms": 0, "frame_id": "map", "x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0},
+        "covariance": [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02]
+      },
+      "health": {"status": "tracking", "last_update_ms": 0, "message": "tracking", "error": null}
+    },
+    {
+      "version": "leash-localization-v1",
+      "ts_ms": 100,
+      "map": {"map_id": "fixture-map", "map_revision": "revision-1", "frame_id": "map"},
+      "pose": {
+        "pose": {"ts_ms": 50, "frame_id": "map", "x_m": 0.1, "y_m": 0.0, "yaw_rad": 0.02},
+        "covariance": [0.04, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0, 0.0, 0.08]
+      },
+      "health": {"status": "stale", "last_update_ms": 50, "message": "update is stale", "error": null}
+    },
+    {
+      "version": "leash-localization-v1",
+      "ts_ms": 150,
+      "map": {"map_id": "fixture-map", "map_revision": "revision-1", "frame_id": "map"},
+      "pose": null,
+      "health": {"status": "lost", "last_update_ms": 50, "message": "localization lost", "error": "provider disconnected"}
+    }
+  ]
+}
