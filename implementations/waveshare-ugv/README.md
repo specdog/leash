@@ -241,9 +241,13 @@ repository. Set the token/state paths and explicit provisional transform/track
 values. Provisional values are for stationary read-only bring-up only; do not
 claim calibration from them. Ensure UID 1000 can write the private map-state
 directory. Starting the system Docker daemon may require the local operator's
-sudo authorization. `timedatectl show -p NTPSynchronized --value` must report
-`yes`; the lifecycle and soak tools refuse unsynchronized timestamps because
-external viewers and freshness gates cannot safely consume them.
+sudo authorization. The lifecycle and soak tools require
+`timedatectl show -p NTPSynchronized --value` to report `yes` because external
+viewers and freshness gates cannot safely consume a bad clock. On an isolated
+UGV where NTP is unavailable, they instead accept a trusted operator epoch only
+when the UGV clock is within five seconds. Generate that epoch on the trusted
+operator machine immediately before the remote command; generating it on the
+UGV would not prove anything.
 
 ### Build and lifecycle
 
@@ -257,6 +261,16 @@ implementations/waveshare-ugv/ros2/slam-stack.sh start
 implementations/waveshare-ugv/ros2/slam-stack.sh status
 implementations/waveshare-ugv/ros2/slam-stack.sh restart
 implementations/waveshare-ugv/ros2/slam-stack.sh stop
+```
+
+For an offline UGV whose clock has already been corrected, invoke `start` from
+the trusted operator machine like this (the local shell expands the epoch):
+
+```bash
+trusted_epoch=$(date +%s)
+ssh <ugv-host> "~/leash-current/implementations/waveshare-ugv/ros2/slam-stack.sh \
+  --env-file ~/.config/leash/waveshare-ros.env \
+  --clock-reference-epoch $trusted_epoch start"
 ```
 
 `status` requires the bridge, EKF, and SLAM nodes; lists only the expected
@@ -291,10 +305,14 @@ implementations/waveshare-ugv/ros2/ros-soak.sh \
   --output ~/.local/state/leash/waveshare-ugv-ros-soak.json
 ```
 
+If NTP is unavailable, run the soak remotely from the trusted operator machine
+in the same way and add `--clock-reference-epoch $trusted_epoch`.
+
 The proof requires one unchanged Leash service PID and container, no restart or
 OOM event, fresh lidar/IMU, tracking localization after warmup, and recorded
-container CPU/RSS. The robot is stopped before and after. Keep the JSON private;
-attach only scrubbed totals to the ticket or pull request.
+container CPU/RSS and the clock-proof mode/skew. The robot is stopped before and
+after. Keep the JSON private; attach only scrubbed totals to the ticket or pull
+request.
 
 Run the no-hardware contract gate anywhere with:
 

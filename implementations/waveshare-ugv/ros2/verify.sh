@@ -63,7 +63,12 @@ fi
 
 bash -n \
   "$ros_dir/bin/container_health.sh" \
+  "$ros_dir/clock-gate.sh" \
   "$ros_dir/slam-stack.sh" \
   "$ros_dir/ros-soak.sh"
+
+grep -Fq -- '--clock-reference-epoch' "$ros_dir/slam-stack.sh"
+grep -Fq -- '--clock-reference-epoch' "$ros_dir/ros-soak.sh"
+grep -Fq -- 'delta <= 5' "$ros_dir/clock-gate.sh"
 
 printf '{"ok":true,"ros_distro":"humble","bridge_fixture":true,"motor_access":false,"device_access":false}\n'
