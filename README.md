@@ -36,8 +36,11 @@ flowchart TB
   root --> scripts["scripts/\nSmoke tests and bot installer"]
   root --> docs["docs/\nOperator, release, and source-map docs"]
   root --> examples["examples/\nSafe runnable examples and fixtures"]
+  root --> implementations["implementations/\nConcrete robots built on public library contracts"]
   root --> specs["specs/leash/\nDotDog project graph source and compiled DAG"]
   root --> workflows[".github/workflows/\nCI and release automation"]
+
+  implementations --> ugvImplementation["waveshare-ugv/\ndeployment, sensors, mapping, field proof"]
 
   src --> runtime["runtime.rs\nHarness state, drivers, telemetry"]
   src --> memory["memory.rs\nFile-backed spatial memory store"]
@@ -59,7 +62,8 @@ flowchart LR
   harness --> drivers{"Profile driver"}
   drivers --> sim["sim\nno hardware"]
   drivers --> replay["replay\nJSONL fixtures"]
-  drivers --> ugv["waveshare-ugv\n/dev/ttyTHS1 serial"]
+  drivers --> ugv["waveshare-ugv\nfeature-gated mobile-base adapter"]
+  ugv -. "concrete configuration stays outside core" .-> ugvImplementation["Waveshare UGV implementation"]
   harness --> streams["Telemetry streams\nHTTP, SSE, WebSocket, MCP observe"]
   registry --> safety["Safety gates\ntoken, approval, dry-run, deny, estop, deadman"]
 ```

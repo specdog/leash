@@ -1,42 +1,46 @@
-# Source Map
+# Source map
 
-Leash starts from the Rust `robot-harness` built inside the hackathon
-`onchain-rover` repo.
+This repository is the canonical source for both the reusable Leash library and
+its concrete Waveshare UGV implementation. It is not extracted from, mirrored
+from, or dependent on an external rover repository.
 
-## Source Reference
+```mermaid
+flowchart TB
+  repo["specdog/leash"] --> library["Reusable library\nsrc/, schemas/, generic docs"]
+  repo --> ugv["Waveshare UGV implementation\nimplementations/waveshare-ugv/"]
+  repo --> examples["Safe examples and replay fixtures\nexamples/"]
+  repo --> proof["CI and no-hardware proof\n.github/, scripts/"]
 
-- Repository: `https://github.com/0xSoftBoi/onchain-rover`
-- Local source ref used for the first extraction pass:
-  `cba2604421249b02de93a52658db0c272dab5ae7`
-- Source package: `robot-harness`
+  library --> contracts["adapter, telemetry, localization, map, policy"]
+  ugv --> concrete["devices, calibration, deployment, SLAM, field proof"]
+  ugv --> contracts
+  concrete -. "private machine values stay local" .-> private["private baseline artifacts"]
+```
 
-## What Becomes Core
+## Reusable library
 
-- Runtime config and profile selection
-- Health, capabilities, telemetry, and sensor snapshots
-- Pilot token/session controls
-- Speed caps, deadman stop, estop latch/reset, and stop behavior
-- Simulation-safe runtime
-- MCP stdio and localhost HTTP transports
+- `src/`: runtime, public types/traits, policy, transports, replay, memory, and
+  feature-gated adapter boundaries.
+- `schemas/`: generated external message contracts.
+- `docs/`: generic operator, extension, release, and protocol documentation.
+- `scripts/`: hardware-independent smoke and packaging proof.
 
-## What Stays Optional
+The library must not require a robot name, fleet address, fixed device path,
+vendor calibration, ROS installation, or deployment credential.
 
-- Waveshare Ubuntu UGV serial adapter
-- Existing bridge/client compatibility routes
-- Bot user-service installation helpers
+## Waveshare UGV implementation
 
-## What Stays Out Of Core
+- `implementations/waveshare-ugv/`: concrete deployment, rollback, sensor,
+  calibration, localization, and supervised field-proof material.
+- `examples/waveshare-ugv/`: minimal runnable physical-adapter example that
+  links back to the canonical implementation.
 
-- Application-specific payment flows
-- Race or game UI
-- Chain contracts and settlement logic
-- Public sidecar app code
-- Hardware deployment state for a specific venue
+Private host identity, device serials, network values, fingerprints, and full
+environment files are captured only in the UGV host's private state directory.
 
-## Known Source Baseline Note
+## Safety boundary
 
-The source harness had a lidar unit-test call-site mismatch in this local ref:
-`LidarScanWindow::ingest` expects `min_valid_mm` and `mask`, while one test still
-called it with only `points`. Leash avoids importing that monolith directly and
-keeps the first extraction focused on the reusable runtime and install surface.
-
+The implementation consumes public Leash contracts. Leash remains the sole
+owner of motor, camera, and lidar devices; localization or mapping processes may
+supply pose, map, covariance, and path data but never bypass Leash actuation,
+policy, deadman, stop, or e-stop behavior.

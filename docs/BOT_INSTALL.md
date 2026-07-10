@@ -29,16 +29,21 @@ For camera-enabled builds and service environment settings, see
 
 ## Waveshare Ubuntu UGV Install
 
+The concrete deployment/rollback workflow lives under
+[`implementations/waveshare-ugv/`](../implementations/waveshare-ugv/). Keep
+robot identity and device values in that host's private configuration.
+
 Only run this after the bot is physically safe and the stock Waveshare process
 is stopped. The serial port is single-owner.
 
 Preflight the resolved config before starting the service:
 
 ```bash
+UGV_SERIAL_DEVICE=/path/to/serial-device
 leash show-config waveshare-ugv \
   --role courier \
   --listen 0.0.0.0:8000 \
-  --serial-port /dev/ttyTHS1 \
+  --serial-port "$UGV_SERIAL_DEVICE" \
   --no-untokened-drive \
   --allow-physical-actuation
 ```
@@ -47,11 +52,12 @@ Check `network_bind`, `physical_actuation_enabled`, and the field `source`
 values before moving on.
 
 ```bash
+UGV_SERIAL_DEVICE=/path/to/serial-device
 scripts/install-bot.sh \
   --profile waveshare-ugv \
   --role courier \
   --listen 0.0.0.0:8000 \
-  --serial-port /dev/ttyTHS1 \
+  --serial-port "$UGV_SERIAL_DEVICE" \
   --no-untokened-drive \
   --allow-physical-actuation \
   --start
