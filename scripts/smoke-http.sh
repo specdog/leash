@@ -106,10 +106,23 @@ const event = payload.motion_events[0];
 if (event.source !== "simulated-motion" || event.kind !== "detected") throw new Error("motion event was invalid");'
 }
 
+assert_sensor_contracts() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+const sensors = payload.sensors || payload;
+if (sensors.range_scan?.status !== "available") throw new Error("range scan status was missing");
+if (sensors.range_scan.sample?.frame_id !== "base_scan") throw new Error("range scan frame was wrong");
+if (!Array.isArray(sensors.range_scan.sample?.ranges_m) || sensors.range_scan.sample.ranges_m.length < 1) throw new Error("range samples were missing");
+if (sensors.imu?.status !== "available") throw new Error("IMU status was missing");
+if (sensors.imu.sample?.frame_id !== "base_link") throw new Error("IMU frame was wrong");
+if (typeof sensors.imu.sample?.linear_acceleration_mps2?.z !== "number") throw new Error("IMU SI acceleration was missing");'
+}
+
 assert_stream_frame() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.kind !== "telemetry") throw new Error(`unexpected stream kind: ${payload.kind}`);
 if (!payload.telemetry || payload.telemetry.profile !== "sim") throw new Error("stream telemetry payload was missing");
+if (payload.telemetry.sensors?.range_scan?.status !== "available") throw new Error("stream range scan was missing");
+if (payload.telemetry.sensors?.imu?.status !== "available") throw new Error("stream IMU was missing");
 if (!payload.health || !Array.isArray(payload.health.modules)) throw new Error("stream health modules were missing");
 if (!payload.command || typeof payload.command.left_cmd !== "number") throw new Error("stream command state was missing");
 if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");
@@ -303,11 +316,11 @@ if (!payload.stop || payload.stop.ok !== true) throw new Error("client stop resp
 curl -fsS "$base/health" | assert_health_modules
 curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
-curl -fsS "$base/telemetry" | parse_json
+curl -fsS "$base/telemetry" | assert_sensor_contracts
 curl -fsS "$base/waypoints" | parse_json
 curl -fsS "$base/patrol/zones" | parse_json
 curl -fsS "$base/patrol/status" | parse_json
-curl -fsS "$base/sensors" | parse_json
+curl -fsS "$base/sensors" | assert_sensor_contracts
 curl -fsS "$base/camera/stream/health" | assert_camera_health 0
 curl -fsS -X POST "$base/camera/stream/recover" | assert_camera_recovery
 curl -fsS "$base/camera/health" | assert_camera_health 1

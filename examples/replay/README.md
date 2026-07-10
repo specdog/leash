@@ -6,6 +6,7 @@ This folder holds deterministic replay fixtures. Replay lets HTTP and MCP observ
 flowchart LR
   fixture["sim-basic.jsonl\nobserve fixture"] --> replay["ReplayPlayback"]
   memory["sim-memory.jsonl\nmemory demo fixture"] --> replay
+  sensorStates["sensor-contract-states.json\ntyped sensor health cases"] --> contracts["range-scan and IMU contract tests"]
   replay --> harness["profile: replay\nphysical: false"]
   harness --> http["serve http --replay-source"]
   harness --> mcp["serve mcp --replay-source"]
@@ -20,6 +21,7 @@ flowchart LR
 - `sim-basic.jsonl`: small replay recording used by replay smoke tests and examples.
 - `sim-memory.jsonl`: short replay recording for demos that tag and recall locations through MCP while observe output stays deterministic.
 - `operator-session.json`: generic browser-operator fixture for offline camera, telemetry, ownership, and joystick timeline replay.
+- `sensor-contract-states.json`: deterministic valid, malformed, stale, and disconnected planar-scan/IMU states.
 
 ## Commands
 

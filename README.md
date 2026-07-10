@@ -25,6 +25,7 @@ leash worker run -- node -e 'setInterval(() => {}, 1000)'
 - **Local stream transport.** Module streams can use `local-pubsub` for async fan-out or `memory` for deterministic tests.
 - **Spatial memory primitives.** Agents can tag, query, list, and clear file-backed location/object memory isolated by run/profile.
 - **Deterministic replay.** JSONL record/replay fixtures can drive HTTP and MCP observe paths in non-physical replay mode.
+- **Typed sensor contracts.** Middleware-neutral planar range scans and IMU samples use documented SI units, frames, validation, and explicit unavailable/stale/error states.
 - **Offline operator debugging.** The fleet GUI records safe ownership, joystick, telemetry, and camera events for timeline replay without a live robot.
 
 ## Repository Map
@@ -261,6 +262,10 @@ poses, paths, occupancy grids, and costmaps; `base_link` is the robot-local
 frame for twist and point-cloud metadata; `camera` is used for image-space
 detections. Grid cells are row-major from the map origin at `origin`, with
 meters-per-cell in `resolution_m`.
+
+Range scans and IMU samples live under `TelemetryFrame.sensors` and use generic
+SI-unit contracts; see [docs/SENSORS.md](docs/SENSORS.md). Hardware model,
+device, calibration, and middleware choices stay in concrete implementations.
 
 External viewers can subscribe to the stream endpoints and render those fields
 without linking a viewer SDK into the core crate.

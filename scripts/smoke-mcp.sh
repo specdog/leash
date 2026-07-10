@@ -100,6 +100,12 @@ async function main() {
   if (!Array.isArray(telemetry.vision.detections) || telemetry.vision.detections[0]?.label !== "sim-fixture") {
     fail(`missing fake detection in observe payload: ${JSON.stringify(telemetry.vision)}`);
   }
+  if (telemetry.sensors?.range_scan?.status !== "available" || telemetry.sensors?.range_scan?.sample?.frame_id !== "base_scan") {
+    fail(`missing range scan in observe payload: ${JSON.stringify(telemetry.sensors)}`);
+  }
+  if (telemetry.sensors?.imu?.status !== "available" || telemetry.sensors?.imu?.sample?.frame_id !== "base_link") {
+    fail(`missing IMU in observe payload: ${JSON.stringify(telemetry.sensors)}`);
+  }
 
   console.log("mcp smoke ok");
 }

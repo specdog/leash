@@ -365,6 +365,8 @@ mod tests {
                     last_ms: Some(ts_ms),
                     payload: None,
                 },
+                range_scan: Default::default(),
+                imu: Default::default(),
             },
             vision: Default::default(),
             workers: Vec::new(),
