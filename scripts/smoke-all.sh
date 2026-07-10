@@ -442,6 +442,15 @@ const checks = [
         if (frame.visualization?.localization?.map?.map_id !== frame.telemetry.localization.map.map_id) {
           throw new Error("mapping replay visualization lost map identity");
         }
+        if (JSON.stringify(frame.visualization?.map) !== JSON.stringify(frame.telemetry?.map)) {
+          throw new Error("mapping replay visualization map diverged from telemetry");
+        }
+        if (JSON.stringify(frame.visualization?.occupancy_grid) !== JSON.stringify(frame.telemetry?.occupancy_grid)) {
+          throw new Error("mapping replay visualization occupancy grid diverged from telemetry");
+        }
+        if (JSON.stringify(frame.visualization?.costmap) !== JSON.stringify(frame.telemetry?.costmap)) {
+          throw new Error("mapping replay visualization costmap diverged from telemetry");
+        }
       }
       return "versioned sensor, localization, covariance, map, and visualization frames replayed deterministically";
     },

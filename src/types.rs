@@ -113,6 +113,12 @@ pub struct TelemetryFrame {
     #[serde(default)]
     pub localization: LocalizationFrame,
     #[serde(default)]
+    pub map: MapMetadata,
+    #[serde(default)]
+    pub occupancy_grid: OccupancyGridFrame,
+    #[serde(default)]
+    pub costmap: CostmapFrame,
+    #[serde(default)]
     pub vision: VisionResult,
     #[serde(default)]
     pub workers: Vec<ExternalWorkerStatus>,
@@ -221,6 +227,28 @@ impl TelemetryStreamFrame {
             .localization
             .validate()
             .map_err(TelemetryContractError::VisualizationLocalization)?;
+        if self.telemetry.map != self.visualization.map
+            || self.telemetry.occupancy_grid != self.visualization.occupancy_grid
+            || self.telemetry.costmap != self.visualization.costmap
+            || self.telemetry.localization != self.visualization.localization
+            || self.telemetry.sensors.range_scan != self.visualization.range_scan
+            || self.telemetry.sensors.imu != self.visualization.imu
+        {
+            return Err(TelemetryContractError::VisualizationMismatch);
+        }
+        if self.telemetry.occupancy_grid.cells.len()
+            != self.telemetry.occupancy_grid.width as usize
+                * self.telemetry.occupancy_grid.height as usize
+            || self.telemetry.costmap.costs.len()
+                != self.telemetry.costmap.width as usize * self.telemetry.costmap.height as usize
+        {
+            return Err(TelemetryContractError::GridSizeMismatch);
+        }
+        if !self.telemetry.localization.map.map_id.is_empty()
+            && self.telemetry.localization.map.map_id != self.telemetry.map.map_id
+        {
+            return Err(TelemetryContractError::MapIdentityMismatch);
+        }
         Ok(())
     }
 }
@@ -235,6 +263,9 @@ pub enum TelemetryContractError {
     Imu(SensorContractError),
     Localization(LocalizationContractError),
     VisualizationLocalization(LocalizationContractError),
+    VisualizationMismatch,
+    GridSizeMismatch,
+    MapIdentityMismatch,
 }
 
 impl std::fmt::Display for TelemetryContractError {
@@ -255,6 +286,15 @@ impl std::fmt::Display for TelemetryContractError {
             Self::Localization(error) => write!(formatter, "invalid localization: {error}"),
             Self::VisualizationLocalization(error) => {
                 write!(formatter, "invalid visualization localization: {error}")
+            }
+            Self::VisualizationMismatch => {
+                formatter.write_str("telemetry and visualization mapping fields do not match")
+            }
+            Self::GridSizeMismatch => {
+                formatter.write_str("mapping grid dimensions do not match cell counts")
+            }
+            Self::MapIdentityMismatch => {
+                formatter.write_str("localization and map identity do not match")
             }
         }
     }

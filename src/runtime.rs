@@ -989,6 +989,15 @@ impl Harness {
         } else {
             LocalizationFrame::default()
         };
+        let (map, occupancy_grid, costmap) = if self.config.profile == Profile::Sim {
+            simulated_map_frames(now)
+        } else {
+            (
+                MapMetadata::default(),
+                OccupancyGridFrame::default(),
+                CostmapFrame::default(),
+            )
+        };
         let resource = self.config.resource_sampling.then(current_resource_sample);
         let workers = if self.config.profile == Profile::Sim {
             vec![crate::worker::simulated_perception_worker_status()]
@@ -1015,6 +1024,9 @@ impl Harness {
             max_speed: command.speed_mode.cap(),
             sensors,
             localization,
+            map,
+            occupancy_grid,
+            costmap,
             vision: VisionResult::default(),
             workers,
             motion_events: Vec::new(),
@@ -1104,27 +1116,7 @@ impl Harness {
         let right_m = telemetry.odometry_right.unwrap_or_default();
         let x_m = round3((left_m + right_m) / 2.0);
         let yaw_rad = round3((right_m - left_m) * 0.25);
-        let map_origin = Pose2d {
-            ts_ms: telemetry.ts_ms,
-            frame_id: "map".to_string(),
-            x_m: -0.5,
-            y_m: -0.5,
-            yaw_rad: 0.0,
-        };
-        let map = MapMetadata {
-            ts_ms: telemetry.ts_ms,
-            map_id: if telemetry.localization.map.map_id.is_empty() {
-                "sim-local".to_string()
-            } else {
-                telemetry.localization.map.map_id.clone()
-            },
-            frame_id: "map".to_string(),
-            width: 4,
-            height: 4,
-            resolution_m: 0.25,
-            origin: map_origin.clone(),
-            cell_order: "row-major".to_string(),
-        };
+        let map = telemetry.map.clone();
         let planner_path = self.planner.lock().path.clone();
         let pose = telemetry
             .localization
@@ -1175,26 +1167,8 @@ impl Harness {
             } else {
                 planner_path
             },
-            occupancy_grid: OccupancyGridFrame {
-                ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
-                width: 4,
-                height: 4,
-                resolution_m: 0.25,
-                origin: map_origin.clone(),
-                metadata: map.clone(),
-                cells: planner_occupancy_cells(),
-            },
-            costmap: CostmapFrame {
-                ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
-                width: 4,
-                height: 4,
-                resolution_m: 0.25,
-                origin: map_origin,
-                metadata: map,
-                costs: planner_costs(),
-            },
+            occupancy_grid: telemetry.occupancy_grid.clone(),
+            costmap: telemetry.costmap.clone(),
             point_cloud: PointCloudMetadata {
                 ts_ms: telemetry.ts_ms,
                 frame_id: "base_link".to_string(),
@@ -2173,6 +2147,47 @@ fn simulated_localization_frame(ts_ms: u128, raw: &RawTelemetry) -> Localization
     }
 }
 
+fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, CostmapFrame) {
+    let origin = Pose2d {
+        ts_ms,
+        frame_id: "map".to_string(),
+        x_m: -0.5,
+        y_m: -0.5,
+        yaw_rad: 0.0,
+    };
+    let map = MapMetadata {
+        ts_ms,
+        map_id: "sim-local".to_string(),
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        cell_order: "row-major".to_string(),
+    };
+    let occupancy_grid = OccupancyGridFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        metadata: map.clone(),
+        cells: planner_occupancy_cells(),
+    };
+    let costmap = CostmapFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin,
+        metadata: map.clone(),
+        costs: planner_costs(),
+    };
+    (map, occupancy_grid, costmap)
+}
+
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
     value.max(min).min(max)
 }
@@ -2740,6 +2755,12 @@ mod tests {
             frame.visualization.localization.map.map_id,
             frame.visualization.map.map_id
         );
+        assert_eq!(frame.telemetry.map, frame.visualization.map);
+        assert_eq!(
+            frame.telemetry.occupancy_grid,
+            frame.visualization.occupancy_grid
+        );
+        assert_eq!(frame.telemetry.costmap, frame.visualization.costmap);
         assert_eq!(
             frame.visualization.range_scan,
             frame.telemetry.sensors.range_scan

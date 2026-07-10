@@ -1150,6 +1150,16 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
         localized.pose.ts_ms = ts_ms;
         frame.telemetry.localization.health.last_update_ms = Some(ts_ms);
     }
+    frame.telemetry.map.ts_ms = ts_ms;
+    frame.telemetry.map.origin.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.origin.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.metadata.ts_ms = ts_ms;
+    frame.telemetry.occupancy_grid.metadata.origin.ts_ms = ts_ms;
+    frame.telemetry.costmap.ts_ms = ts_ms;
+    frame.telemetry.costmap.origin.ts_ms = ts_ms;
+    frame.telemetry.costmap.metadata.ts_ms = ts_ms;
+    frame.telemetry.costmap.metadata.origin.ts_ms = ts_ms;
     frame.health.mode = "replay".to_string();
     frame.health.replay = true;
     frame.health.profile = "replay".to_string();
@@ -1166,6 +1176,9 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
     frame.visualization.range_scan = frame.telemetry.sensors.range_scan.clone();
     frame.visualization.imu = frame.telemetry.sensors.imu.clone();
     frame.visualization.localization = frame.telemetry.localization.clone();
+    frame.visualization.map = frame.telemetry.map.clone();
+    frame.visualization.occupancy_grid = frame.telemetry.occupancy_grid.clone();
+    frame.visualization.costmap = frame.telemetry.costmap.clone();
 }
 
 #[cfg(feature = "http")]

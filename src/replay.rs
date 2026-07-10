@@ -355,6 +355,12 @@ mod tests {
                 frame.visualization.localization,
                 frame.telemetry.localization
             );
+            assert_eq!(frame.visualization.map, frame.telemetry.map);
+            assert_eq!(
+                frame.visualization.occupancy_grid,
+                frame.telemetry.occupancy_grid
+            );
+            assert_eq!(frame.visualization.costmap, frame.telemetry.costmap);
             assert_eq!(
                 frame.visualization.range_scan,
                 frame.telemetry.sensors.range_scan
@@ -425,6 +431,9 @@ mod tests {
                 imu: Default::default(),
             },
             localization: Default::default(),
+            map: Default::default(),
+            occupancy_grid: Default::default(),
+            costmap: Default::default(),
             vision: Default::default(),
             workers: Vec::new(),
             motion_events: Vec::new(),

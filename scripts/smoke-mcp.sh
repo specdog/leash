@@ -109,6 +109,15 @@ async function main() {
   if (telemetry.localization?.version !== "leash-localization-v1" || telemetry.localization?.health?.status !== "tracking") {
     fail(`missing localization in observe payload: ${JSON.stringify(telemetry.localization)}`);
   }
+  if (telemetry.map?.map_id !== telemetry.localization.map.map_id) {
+    fail(`map identity did not match localization: ${JSON.stringify(telemetry.map)}`);
+  }
+  if (!Array.isArray(telemetry.occupancy_grid?.cells) || telemetry.occupancy_grid.cells.length !== telemetry.occupancy_grid.metadata.width * telemetry.occupancy_grid.metadata.height) {
+    fail(`invalid occupancy grid in observe payload: ${JSON.stringify(telemetry.occupancy_grid)}`);
+  }
+  if (!Array.isArray(telemetry.costmap?.costs) || telemetry.costmap.costs.length !== telemetry.costmap.metadata.width * telemetry.costmap.metadata.height) {
+    fail(`invalid costmap in observe payload: ${JSON.stringify(telemetry.costmap)}`);
+  }
 
   console.log("mcp smoke ok");
 }

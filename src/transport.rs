@@ -618,6 +618,12 @@ mod tests {
             decoded.telemetry.localization,
             telemetry.telemetry.localization
         );
+        assert_eq!(decoded.telemetry.map, telemetry.telemetry.map);
+        assert_eq!(
+            decoded.telemetry.occupancy_grid,
+            telemetry.telemetry.occupancy_grid
+        );
+        assert_eq!(decoded.telemetry.costmap, telemetry.telemetry.costmap);
         assert_eq!(
             decoded.visualization.localization,
             telemetry.visualization.localization

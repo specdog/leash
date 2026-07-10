@@ -35,11 +35,12 @@ public validator and are rejected when loaded from replay.
 
 ## Cross-surface behavior
 
-`TelemetryFrame.localization` is the canonical value. HTTP telemetry, MCP
-observe, WebSocket/SSE frames, local transports, TCP JSONL payloads, recording,
-and replay serialize that same type without field renaming. The visualization
-frame carries the exact same localization value plus the same range-scan and IMU
-status objects used by telemetry, so a native viewer can render pose,
+`TelemetryFrame.localization`, `TelemetryFrame.map`,
+`TelemetryFrame.occupancy_grid`, and `TelemetryFrame.costmap` are the canonical
+values. HTTP telemetry, MCP observe, WebSocket/SSE frames, local transports, TCP
+JSONL payloads, recording, and replay serialize those same types without field
+renaming. The visualization frame carries exact copies plus the same range-scan
+and IMU status objects used by telemetry, so a native viewer can render pose,
 uncertainty, occupancy/cost maps, and sensor health from one frame.
 
 `SensorSnapshot.version` is `leash-sensors-v1`; localization is independently

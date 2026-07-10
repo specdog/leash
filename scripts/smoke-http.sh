@@ -124,7 +124,10 @@ if (localization?.version !== "leash-localization-v1") throw new Error("localiza
 if (localization.health?.status !== "tracking") throw new Error("localization status was not tracking");
 if (localization.map?.map_id !== "sim-local" || localization.map?.frame_id !== "map") throw new Error("map identity was wrong");
 if (localization.pose?.pose?.frame_id !== "map") throw new Error("localized pose was missing");
-if (!Array.isArray(localization.pose?.covariance) || localization.pose.covariance.length !== 9) throw new Error("pose covariance was missing");'
+if (!Array.isArray(localization.pose?.covariance) || localization.pose.covariance.length !== 9) throw new Error("pose covariance was missing");
+if (payload.map?.map_id !== localization.map.map_id) throw new Error("canonical map identity did not match localization");
+if (!Array.isArray(payload.occupancy_grid?.cells) || payload.occupancy_grid.cells.length !== payload.occupancy_grid.metadata.width * payload.occupancy_grid.metadata.height) throw new Error("canonical occupancy grid was invalid");
+if (!Array.isArray(payload.costmap?.costs) || payload.costmap.costs.length !== payload.costmap.metadata.width * payload.costmap.metadata.height) throw new Error("canonical costmap was invalid");'
 }
 
 assert_stream_frame() {
@@ -135,6 +138,9 @@ if (payload.telemetry.sensors?.range_scan?.status !== "available") throw new Err
 if (payload.telemetry.sensors?.imu?.status !== "available") throw new Error("stream IMU was missing");
 if (payload.telemetry.localization?.health?.status !== "tracking") throw new Error("stream localization health was missing");
 if (payload.visualization?.localization?.map?.map_id !== payload.telemetry.localization.map.map_id) throw new Error("visualization localization did not match telemetry");
+if (JSON.stringify(payload.visualization.map) !== JSON.stringify(payload.telemetry.map)) throw new Error("visualization map did not match telemetry");
+if (JSON.stringify(payload.visualization.occupancy_grid) !== JSON.stringify(payload.telemetry.occupancy_grid)) throw new Error("visualization occupancy grid did not match telemetry");
+if (JSON.stringify(payload.visualization.costmap) !== JSON.stringify(payload.telemetry.costmap)) throw new Error("visualization costmap did not match telemetry");
 if (!payload.health || !Array.isArray(payload.health.modules)) throw new Error("stream health modules were missing");
 if (!payload.command || typeof payload.command.left_cmd !== "number") throw new Error("stream command state was missing");
 if (!payload.safety || payload.safety.deadman_ok !== true) throw new Error("stream safety state was missing");

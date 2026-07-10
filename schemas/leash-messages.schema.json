@@ -5834,6 +5834,73 @@
           ],
           "type": "object"
         },
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
         "DetectionFrame": {
           "properties": {
             "confidence": {
@@ -6148,6 +6215,52 @@
           ],
           "type": "object"
         },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
         "MotionEvent": {
           "properties": {
             "confidence": {
@@ -6203,6 +6316,73 @@
             "cleared"
           ],
           "type": "string"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
         },
         "OdometryStatus": {
           "properties": {
@@ -6648,6 +6828,40 @@
             "null"
           ]
         },
+        "costmap": {
+          "$ref": "#/$defs/CostmapFrame",
+          "default": {
+            "costs": [],
+            "frame_id": "",
+            "height": 0,
+            "metadata": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
         "deadman_ok": {
           "type": "boolean"
         },
@@ -6677,6 +6891,25 @@
             "version": "leash-localization-v1"
           }
         },
+        "map": {
+          "$ref": "#/$defs/MapMetadata",
+          "default": {
+            "cell_order": "",
+            "frame_id": "",
+            "height": 0,
+            "map_id": "",
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
+        },
         "max_speed": {
           "format": "double",
           "type": "number"
@@ -6687,6 +6920,40 @@
             "$ref": "#/$defs/MotionEvent"
           },
           "type": "array"
+        },
+        "occupancy_grid": {
+          "$ref": "#/$defs/OccupancyGridFrame",
+          "default": {
+            "cells": [],
+            "frame_id": "",
+            "height": 0,
+            "metadata": {
+              "cell_order": "",
+              "frame_id": "",
+              "height": 0,
+              "map_id": "",
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "resolution_m": 0.0,
+              "ts_ms": 0,
+              "width": 0
+            },
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "resolution_m": 0.0,
+            "ts_ms": 0,
+            "width": 0
+          }
         },
         "odometry_left": {
           "format": "double",
@@ -8280,6 +8547,40 @@
                 "null"
               ]
             },
+            "costmap": {
+              "$ref": "#/$defs/CostmapFrame",
+              "default": {
+                "costs": [],
+                "frame_id": "",
+                "height": 0,
+                "metadata": {
+                  "cell_order": "",
+                  "frame_id": "",
+                  "height": 0,
+                  "map_id": "",
+                  "origin": {
+                    "frame_id": "",
+                    "ts_ms": 0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_rad": 0.0
+                  },
+                  "resolution_m": 0.0,
+                  "ts_ms": 0,
+                  "width": 0
+                },
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
             "deadman_ok": {
               "type": "boolean"
             },
@@ -8309,6 +8610,25 @@
                 "version": "leash-localization-v1"
               }
             },
+            "map": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
             "max_speed": {
               "format": "double",
               "type": "number"
@@ -8319,6 +8639,40 @@
                 "$ref": "#/$defs/MotionEvent"
               },
               "type": "array"
+            },
+            "occupancy_grid": {
+              "$ref": "#/$defs/OccupancyGridFrame",
+              "default": {
+                "cells": [],
+                "frame_id": "",
+                "height": 0,
+                "metadata": {
+                  "cell_order": "",
+                  "frame_id": "",
+                  "height": 0,
+                  "map_id": "",
+                  "origin": {
+                    "frame_id": "",
+                    "ts_ms": 0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_rad": 0.0
+                  },
+                  "resolution_m": 0.0,
+                  "ts_ms": 0,
+                  "width": 0
+                },
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
             },
             "odometry_left": {
               "format": "double",
