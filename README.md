@@ -193,6 +193,10 @@ as non-actuating path selection in replay. Physical mobile-base execution is
 off by default and requires the independent compile/runtime gate documented in
 [docs/PHYSICAL_NAVIGATION.md](docs/PHYSICAL_NAVIGATION.md). The operator lists
 configured zones and offers start/stop controls while keeping e-stop priority.
+Map-scoped waypoint list results include `stale` and `stale_reason`; localization
+loss reports `localization-unavailable`, while a different map identity or
+revision reports `map-replaced`. A reload of the same identity restores the
+waypoint without rewriting its coordinates.
 Passive external motion-worker events are emitted in
 `TelemetryFrame.motion_events`. See [docs/NAVIGATION.md](docs/NAVIGATION.md).
 
@@ -207,7 +211,8 @@ non-actuating.
 Leash keeps a small file-backed spatial memory store for named `location` and
 `object` entries. Each entry records `name`, `kind`, `frame_id`, `x_m`, `y_m`,
 `observed_at_ms`, `updated_at_ms`, `confidence`, `effective_confidence`, and a
-`stale` flag. The default path is under the Leash state directory:
+`stale` flag plus an optional `stale_reason`. The default path is under the
+Leash state directory:
 
 ```text
 $LEASH_STATE_DIR/memory/<profile>/<role>/<run-id>.json
@@ -224,10 +229,17 @@ semantics:
 ```bash
 leash mcp call invoke_capability --json '{"capability":"memory_tag_location","name":"dock","frame_id":"map","x_m":0.25,"y_m":0.0,"confidence":0.95}'
 leash mcp call invoke_capability --json '{"capability":"memory_tag_location","name":"cone","kind":"object","frame_id":"map","x_m":0.4,"y_m":0.5,"confidence":0.8}'
+leash mcp call invoke_capability --json '{"capability":"memory_tag_observation","name":"cone","confidence":0.8}'
 leash mcp call invoke_capability --json '{"capability":"memory_query","query":"dock","min_confidence":0.9}'
 leash mcp call invoke_capability capability=memory_list
 leash mcp call invoke_capability capability=memory_clear
 ```
+
+`memory_tag_observation` stores an observed object at the robot's current
+localized pose. Map-frame tagging fails when localization is stale/lost instead
+of silently creating unscoped coordinates. Existing map-scoped memory is marked
+`localization-unavailable` or `map-replaced` and regains active confidence only
+when the same map identity is tracking again.
 
 ## HTTP Endpoints
 
@@ -635,8 +647,8 @@ leash serve http --replay-source examples/replay/sim-mapping.jsonl
 Replay mode resolves to `profile: replay`, `mode: replay`, `replay: true`, and
 `physical: false` / `physical_actuation_enabled: false` in config, health, and
 capability output. The `sim-memory.jsonl` fixture is a short deterministic
-observe source for demos that tag and recall locations through MCP while replay
-telemetry stays stable.
+mapping source for demos that tag and recall map-scoped locations/objects through
+MCP while replay telemetry stays stable.
 
 Run narrower checks when you need to isolate one surface:
 

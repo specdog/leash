@@ -21,7 +21,7 @@ flowchart LR
 ## Files
 
 - `sim-basic.jsonl`: small replay recording used by replay smoke tests and examples.
-- `sim-memory.jsonl`: short replay recording for demos that tag and recall locations through MCP while observe output stays deterministic.
+- `sim-memory.jsonl`: short mapping replay for demos that tag and recall map-scoped locations/objects through MCP while observe output stays deterministic.
 - `operator-session.json`: generic browser-operator fixture for offline camera, telemetry, ownership, and joystick timeline replay.
 - `sensor-contract-states.json`: deterministic valid, malformed, stale, and disconnected planar-scan/IMU states.
 - `sim-mapping.jsonl`: an actual three-frame recording with versioned sensors, map identity, localized pose/covariance, health, and matching visualization data.

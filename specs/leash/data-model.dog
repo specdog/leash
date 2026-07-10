@@ -452,7 +452,7 @@ properties:
   replay_demo:
     type: string
     required: true
-    description: examples/replay/sim-memory.jsonl supports deterministic memory demos
+    description: examples/replay/sim-memory.jsonl supports deterministic map-scoped memory demos
 states: [planned, implemented, active]
 lifecycle: planned → implemented → active
 ```

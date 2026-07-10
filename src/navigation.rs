@@ -65,7 +65,11 @@ impl NavigationStore {
     }
 
     pub fn waypoints(&self) -> SavedWaypointList {
-        self.waypoint_status(&self.state.lock())
+        self.waypoints_for_map(None)
+    }
+
+    pub fn waypoints_for_map(&self, active_map: Option<&MapIdentity>) -> SavedWaypointList {
+        self.waypoint_status(&self.state.lock(), active_map)
     }
 
     pub fn waypoint(&self, id: &str) -> Option<SavedWaypoint> {
@@ -102,17 +106,19 @@ impl NavigationStore {
             id: spec.id,
             name: spec.name,
             frame_id: spec.frame_id,
-            map,
+            map: map.clone(),
             x_m: spec.x_m,
             y_m: spec.y_m,
             tolerance_m: spec.tolerance_m,
             created_at_ms: now,
             updated_at_ms: now,
+            stale: false,
+            stale_reason: None,
         });
         sort_file(&mut next);
         self.write(&next)?;
         *state = next;
-        Ok(self.waypoint_status(&state))
+        Ok(self.waypoint_status(&state, map.as_ref()))
     }
 
     pub fn update_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
@@ -137,7 +143,7 @@ impl NavigationStore {
         };
         waypoint.name = spec.name;
         waypoint.frame_id = spec.frame_id;
-        waypoint.map = map;
+        waypoint.map = map.clone();
         waypoint.x_m = spec.x_m;
         waypoint.y_m = spec.y_m;
         waypoint.tolerance_m = spec.tolerance_m;
@@ -146,7 +152,7 @@ impl NavigationStore {
         sort_file(&mut next);
         self.write(&next)?;
         *state = next;
-        Ok(self.waypoint_status(&state))
+        Ok(self.waypoint_status(&state, map.as_ref()))
     }
 
     pub fn delete_waypoint(&self, id: &str) -> Result<SavedWaypointList> {
@@ -167,7 +173,7 @@ impl NavigationStore {
         }
         self.write(&next)?;
         *state = next;
-        Ok(self.waypoint_status(&state))
+        Ok(self.waypoint_status(&state, None))
     }
 
     pub fn zones(&self) -> PatrolZoneList {
@@ -240,12 +246,33 @@ impl NavigationStore {
         Ok(self.zone_status(&state))
     }
 
-    fn waypoint_status(&self, state: &NavigationFile) -> SavedWaypointList {
+    fn waypoint_status(
+        &self,
+        state: &NavigationFile,
+        active_map: Option<&MapIdentity>,
+    ) -> SavedWaypointList {
+        let waypoints = state
+            .waypoints
+            .iter()
+            .cloned()
+            .map(|mut waypoint| {
+                waypoint.stale_reason = match (&waypoint.map, active_map) {
+                    (None, _) => None,
+                    (Some(_), None) => Some("localization-unavailable".to_string()),
+                    (Some(saved), Some(active)) if saved != active => {
+                        Some("map-replaced".to_string())
+                    }
+                    (Some(_), Some(_)) => None,
+                };
+                waypoint.stale = waypoint.stale_reason.is_some();
+                waypoint
+            })
+            .collect::<Vec<_>>();
         SavedWaypointList {
             ok: true,
             store_path: self.path.display().to_string(),
-            count: state.waypoints.len(),
-            waypoints: state.waypoints.clone(),
+            count: waypoints.len(),
+            waypoints,
         }
     }
 
@@ -535,6 +562,55 @@ mod tests {
         assert_eq!(reopened.zones().zones[0].waypoint_ids, vec!["dock"]);
         reopened.delete_zone("entry").unwrap();
         assert_eq!(reopened.delete_waypoint("dock").unwrap().count, 0);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn map_scoped_waypoint_restores_only_for_the_same_map_identity() {
+        let path = std::env::temp_dir().join(format!(
+            "leash-navigation-map-test-{}-{}.json",
+            std::process::id(),
+            now_ms()
+        ));
+        let active = MapIdentity {
+            map_id: "pinkie-map".to_string(),
+            map_revision: "room-v1".to_string(),
+            frame_id: "map".to_string(),
+        };
+        let store = NavigationStore::open(&path).unwrap();
+        let created = store
+            .create_waypoint_scoped(
+                WaypointSpec {
+                    id: "dock".to_string(),
+                    name: "Dock".to_string(),
+                    frame_id: "map".to_string(),
+                    x_m: 0.25,
+                    y_m: 0.0,
+                    tolerance_m: 0.1,
+                },
+                Some(active.clone()),
+            )
+            .unwrap();
+        assert!(!created.waypoints[0].stale);
+        drop(store);
+
+        let reopened = NavigationStore::open(&path).unwrap();
+        assert!(!reopened.waypoints_for_map(Some(&active)).waypoints[0].stale);
+        let replacement = MapIdentity {
+            map_revision: "room-v2".to_string(),
+            ..active.clone()
+        };
+        let replaced = reopened.waypoints_for_map(Some(&replacement));
+        assert!(replaced.waypoints[0].stale);
+        assert_eq!(
+            replaced.waypoints[0].stale_reason.as_deref(),
+            Some("map-replaced")
+        );
+        let lost = reopened.waypoints_for_map(None);
+        assert_eq!(
+            lost.waypoints[0].stale_reason.as_deref(),
+            Some("localization-unavailable")
+        );
         let _ = fs::remove_file(path);
     }
 }

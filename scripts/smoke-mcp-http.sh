@@ -137,7 +137,9 @@ if (payload.result.status !== "stopped") throw new Error(`unexpected patrol stop
 assert_waypoint_call() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("waypoint wrapper was invalid");
-if (payload.result?.count !== 1 || payload.result?.waypoints?.[0]?.id !== "entry") throw new Error("saved waypoint was missing");'
+const waypoint = payload.result?.waypoints?.[0];
+if (payload.result?.count !== 1 || waypoint?.id !== "entry") throw new Error("saved waypoint was missing");
+if (waypoint.map?.map_id !== "sim-local" || waypoint.stale !== false) throw new Error("saved waypoint was not active and map-scoped");'
 }
 
 assert_zone_call() {
@@ -167,11 +169,19 @@ if (entry.frame_id !== "map" || entry.x_m !== 0.25 || entry.y_m !== 0) throw new
 if (entry.effective_confidence !== 0.95 || entry.stale !== false) throw new Error("memory confidence was wrong");'
 }
 
+assert_memory_observation_call() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("observation wrapper was invalid");
+if (payload.result?.count !== 2) throw new Error("observed object was not added");
+const entry = payload.result.entries.find((item) => item.name === "observed-cone");
+if (!entry || entry.kind !== "object" || entry.map?.map_id !== "sim-local" || entry.stale !== false) throw new Error("observed object was not active and map-scoped");'
+}
+
 assert_memory_list_call() {
   node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 if (payload.ok !== true || payload.tool !== "invoke_capability") throw new Error("memory list wrapper was invalid");
-if (!payload.result || payload.result.count !== 1) throw new Error("memory list did not include the tagged entry");
-if (payload.result.entries[0].name !== "dock") throw new Error("memory list returned the wrong entry");'
+if (!payload.result || payload.result.count !== 2) throw new Error("memory list did not include both tagged entries");
+if (!payload.result.entries.some((entry) => entry.name === "dock")) throw new Error("memory list did not include dock");'
 }
 
 assert_memory_query_call() {
@@ -291,6 +301,9 @@ curl -fsS -X POST "$base/mcp/call" \
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"memory_tag_location","name":"dock","frame_id":"map","x_m":0.25,"y_m":0.0,"confidence":0.95}}' | assert_memory_tag_call
+curl -fsS -X POST "$base/mcp/call" \
+  -H "content-type: application/json" \
+  --data '{"tool":"invoke_capability","args":{"capability":"memory_tag_observation","name":"observed-cone","confidence":0.8}}' | assert_memory_observation_call
 curl -fsS -X POST "$base/mcp/call" \
   -H "content-type: application/json" \
   --data '{"tool":"invoke_capability","args":{"capability":"memory_list"}}' | assert_memory_list_call

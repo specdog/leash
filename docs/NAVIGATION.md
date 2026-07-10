@@ -3,7 +3,9 @@
 Leash persists saved waypoints and patrol zones in a versioned
 `leash-navigation-v1` JSON store next to the per-run spatial-memory file. A
 waypoint has a stable ID, display name, frame, position, tolerance, and created
-and updated timestamps. A patrol zone groups ordered waypoint IDs with an
+and updated timestamps. Map-scoped list responses also project `stale` and
+`stale_reason` from current localization without changing the saved record. A
+patrol zone groups ordered waypoint IDs with an
 optional polygon boundary of at least three points.
 
 The capability registry exposes:
@@ -15,6 +17,11 @@ The capability registry exposes:
 Deleting a waypoint that a zone references is rejected. IDs accept only ASCII
 letters, numbers, `-`, and `_`; coordinates must be finite; tolerances must be
 positive. Zone creation and updates reject missing or duplicate waypoint IDs.
+Creating or updating a `map` waypoint requires fresh tracking localization.
+Existing waypoints report `localization-unavailable` after localization loss and
+`map-replaced` when the active map ID, revision, or frame differs. Reloading the
+same map identity makes them active again; physical use still rechecks the map
+at execution time.
 
 ```bash
 leash mcp call invoke_capability --json \

@@ -106,7 +106,12 @@ When spatial memory or a saved waypoint uses the active map frame, Leash stores
 the provider's `map_id`, `map_revision`, and `frame_id` alongside it. Older
 unscoped files remain readable. A map replacement therefore leaves old data
 clearly attributable to its source map instead of silently treating it as
-current.
+current. List/query responses mark scoped entries and waypoints
+`localization-unavailable` when tracking is lost and `map-replaced` when any map
+identity field differs. Reloading the same identity clears that dynamic stale
+state. New map-frame tags and waypoint writes fail unless localization is
+tracking with a pose; `memory_tag_observation` records an observed object at the
+current localized pose under the same rule.
 
 Provider data is observational. Supplying a pose, grid, memory entry, or
 waypoint does not authorize or issue movement; physical goal execution remains

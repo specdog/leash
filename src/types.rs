@@ -741,6 +741,12 @@ pub struct SavedWaypoint {
     pub tolerance_m: f64,
     pub created_at_ms: u128,
     pub updated_at_ms: u128,
+    /// Dynamic compatibility with the active localization map. Persisted
+    /// waypoints default to false/none and runtime list responses project it.
+    #[serde(default)]
+    pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -880,6 +886,8 @@ pub struct SpatialMemoryEntry {
     pub confidence: f64,
     pub effective_confidence: f64,
     pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
