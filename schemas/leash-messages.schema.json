@@ -5956,6 +5956,17 @@
         "name": {
           "type": "string"
         },
+        "stale": {
+          "default": false,
+          "description": "Dynamic compatibility with the active localization map. Persisted\nwaypoints default to false/none and runtime list responses project it.",
+          "type": "boolean"
+        },
+        "stale_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tolerance_m": {
           "format": "double",
           "type": "number"
@@ -6034,6 +6045,17 @@
             },
             "name": {
               "type": "string"
+            },
+            "stale": {
+              "default": false,
+              "description": "Dynamic compatibility with the active localization map. Persisted\nwaypoints default to false/none and runtime list responses project it.",
+              "type": "boolean"
+            },
+            "stale_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "tolerance_m": {
               "format": "double",
@@ -6597,6 +6619,12 @@
         "stale": {
           "type": "boolean"
         },
+        "stale_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "updated_at_ms": {
           "format": "uint128",
           "minimum": 0,
@@ -6693,6 +6721,12 @@
             },
             "stale": {
               "type": "boolean"
+            },
+            "stale_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "updated_at_ms": {
               "format": "uint128",

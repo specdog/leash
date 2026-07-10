@@ -702,16 +702,44 @@ impl Harness {
     }
 
     pub fn tag_spatial_memory(&self, tag: SpatialMemoryTag) -> Result<SpatialMemoryStatus> {
-        let map = self.map_scope_for_frame(&tag.frame_id);
+        let map = self.map_scope_for_frame(&tag.frame_id)?;
         self.spatial_memory.tag_scoped(tag, map)
     }
 
+    pub fn tag_observation_at_current_pose(
+        &self,
+        name: String,
+        confidence: f64,
+    ) -> Result<SpatialMemoryStatus> {
+        let snapshot = self.localization_provider.snapshot(now_ms());
+        let map = active_map_from_snapshot(&snapshot)
+            .ok_or_else(|| anyhow!("map-frame observation requires fresh tracking localization"))?;
+        let pose = snapshot
+            .localization
+            .pose
+            .ok_or_else(|| anyhow!("map-frame observation requires a localized pose"))?
+            .pose;
+        self.spatial_memory.tag_scoped(
+            SpatialMemoryTag {
+                name,
+                kind: crate::types::SpatialMemoryKind::Object,
+                frame_id: map.frame_id.clone(),
+                x_m: pose.x_m,
+                y_m: pose.y_m,
+                confidence,
+            },
+            Some(map),
+        )
+    }
+
     pub fn spatial_memory(&self) -> SpatialMemoryStatus {
-        self.spatial_memory.list()
+        let map = self.active_map_scope();
+        self.spatial_memory.list_for_map(map.as_ref())
     }
 
     pub fn query_spatial_memory(&self, query: SpatialMemoryQuery) -> Result<SpatialMemoryStatus> {
-        self.spatial_memory.query(query)
+        let map = self.active_map_scope();
+        self.spatial_memory.query_for_map(query, map.as_ref())
     }
 
     pub fn clear_spatial_memory(&self) -> Result<SpatialMemoryStatus> {
@@ -719,33 +747,43 @@ impl Harness {
     }
 
     pub fn waypoints(&self) -> SavedWaypointList {
-        self.navigation.waypoints()
+        let map = self.active_map_scope();
+        self.navigation.waypoints_for_map(map.as_ref())
     }
 
     pub fn create_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
-        let map = self.map_scope_for_frame(&spec.frame_id);
-        self.navigation.create_waypoint_scoped(spec, map)
+        let map = self.map_scope_for_frame(&spec.frame_id)?;
+        self.navigation.create_waypoint_scoped(spec, map)?;
+        Ok(self.waypoints())
     }
 
     pub fn update_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
-        let map = self.map_scope_for_frame(&spec.frame_id);
-        self.navigation.update_waypoint_scoped(spec, map)
+        let map = self.map_scope_for_frame(&spec.frame_id)?;
+        self.navigation.update_waypoint_scoped(spec, map)?;
+        Ok(self.waypoints())
     }
 
     pub fn delete_waypoint(&self, id: &str) -> Result<SavedWaypointList> {
-        self.navigation.delete_waypoint(id)
+        self.navigation.delete_waypoint(id)?;
+        Ok(self.waypoints())
     }
 
-    fn map_scope_for_frame(&self, frame_id: &str) -> Option<MapIdentity> {
-        let map = self
-            .localization_provider
-            .snapshot(now_ms())
-            .localization
-            .map;
-        (map.frame_id == frame_id
-            && !map.map_id.trim().is_empty()
-            && !map.map_revision.trim().is_empty())
-        .then_some(map)
+    fn active_map_scope(&self) -> Option<MapIdentity> {
+        let snapshot = self.localization_provider.snapshot(now_ms());
+        active_map_from_snapshot(&snapshot)
+    }
+
+    fn map_scope_for_frame(&self, frame_id: &str) -> Result<Option<MapIdentity>> {
+        let snapshot = self.localization_provider.snapshot(now_ms());
+        let advertised_frame = snapshot.localization.map.frame_id.as_str();
+        let requests_map =
+            frame_id == "map" || (!advertised_frame.is_empty() && frame_id == advertised_frame);
+        if !requests_map {
+            return Ok(None);
+        }
+        active_map_from_snapshot(&snapshot)
+            .map(Some)
+            .ok_or_else(|| anyhow!("map-frame coordinates require fresh tracking localization"))
     }
 
     pub fn patrol_zones(&self) -> PatrolZoneList {
@@ -777,6 +815,17 @@ impl Harness {
             .navigation
             .zone(zone_id)
             .ok_or_else(|| anyhow!("patrol zone '{zone_id}' does not exist"))?;
+        let active_map = self.active_map_scope();
+        for waypoint_id in &zone.waypoint_ids {
+            let waypoint = self.navigation.waypoint(waypoint_id).ok_or_else(|| {
+                anyhow!("patrol zone waypoint '{waypoint_id}' does not exist")
+            })?;
+            if waypoint.map.is_some() && waypoint.map.as_ref() != active_map.as_ref() {
+                return Err(anyhow!(
+                    "patrol zone waypoint map identity does not match active localization"
+                ));
+            }
+        }
         let waypoint_id = zone
             .waypoint_ids
             .first()
@@ -2792,6 +2841,19 @@ fn apply_localization_snapshot(
     telemetry.costmap = snapshot.costmap;
 }
 
+fn active_map_from_snapshot(
+    snapshot: &crate::localization::LocalizationProviderSnapshot,
+) -> Option<MapIdentity> {
+    let map = &snapshot.localization.map;
+    (snapshot.status.state == crate::localization::LocalizationProviderState::Tracking
+        && snapshot.localization.health.status == LocalizationStatus::Tracking
+        && snapshot.localization.pose.is_some()
+        && !map.map_id.trim().is_empty()
+        && !map.map_revision.trim().is_empty()
+        && !map.frame_id.trim().is_empty())
+    .then(|| map.clone())
+}
+
 #[cfg(feature = "physical-navigation")]
 fn physical_patrol_goal(
     strategy: PatrolStrategy,
@@ -3911,15 +3973,129 @@ mod tests {
                 tolerance_m: 0.1,
             })
             .unwrap();
+        harness
+            .create_patrol_zone(PatrolZoneSpec {
+                id: "dock-zone".to_string(),
+                name: "Dock zone".to_string(),
+                frame_id: "map".to_string(),
+                waypoint_ids: vec!["dock".to_string()],
+                boundary: Vec::new(),
+            })
+            .unwrap();
 
         let memory_map = memory.entries[0].map.as_ref().unwrap();
         let waypoint_map = waypoints.waypoints[0].map.as_ref().unwrap();
         assert_eq!(memory_map, waypoint_map);
         assert_eq!(memory_map.map_id, "sim-local");
         assert_eq!(memory_map.map_revision, "sim-grid-v1");
+        assert!(!memory.entries[0].stale);
+        assert!(!waypoints.waypoints[0].stale);
+
+        let observation = harness
+            .tag_observation_at_current_pose("cone".to_string(), 0.8)
+            .unwrap();
+        let cone = observation
+            .entries
+            .iter()
+            .find(|entry| entry.name == "cone")
+            .unwrap();
+        assert_eq!(cone.kind, crate::types::SpatialMemoryKind::Object);
+        assert_eq!(cone.frame_id, "map");
+        assert_eq!(cone.map.as_ref(), Some(memory_map));
+
         let telemetry = harness.telemetry();
         assert_eq!(telemetry.left_cmd, 0.0);
         assert_eq!(telemetry.right_cmd, 0.0);
+
+        let replacement_ts = now_ms();
+        let replacement_sequence = harness
+            .localization_provider
+            .snapshot(replacement_ts)
+            .status
+            .sequence
+            .unwrap_or_default()
+            + 1;
+        let mut replacement_localization =
+            simulated_localization_frame(replacement_ts, &harness.raw.read());
+        replacement_localization.map.map_revision = "sim-grid-v2".to_string();
+        let (replacement_map, replacement_occupancy, replacement_costmap) =
+            simulated_map_frames(replacement_ts);
+        let replacement = LocalizationProviderUpdate {
+            version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+            sequence: replacement_sequence,
+            localization: replacement_localization.clone(),
+            map: replacement_map.clone(),
+            occupancy_grid: replacement_occupancy.clone(),
+            costmap: replacement_costmap.clone(),
+        };
+        harness
+            .localization_provider
+            .apply_at(replacement.clone(), replacement_ts)
+            .unwrap();
+
+        let replaced_memory = harness.spatial_memory();
+        assert!(replaced_memory.entries.iter().all(|entry| entry.stale));
+        assert!(replaced_memory
+            .entries
+            .iter()
+            .all(|entry| entry.stale_reason.as_deref() == Some("map-replaced")));
+        let replaced_waypoints = harness.waypoints();
+        assert!(replaced_waypoints.waypoints[0].stale);
+        assert_eq!(
+            replaced_waypoints.waypoints[0].stale_reason.as_deref(),
+            Some("map-replaced")
+        );
+        assert!(harness
+            .start_patrol_zone("dock-zone", SpeedMode::Low)
+            .unwrap_err()
+            .to_string()
+            .contains("map identity"));
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+
+        harness
+            .localization_provider
+            .mark_failed("localization lost for test");
+        let lost_memory = harness.spatial_memory();
+        assert!(lost_memory
+            .entries
+            .iter()
+            .all(|entry| entry.stale_reason.as_deref() == Some("localization-unavailable")));
+        assert!(harness
+            .tag_observation_at_current_pose("blocked".to_string(), 0.9)
+            .unwrap_err()
+            .to_string()
+            .contains("tracking localization"));
+        assert!(harness
+            .create_waypoint(WaypointSpec {
+                id: "blocked".to_string(),
+                name: "Blocked".to_string(),
+                frame_id: "map".to_string(),
+                x_m: 0.0,
+                y_m: 0.0,
+                tolerance_m: 0.1,
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("tracking localization"));
+
+        let mut recovered = replacement;
+        recovered.sequence = replacement_sequence + 1;
+        replacement_localization.map.map_revision = "sim-grid-v1".to_string();
+        recovered.localization = replacement_localization;
+        recovered.map = replacement_map;
+        recovered.occupancy_grid = replacement_occupancy;
+        recovered.costmap = replacement_costmap;
+        harness
+            .localization_provider
+            .apply_at(recovered, now_ms())
+            .unwrap();
+        assert!(harness
+            .spatial_memory()
+            .entries
+            .iter()
+            .all(|entry| !entry.stale));
+        assert!(!harness.waypoints().waypoints[0].stale);
 
         let _ = std::fs::remove_file(memory_path);
         let _ = std::fs::remove_file(navigation_path);
@@ -4072,10 +4248,16 @@ mod tests {
             let harness = Harness::new(HarnessConfig {
                 profile,
                 replay_source: (profile == Profile::Replay)
-                    .then(|| std::path::PathBuf::from("examples/replay/sim-basic.jsonl")),
+                    .then(|| std::path::PathBuf::from("examples/replay/sim-memory.jsonl")),
                 ..HarnessConfig::default()
             })
             .unwrap();
+            if profile == Profile::Replay {
+                assert_eq!(
+                    harness.telemetry().localization.health.status,
+                    LocalizationStatus::Tracking
+                );
+            }
             harness
                 .create_waypoint(WaypointSpec {
                     id: "entry".to_string(),
@@ -4114,6 +4296,62 @@ mod tests {
                 assert_eq!(command.right_cmd, 0.0);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn mapping_replay_tags_queries_and_lists_map_scoped_memory_without_motion() {
+        let memory_path = std::env::temp_dir().join(format!(
+            "leash-replay-map-memory-{}-{}.json",
+            std::process::id(),
+            now_ms()
+        ));
+        let navigation_path = navigation_path_for_memory(&memory_path);
+        let harness = Harness::new_with_memory_path(
+            HarnessConfig {
+                profile: Profile::Replay,
+                replay_source: Some(std::path::PathBuf::from("examples/replay/sim-memory.jsonl")),
+                ..HarnessConfig::default()
+            },
+            memory_path.clone(),
+        )
+        .unwrap();
+        let telemetry = harness.telemetry();
+        assert_eq!(
+            telemetry.localization.health.status,
+            LocalizationStatus::Tracking
+        );
+
+        harness
+            .tag_spatial_memory(SpatialMemoryTag {
+                name: "dock".to_string(),
+                kind: crate::types::SpatialMemoryKind::Location,
+                frame_id: "map".to_string(),
+                x_m: 0.25,
+                y_m: 0.0,
+                confidence: 0.95,
+            })
+            .unwrap();
+        harness
+            .tag_observation_at_current_pose("cone".to_string(), 0.8)
+            .unwrap();
+        let listed = harness.spatial_memory();
+        assert_eq!(listed.count, 2);
+        assert!(listed.entries.iter().all(|entry| !entry.stale));
+        let queried = harness
+            .query_spatial_memory(SpatialMemoryQuery {
+                query: Some("cone".to_string()),
+                kind: Some(crate::types::SpatialMemoryKind::Object),
+                min_confidence: Some(0.8),
+                include_stale: false,
+            })
+            .unwrap();
+        assert_eq!(queried.count, 1);
+        assert_eq!(queried.entries[0].map, telemetry.localization.map.into());
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+
+        let _ = std::fs::remove_file(memory_path);
+        let _ = std::fs::remove_file(navigation_path);
     }
 
     #[cfg(feature = "manipulator")]

@@ -189,6 +189,33 @@ function batteryLabel(telemetry) {
   return "battery -";
 }
 
+function renderLocalization(card, telemetry) {
+  const localization = telemetry?.localization;
+  const provider = telemetry?.localization_provider;
+  const map = localization?.map;
+  const pose = localization?.pose?.pose;
+  const covariance = localization?.pose?.covariance;
+  const status = localization?.health?.status || provider?.state || "unavailable";
+  card.querySelector(".metric-localization").textContent = status;
+  card.querySelector(".metric-localization").title =
+    [provider?.provider, localization?.health?.message, provider?.error].filter(Boolean).join(" · ");
+  card.querySelector(".metric-map").textContent = map?.map_id
+    ? `${map.map_id} · ${map.map_revision || "revision -"}`
+    : "-";
+  card.querySelector(".metric-map").title =
+    [map?.frame_id, map?.map_revision].filter(Boolean).join(" · ");
+  card.querySelector(".metric-pose").textContent = pose
+    ? `x ${formatNumber(pose.x_m)} m · y ${formatNumber(pose.y_m)} m · yaw ${formatNumber((pose.yaw_rad * 180) / Math.PI, 1)}°`
+    : "-";
+  const sigma = Array.isArray(covariance) && covariance.length === 9
+    ? [covariance[0], covariance[4], covariance[8]].map((value) =>
+      Number.isFinite(value) && value >= 0 ? Math.sqrt(value) : null)
+    : null;
+  card.querySelector(".metric-covariance").textContent = sigma?.every(Number.isFinite)
+    ? `σx ${formatNumber(sigma[0], 3)} m · σy ${formatNumber(sigma[1], 3)} m · σyaw ${formatNumber((sigma[2] * 180) / Math.PI, 1)}°`
+    : "-";
+}
+
 function recordHealth(current, ok, detail) {
   const previous = current.healthHistory[0];
   if (previous && previous.ok === ok && previous.detail === detail) return;
@@ -459,6 +486,7 @@ async function refreshRobot(robot) {
     card.querySelector(".metric-battery").textContent = batteryLabel(telemetry).replace("battery ", "");
     card.querySelector(".metric-estop").textContent = String(health.estop);
     card.querySelector(".metric-profile").textContent = health.profile || "-";
+    renderLocalization(card, telemetry);
     if (camera.gimbal?.range) {
       card.dataset.panMin = camera.gimbal.range.pan_deg[0];
       card.dataset.panMax = camera.gimbal.range.pan_deg[1];
@@ -484,6 +512,7 @@ async function refreshRobot(robot) {
     setRobotClass(card, "down");
     card.querySelector(".state-text").textContent = "offline";
     card.querySelector(".metric-health").textContent = "down";
+    renderLocalization(card, null);
     await renderOperatorToken(card, null);
     renderHistories(card, current);
     renderPatrol(card, current);
@@ -1277,6 +1306,7 @@ async function applyRecordedSummary(robot, replayState) {
   card.querySelector(".metric-battery").textContent = batteryLabel(telemetry).replace("battery ", "");
   card.querySelector(".metric-estop").textContent = health?.estop == null ? "-" : String(health.estop);
   card.querySelector(".metric-profile").textContent = health?.profile || "-";
+  renderLocalization(card, telemetry);
   card.querySelector(".log").textContent = current.lastLog.join("\n");
   const image = card.querySelector(".snapshot");
   image.onload = null;

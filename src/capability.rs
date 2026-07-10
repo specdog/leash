@@ -402,6 +402,16 @@ impl CapabilityRegistry {
                 };
                 serde_json::to_value(self.harness.tag_spatial_memory(tag)?).map_err(Into::into)
             }
+            "memory_tag_observation" => {
+                ensure_fields(&args, &["name", "confidence"])?;
+                let name = required_string(&args, "name")?;
+                let confidence = optional_f64(&args, "confidence")?.unwrap_or(1.0);
+                serde_json::to_value(
+                    self.harness
+                        .tag_observation_at_current_pose(name, confidence)?,
+                )
+                .map_err(Into::into)
+            }
             "memory_list" => {
                 ensure_fields(&args, &["include_stale"])?;
                 let include_stale = optional_bool(&args, "include_stale")?.unwrap_or(true);
@@ -918,6 +928,16 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
             "SpatialMemoryStatus",
         ),
         descriptor(
+            "memory_tag_observation",
+            "Tag an observed object at the current localized map pose; rejects stale or lost localization",
+            SafetyClass::SimControl,
+            object_schema(&[
+                ("name", "string", true),
+                ("confidence", "number", false),
+            ]),
+            "SpatialMemoryStatus",
+        ),
+        descriptor(
             "memory_list",
             "List local spatial memory entries for this run/profile store",
             SafetyClass::ObserveOnly,
@@ -1156,6 +1176,12 @@ fn canonical_name(name: &str) -> &str {
         | "memory_tag"
         | "tag_location"
         | "tag-location" => "memory_tag_location",
+        "memory.tag_observation"
+        | "memory/tag_observation"
+        | "memory.tag-observation"
+        | "memory/tag-observation"
+        | "tag_observation"
+        | "tag-observation" => "memory_tag_observation",
         "memory.list" | "memory/list" | "list_memory" | "list-memory" => "memory_list",
         "memory.query" | "memory/query" | "query_memory" | "query-memory" => "memory_query",
         "memory.clear" | "memory/clear" | "clear_memory" | "clear-memory" => "memory_clear",
@@ -1778,8 +1804,24 @@ mod tests {
         assert_eq!(queried["count"], 1);
         assert_eq!(queried["entries"][0]["name"], "cone");
 
+        let observed = registry
+            .invoke_value(
+                "tag_observation",
+                json!({"name": "observed-cone", "confidence": 0.75}),
+            )
+            .unwrap();
+        assert_eq!(observed["count"], 3);
+        let observed_entry = observed["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == "observed-cone")
+            .unwrap();
+        assert_eq!(observed_entry["kind"], "object");
+        assert_eq!(observed_entry["map"]["map_id"], "sim-local");
+
         let listed = registry.invoke_value("memory_list", json!({})).unwrap();
-        assert_eq!(listed["count"], 2);
+        assert_eq!(listed["count"], 3);
         assert!(listed["store_path"]
             .as_str()
             .unwrap()

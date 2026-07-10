@@ -76,6 +76,7 @@ select {
 button {
   cursor: pointer;
   font-weight: 650;
+  touch-action: manipulation;
 }
 
 button:hover {
@@ -85,6 +86,13 @@ button:hover {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.metric-localization,
+.metric-map,
+.metric-pose,
+.metric-covariance {
+  font-variant-numeric: tabular-nums;
 }
 
 button.danger {
@@ -547,6 +555,18 @@ main.single-view {
 }
 
 @media (max-width: 760px) {
+  button,
+  input,
+  select,
+  .session-load {
+    min-height: 48px;
+  }
+
+  input,
+  select {
+    font-size: 16px;
+  }
+
   header {
     position: static;
     align-items: flex-start;
