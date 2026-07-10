@@ -6,7 +6,8 @@ it does not prescribe how a provider computes them.
 
 ```mermaid
 flowchart LR
-  provider["Localization provider"] --> frame["LocalizationFrame\nleash-localization-v1"]
+  provider["Localization provider"] --> update["LocalizationProviderUpdate\nleash-localization-provider-v1"]
+  update --> frame["LocalizationFrame\nleash-localization-v1"]
   frame --> telemetry["TelemetryFrame"]
   telemetry --> http["HTTP / WebSocket / SSE"]
   telemetry --> mcp["MCP observe"]
@@ -27,6 +28,8 @@ flowchart LR
   or `unavailable`, plus the last update, message, and optional error.
 - `LocalizationFrame`: the version, message timestamp, map identity, optional
   localized pose, and health.
+- `LocalizationProviderStatus`: provider state, sequence, map generation,
+  freshness, and isolated error state.
 
 Tracking, degraded, and stale frames require a complete map identity and a
 timestamp-consistent pose. Lost frames require an error. Invalid versions,
@@ -42,6 +45,8 @@ JSONL payloads, recording, and replay serialize those same types without field
 renaming. The visualization frame carries exact copies plus the same range-scan
 and IMU status objects used by telemetry, so a native viewer can render pose,
 uncertainty, occupancy/cost maps, and sensor health from one frame.
+Provider extension and isolation behavior is documented in
+[`LOCALIZATION_PROVIDERS.md`](LOCALIZATION_PROVIDERS.md).
 
 `SensorSnapshot.version` is `leash-sensors-v1`; localization is independently
 versioned as `leash-localization-v1`. Outer TCP frames remain

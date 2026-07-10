@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::HarnessConfig,
     memory::default_spatial_memory_path,
-    types::{PatrolZone, PatrolZoneList, SavedWaypoint, SavedWaypointList, ZoneBoundaryPoint},
+    types::{
+        MapIdentity, PatrolZone, PatrolZoneList, SavedWaypoint, SavedWaypointList,
+        ZoneBoundaryPoint,
+    },
 };
 
 pub const NAVIGATION_FORMAT: &str = "leash-navigation-v1";
@@ -75,7 +78,16 @@ impl NavigationStore {
     }
 
     pub fn create_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
+        self.create_waypoint_scoped(spec, None)
+    }
+
+    pub fn create_waypoint_scoped(
+        &self,
+        spec: WaypointSpec,
+        map: Option<MapIdentity>,
+    ) -> Result<SavedWaypointList> {
         let spec = validate_waypoint_spec(spec)?;
+        let map = validate_map_scope(map, &spec.frame_id)?;
         let mut state = self.state.lock();
         if state
             .waypoints
@@ -90,6 +102,7 @@ impl NavigationStore {
             id: spec.id,
             name: spec.name,
             frame_id: spec.frame_id,
+            map,
             x_m: spec.x_m,
             y_m: spec.y_m,
             tolerance_m: spec.tolerance_m,
@@ -103,7 +116,16 @@ impl NavigationStore {
     }
 
     pub fn update_waypoint(&self, spec: WaypointSpec) -> Result<SavedWaypointList> {
+        self.update_waypoint_scoped(spec, None)
+    }
+
+    pub fn update_waypoint_scoped(
+        &self,
+        spec: WaypointSpec,
+        map: Option<MapIdentity>,
+    ) -> Result<SavedWaypointList> {
         let spec = validate_waypoint_spec(spec)?;
+        let map = validate_map_scope(map, &spec.frame_id)?;
         let mut state = self.state.lock();
         let mut next = state.clone();
         let Some(waypoint) = next
@@ -115,6 +137,7 @@ impl NavigationStore {
         };
         waypoint.name = spec.name;
         waypoint.frame_id = spec.frame_id;
+        waypoint.map = map;
         waypoint.x_m = spec.x_m;
         waypoint.y_m = spec.y_m;
         waypoint.tolerance_m = spec.tolerance_m;
@@ -314,6 +337,7 @@ fn validate_file(state: &NavigationFile) -> Result<()> {
             y_m: waypoint.y_m,
             tolerance_m: waypoint.tolerance_m,
         })?;
+        validate_map_scope(waypoint.map.clone(), &waypoint.frame_id)?;
     }
     for zone in &state.zones {
         validate_zone_spec(PatrolZoneSpec {
@@ -345,6 +369,21 @@ fn validate_waypoint_spec(mut spec: WaypointSpec) -> Result<WaypointSpec> {
         bail!("waypoint tolerance_m must be positive and finite");
     }
     Ok(spec)
+}
+
+fn validate_map_scope(map: Option<MapIdentity>, frame_id: &str) -> Result<Option<MapIdentity>> {
+    if let Some(map) = &map {
+        if map.map_id.trim().is_empty()
+            || map.map_revision.trim().is_empty()
+            || map.frame_id.trim().is_empty()
+        {
+            bail!("map scope requires map_id, map_revision, and frame_id");
+        }
+        if map.frame_id != frame_id {
+            bail!("map scope frame_id does not match waypoint frame_id");
+        }
+    }
+    Ok(map)
 }
 
 fn validate_zone_spec(mut spec: PatrolZoneSpec) -> Result<PatrolZoneSpec> {
