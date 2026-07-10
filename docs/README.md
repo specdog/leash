@@ -15,6 +15,7 @@ flowchart TB
   docs --> sessions["OPERATOR_SESSIONS.md\nsafe recording and offline GUI replay"]
   docs --> defaultBranch["DEFAULT_BRANCH_RECOVERY.md\ndefault-branch audit and recovery proof"]
   docs --> sensors["SENSORS.md\ngeneric range-scan and IMU contracts"]
+  docs --> localization["LOCALIZATION.md\nversioned pose, covariance, map, and health wire contract"]
 
   bot --> service["systemd user service\n~/.config/systemd/user/leash.service"]
   release --> proof["cargo, smoke scripts, package checks"]
@@ -34,3 +35,4 @@ flowchart TB
 - `OPERATOR_SESSIONS.md`: safe operator event recording and offline GUI timeline replay.
 - `DEFAULT_BRANCH_RECOVERY.md`: the audited `main` default-branch recovery, DotDog proof, and repeatable recovery procedure.
 - `SENSORS.md`: middleware-neutral planar range-scan and IMU units, frames, validation, and status behavior.
+- `LOCALIZATION.md`: versioned map identity, pose/covariance, health, visualization, and replay behavior.

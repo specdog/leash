@@ -8,6 +8,7 @@ Leash publishes JSON Schema for the wire messages external tools consume:
 - perception, visualization, planner, patrol, spatial-memory, drone, and manipulator payloads
 - network stream frames for TCP JSONL cross-process module boundaries
 - versioned worker input/output frames and sanitized worker health status
+- versioned planar scan, IMU, map identity, pose/covariance, and localization health payloads
 
 The canonical artifact is [schemas/leash-messages.schema.json](../schemas/leash-messages.schema.json).
 It is generated from Rust `serde` + `schemars` types:
@@ -35,6 +36,12 @@ Versioned payloads such as `visualization.version` and manipulator `version`
 stay scoped to that nested payload. A nested payload version bump does not
 require a top-level `schema_version` bump unless the cross-message contract also
 breaks.
+
+`SensorSnapshot.version` (`leash-sensors-v1`) and `LocalizationFrame.version`
+(`leash-localization-v1`) are validated independently. Replay rejects unknown
+inner versions. Older recordings that predate these fields default to
+`unavailable`; new readers must not infer tracking or sensor freshness from a
+missing field.
 
 `NetworkStreamFrame.schema_version` is scoped to the TCP JSONL stream frame. A
 network frame version bump does not require changing the top-level schema

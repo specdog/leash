@@ -7,6 +7,8 @@ flowchart LR
   fixture["sim-basic.jsonl\nobserve fixture"] --> replay["ReplayPlayback"]
   memory["sim-memory.jsonl\nmemory demo fixture"] --> replay
   sensorStates["sensor-contract-states.json\ntyped sensor health cases"] --> contracts["range-scan and IMU contract tests"]
+  mapping["sim-mapping.jsonl\nversioned localization replay"] --> replay
+  localizationStates["localization-contract-states.json\ntracking, stale, lost"] --> contracts
   replay --> harness["profile: replay\nphysical: false"]
   harness --> http["serve http --replay-source"]
   harness --> mcp["serve mcp --replay-source"]
@@ -22,6 +24,8 @@ flowchart LR
 - `sim-memory.jsonl`: short replay recording for demos that tag and recall locations through MCP while observe output stays deterministic.
 - `operator-session.json`: generic browser-operator fixture for offline camera, telemetry, ownership, and joystick timeline replay.
 - `sensor-contract-states.json`: deterministic valid, malformed, stale, and disconnected planar-scan/IMU states.
+- `sim-mapping.jsonl`: an actual three-frame recording with versioned sensors, map identity, localized pose/covariance, health, and matching visualization data.
+- `localization-contract-states.json`: deterministic tracking, stale, and lost localization states.
 
 ## Commands
 
@@ -29,6 +33,7 @@ flowchart LR
 leash replay examples/replay/sim-basic.jsonl --speed 10
 leash serve http --replay-source examples/replay/sim-basic.jsonl
 leash serve mcp --replay-source examples/replay/sim-basic.jsonl
+leash serve http --replay-source examples/replay/sim-mapping.jsonl
 LEASH_STATE_DIR="$(mktemp -d)" leash serve mcp-http --replay-source examples/replay/sim-memory.jsonl
 ```
 

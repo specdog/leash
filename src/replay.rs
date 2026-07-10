@@ -124,8 +124,12 @@ impl ReplayRecording {
             .iter()
             .filter(|event| event.kind == ReplayEventKind::Telemetry)
             .map(|event| {
-                let frame = serde_json::from_value(event.data.clone()).with_context(|| {
-                    format!("parse telemetry replay event at {}ms", event.ts_ms)
+                let frame: TelemetryStreamFrame = serde_json::from_value(event.data.clone())
+                    .with_context(|| {
+                        format!("parse telemetry replay event at {}ms", event.ts_ms)
+                    })?;
+                frame.validate().with_context(|| {
+                    format!("validate telemetry replay event at {}ms", event.ts_ms)
                 })?;
                 Ok((event.ts_ms, frame))
             })
@@ -323,6 +327,63 @@ mod tests {
         assert!(recording.telemetry_streams().unwrap().len() >= 2);
     }
 
+    #[test]
+    fn bundled_mapping_fixture_preserves_sensor_localization_and_order() {
+        let text = include_str!("../examples/replay/sim-mapping.jsonl");
+        let recording = ReplayRecording::from_jsonl(text).unwrap();
+        let telemetry = recording.telemetry_streams().unwrap();
+
+        assert_eq!(telemetry.len(), 3);
+        assert_eq!(
+            telemetry
+                .iter()
+                .map(|(ts_ms, _)| *ts_ms)
+                .collect::<Vec<_>>(),
+            vec![0, 50, 100]
+        );
+        for (_, frame) in &telemetry {
+            frame.validate().unwrap();
+            assert_eq!(
+                frame.telemetry.sensors.version,
+                crate::types::SENSOR_CONTRACT_VERSION
+            );
+            assert_eq!(
+                frame.telemetry.localization.health.status,
+                crate::types::LocalizationStatus::Tracking
+            );
+            assert_eq!(
+                frame.visualization.localization,
+                frame.telemetry.localization
+            );
+            assert_eq!(frame.visualization.map, frame.telemetry.map);
+            assert_eq!(
+                frame.visualization.occupancy_grid,
+                frame.telemetry.occupancy_grid
+            );
+            assert_eq!(frame.visualization.costmap, frame.telemetry.costmap);
+            assert_eq!(
+                frame.visualization.range_scan,
+                frame.telemetry.sensors.range_scan
+            );
+        }
+    }
+
+    #[test]
+    fn replay_rejects_invalid_inner_contract_versions() {
+        let text = include_str!("../examples/replay/sim-mapping.jsonl");
+        let recording = ReplayRecording::from_jsonl(text).unwrap();
+        let mut events = recording.events().to_vec();
+        let telemetry = events
+            .iter_mut()
+            .find(|event| event.kind == ReplayEventKind::Telemetry)
+            .unwrap();
+        telemetry.data["telemetry"]["sensors"]["version"] = Value::String("old".to_string());
+
+        let error = ReplayPlayback::new(ReplayRecording::new(events), 1.0).unwrap_err();
+
+        assert!(format!("{error:#}").contains("unsupported sensor contract version"));
+    }
+
     fn telemetry_frame(ts_ms: u128) -> TelemetryStreamFrame {
         let telemetry = TelemetryFrame {
             ts_ms,
@@ -343,6 +404,7 @@ mod tests {
             speed_mode: SpeedMode::Medium,
             max_speed: SpeedMode::Medium.cap(),
             sensors: SensorSnapshot {
+                version: crate::types::SENSOR_CONTRACT_VERSION.to_string(),
                 battery: BatteryStatus {
                     status: "available".to_string(),
                     voltage_v: Some(12.3),
@@ -368,6 +430,10 @@ mod tests {
                 range_scan: Default::default(),
                 imu: Default::default(),
             },
+            localization: Default::default(),
+            map: Default::default(),
+            occupancy_grid: Default::default(),
+            costmap: Default::default(),
             vision: Default::default(),
             workers: Vec::new(),
             motion_events: Vec::new(),

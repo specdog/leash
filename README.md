@@ -256,6 +256,8 @@ invokes `POST /stop` against sim HTTP.
 - `detections`: generic detection boxes
 - `command`: motor command overlay for operators
 - `autonomy`: active patrol mode, strategy, goal, and visited cells
+- `range_scan` / `imu`: the exact versioned sensor status objects from telemetry
+- `localization`: map identity, localized pose/covariance, and health
 
 Frame conventions are deliberately small: `map` is the global 2D frame for
 poses, paths, occupancy grids, and costmaps; `base_link` is the robot-local
@@ -266,6 +268,8 @@ meters-per-cell in `resolution_m`.
 Range scans and IMU samples live under `TelemetryFrame.sensors` and use generic
 SI-unit contracts; see [docs/SENSORS.md](docs/SENSORS.md). Hardware model,
 device, calibration, and middleware choices stay in concrete implementations.
+The version and compatibility rules for localization, streams, and replay are in
+[docs/LOCALIZATION.md](docs/LOCALIZATION.md).
 
 External viewers can subscribe to the stream endpoints and render those fields
 without linking a viewer SDK into the core crate.
@@ -583,6 +587,7 @@ and MCP surfaces without hardware:
 leash serve http --replay-source examples/replay/sim-basic.jsonl
 leash serve mcp --replay-source examples/replay/sim-basic.jsonl
 leash serve mcp-http --replay-source examples/replay/sim-memory.jsonl
+leash serve http --replay-source examples/replay/sim-mapping.jsonl
 ```
 
 Replay mode resolves to `profile: replay`, `mode: replay`, `replay: true`, and
