@@ -8,6 +8,10 @@ warmup_secs=120
 output="${HOME}/.local/state/leash/waveshare-ugv-ros-soak.json"
 env_file="${LEASH_ROS_ENV_FILE:-}"
 leash_url="${LEASH_URL:-http://127.0.0.1:8000}"
+clock_reference_epoch=""
+
+# shellcheck source=clock-gate.sh
+source "$ros_dir/clock-gate.sh"
 
 usage() {
   cat <<'EOF'
@@ -18,6 +22,8 @@ Options:
   --interval-secs N   Poll interval (default: 2).
   --warmup-secs N     Grace period before tracking is required (default: 120).
   --output PATH       Private JSON proof output.
+  --clock-reference-epoch EPOCH
+                      Fresh epoch from a trusted operator machine when NTP is unavailable.
 
 The script sends stop before and after, never sends drive, and requires an
 unchanged Leash PID/container, available lidar/IMU, tracking localization after
@@ -32,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --interval-secs) interval_secs="$2"; shift 2 ;;
     --warmup-secs) warmup_secs="$2"; shift 2 ;;
     --output) output="$2"; shift 2 ;;
+    --clock-reference-epoch) clock_reference_epoch="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -45,10 +52,7 @@ done
   exit 2
 }
 [[ -n "$env_file" && -r "$env_file" ]] || { echo "a readable --env-file is required" >&2; exit 2; }
-[[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]] || {
-  echo "target clock is not synchronized" >&2
-  exit 1
-}
+require_trusted_clock "$clock_reference_epoch"
 
 compose() {
   docker compose --env-file "$env_file" -f "$ros_dir/compose.yaml" "$@"
@@ -133,6 +137,8 @@ jq -n \
   --argjson max_cpu_pct "$max_cpu_pct" \
   --argjson max_lidar_age_ms "$max_lidar_age_ms" \
   --argjson max_imu_age_ms "$max_imu_age_ms" \
-  '{ok:true,suite:"waveshare-ugv-read-only-slam",duration_secs:$duration_secs,polls:$polls,leash_pid:$leash_pid,container:{restarts:0,oom_killed:false,rss:{min_kb:$min_rss_kb,max_kb:$max_rss_kb,growth_kb:($max_rss_kb-$min_rss_kb)},max_cpu_pct:$max_cpu_pct},sensors:{max_lidar_age_ms:$max_lidar_age_ms,max_imu_age_ms:$max_imu_age_ms},localization:"tracking"}' \
+  --arg clock_proof_source "$CLOCK_PROOF_SOURCE" \
+  --argjson initial_clock_skew_secs "$CLOCK_PROOF_SKEW_SECS" \
+  '{ok:true,suite:"waveshare-ugv-read-only-slam",duration_secs:$duration_secs,polls:$polls,leash_pid:$leash_pid,clock:{proof:$clock_proof_source,initial_skew_secs:$initial_clock_skew_secs},container:{restarts:0,oom_killed:false,rss:{min_kb:$min_rss_kb,max_kb:$max_rss_kb,growth_kb:($max_rss_kb-$min_rss_kb)},max_cpu_pct:$max_cpu_pct},sensors:{max_lidar_age_ms:$max_lidar_age_ms,max_imu_age_ms:$max_imu_age_ms},localization:"tracking"}' \
   | tee "$output"
 chmod 600 "$output"

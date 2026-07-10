@@ -5,10 +5,14 @@ ros_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose_file="$ros_dir/compose.yaml"
 env_file="${LEASH_ROS_ENV_FILE:-}"
 leash_url="${LEASH_URL:-http://127.0.0.1:8000}"
+clock_reference_epoch=""
+
+# shellcheck source=clock-gate.sh
+source "$ros_dir/clock-gate.sh"
 
 usage() {
   cat <<'EOF'
-Usage: slam-stack.sh [--env-file PATH] COMMAND [ARG]
+Usage: slam-stack.sh [--env-file PATH] [--clock-reference-epoch EPOCH] COMMAND [ARG]
 
 Commands:
   build             Build the pinned ROS 2 Humble image.
@@ -21,7 +25,9 @@ Commands:
   load NAME         Load a serialized pose graph from /data/maps for localization.
 
 The environment file is private and follows .env.example. This script never
-sends a drive command and the container has no serial device mapping.
+sends a drive command and the container has no serial device mapping. The clock
+reference is accepted only when NTP is unavailable and must be generated on a
+trusted operator machine immediately before invoking this command.
 EOF
 }
 
@@ -30,6 +36,11 @@ while [[ $# -gt 0 ]]; do
     --env-file)
       [[ $# -ge 2 ]] || { echo "--env-file requires a path" >&2; exit 2; }
       env_file="$2"
+      shift 2
+      ;;
+    --clock-reference-epoch)
+      [[ $# -ge 2 ]] || { echo "--clock-reference-epoch requires a value" >&2; exit 2; }
+      clock_reference_epoch="$2"
       shift 2
       ;;
     --help|-h)
@@ -54,13 +65,6 @@ stop_leash() {
   curl -fsS -X POST "$leash_url/stop" >/dev/null
 }
 
-require_time_sync() {
-  [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]] || {
-    echo "target clock is not synchronized; correct time before starting ROS" >&2
-    exit 1
-  }
-}
-
 valid_map_name() {
   [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]
 }
@@ -73,7 +77,7 @@ case "$command" in
     ;;
   start)
     stop_leash
-    require_time_sync
+    require_trusted_clock "$clock_reference_epoch"
     compose up -d --build
     stop_leash
     ;;
@@ -84,7 +88,7 @@ case "$command" in
     ;;
   restart)
     stop_leash
-    require_time_sync
+    require_trusted_clock "$clock_reference_epoch"
     compose restart slam
     stop_leash
     ;;
