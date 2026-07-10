@@ -47,7 +47,7 @@ for command in "capture" "verify" "rollback" "--source-revision" "--build-featur
   fi
 done
 
-for heading in "## Deployment baseline and rollback" "## USB bring-up without committed identity" "## LD06 lidar and base IMU" "### Stationary proof"; do
+for heading in "## Deployment baseline and rollback" "## USB bring-up without committed identity" "## LD06 lidar and base IMU" "### Stationary proof" "calibration/"; do
   if ! grep -Fq -- "$heading" implementations/waveshare-ugv/README.md; then
     echo "UGV implementation guide missing: $heading" >&2
     exit 1
@@ -55,10 +55,11 @@ for heading in "## Deployment baseline and rollback" "## USB bring-up without co
 done
 
 implementations/waveshare-ugv/ros2/verify.sh
+implementations/waveshare-ugv/calibration/verify.sh
 
 if grep -R -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)' docs/ADAPTERS.md docs/ADAPTER_SMOKE_TEMPLATE.md implementations/waveshare-ugv; then
   echo "adapter docs contain a private address" >&2
   exit 1
 fi
 
-printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true}\n'
+printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true,"ugv_calibration":true}\n'
