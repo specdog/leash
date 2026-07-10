@@ -45,6 +45,10 @@ done
   exit 2
 }
 [[ -n "$env_file" && -r "$env_file" ]] || { echo "a readable --env-file is required" >&2; exit 2; }
+[[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]] || {
+  echo "target clock is not synchronized" >&2
+  exit 1
+}
 
 compose() {
   docker compose --env-file "$env_file" -f "$ros_dir/compose.yaml" "$@"

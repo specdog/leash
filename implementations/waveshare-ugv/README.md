@@ -241,7 +241,9 @@ repository. Set the token/state paths and explicit provisional transform/track
 values. Provisional values are for stationary read-only bring-up only; do not
 claim calibration from them. Ensure UID 1000 can write the private map-state
 directory. Starting the system Docker daemon may require the local operator's
-sudo authorization.
+sudo authorization. `timedatectl show -p NTPSynchronized --value` must report
+`yes`; the lifecycle and soak tools refuse unsynchronized timestamps because
+external viewers and freshness gates cannot safely consume them.
 
 ### Build and lifecycle
 
