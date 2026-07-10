@@ -87,6 +87,15 @@ application. Queue saturation and disconnect return explicit errors. Call
 `disconnect_localization_provider` or `fail_localization_provider` when an
 adapter terminates so telemetry degrades immediately.
 
+An out-of-process local adapter can use the HTTP projection of the same queue.
+Set `LEASH_LOCALIZATION_INGRESS_TOKEN_FILE` to a private mode-`0600` token file,
+then send the versioned JSON update with `Authorization: Bearer <token>` to
+`POST /localization/update`. If the token-file setting is absent, ingress is
+disabled with `503`; a missing or wrong token returns `401`. `GET /localization`
+reports provider status without enabling ingress. Prefer a private loopback or
+robot-local network binding and never put the token in source, command history,
+or a URL.
+
 The external adapter owns ROS, SLAM Toolbox, vendor SDKs, device paths,
 calibration, transforms, reconnect policy, and robot configuration. None of
 those belong in the core provider contract.
