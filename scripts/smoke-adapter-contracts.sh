@@ -20,9 +20,26 @@ for heading in "## No-hardware proof" "## Bench preflight" "## Gimbal and camera
   fi
 done
 
-if grep -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)' docs/ADAPTERS.md docs/ADAPTER_SMOKE_TEMPLATE.md; then
+baseline_script="implementations/waveshare-ugv/deployment-baseline.sh"
+bash -n "$baseline_script"
+baseline_help="$(bash "$baseline_script" --help)"
+for command in "capture" "verify" "rollback" "--source-revision" "--build-features" "--confirm"; do
+  if ! grep -Fq -- "$command" <<<"$baseline_help"; then
+    echo "deployment baseline help missing: $command" >&2
+    exit 1
+  fi
+done
+
+for heading in "## Deployment baseline and rollback" "## USB bring-up without committed identity"; do
+  if ! grep -Fq -- "$heading" implementations/waveshare-ugv/README.md; then
+    echo "UGV implementation guide missing: $heading" >&2
+    exit 1
+  fi
+done
+
+if grep -R -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])192\.168\.[0-9]+\.[0-9]+([^0-9]|$)' docs/ADAPTERS.md docs/ADAPTER_SMOKE_TEMPLATE.md implementations/waveshare-ugv; then
   echo "adapter docs contain a private address" >&2
   exit 1
 fi
 
-printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5}\n'
+printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true}\n'

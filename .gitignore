@@ -7,3 +7,4 @@
 .DS_Store
 /operator/fleet.local.json
 /operator/config/fleet.json
+/implementations/waveshare-ugv/local/
