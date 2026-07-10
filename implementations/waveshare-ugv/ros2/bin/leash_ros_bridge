@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from leash_waveshare_slam.bridge import main
+
+main()

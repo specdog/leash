@@ -1,0 +1,48 @@
+name: leash-waveshare-slam
+
+services:
+  slam:
+    image: leash-waveshare-slam:humble-20260702
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      LEASH_URL: ${LEASH_URL:-http://host.docker.internal:8000}
+      LEASH_LOCALIZATION_TOKEN_FILE: /run/secrets/localization_token
+      LEASH_ROS_READ_ONLY: "1"
+      LEASH_ROS_MAP_ID: ${LEASH_ROS_MAP_ID:-waveshare-ugv-map}
+      LEASH_ROS_WHEEL_TRACK_M: ${LEASH_ROS_WHEEL_TRACK_M:?set measured wheel track}
+      LEASH_ROS_WHEEL_SCALE: ${LEASH_ROS_WHEEL_SCALE:-1.0}
+      LEASH_ROS_SCAN_X_M: ${LEASH_ROS_SCAN_X_M:?set measured lidar x}
+      LEASH_ROS_SCAN_Y_M: ${LEASH_ROS_SCAN_Y_M:?set measured lidar y}
+      LEASH_ROS_SCAN_Z_M: ${LEASH_ROS_SCAN_Z_M:?set measured lidar z}
+      LEASH_ROS_SCAN_YAW_RAD: ${LEASH_ROS_SCAN_YAW_RAD:?set measured lidar yaw}
+      LEASH_ROS_CAMERA_X_M: ${LEASH_ROS_CAMERA_X_M:?set measured camera x}
+      LEASH_ROS_CAMERA_Y_M: ${LEASH_ROS_CAMERA_Y_M:?set measured camera y}
+      LEASH_ROS_CAMERA_Z_M: ${LEASH_ROS_CAMERA_Z_M:?set measured camera z}
+      LEASH_ROS_CAMERA_YAW_RAD: ${LEASH_ROS_CAMERA_YAW_RAD:?set measured camera yaw}
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    secrets:
+      - localization_token
+    volumes:
+      - type: bind
+        source: ${LEASH_ROS_MAP_STATE_DIR:?set private map state directory}
+        target: /data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run:size=16m,mode=755
+    mem_limit: 1536m
+    cpus: 2.0
+
+secrets:
+  localization_token:
+    file: ${LEASH_ROS_LOCALIZATION_TOKEN_FILE:?set private localization token file}

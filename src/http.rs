@@ -16,7 +16,10 @@ use axum::{
         ws::{Message, WebSocket},
         Form, Path as AxumPath, State, WebSocketUpgrade,
     },
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
+    http::{
+        header::{AUTHORIZATION, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Redirect, Response,
@@ -44,7 +47,9 @@ use crate::runtime::{
 use crate::types::{AgentMessageAck, AgentMessageList};
 #[cfg(feature = "webrtc")]
 use crate::webrtc_camera::{camera_webrtc_status, camera_webrtc_ws};
-use crate::{runtime::Harness, transport::StreamRecvError, types::SpeedMode};
+use crate::{
+    runtime::Harness, transport::StreamRecvError, types::SpeedMode, LocalizationProviderUpdate,
+};
 
 static CAMERA_PROCESS_LOCK: LazyLock<Arc<TokioMutex<()>>> =
     LazyLock::new(|| Arc::new(TokioMutex::new(())));
@@ -246,6 +251,8 @@ pub fn router(harness: Harness) -> Router {
         .route("/capabilities", get(capabilities))
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
+        .route("/localization", get(localization_status))
+        .route("/localization/update", post(localization_update))
         .route("/events/telemetry", get(sse_telemetry))
         .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
@@ -501,6 +508,86 @@ fn mcp_origin_allowed(headers: &HeaderMap) -> bool {
 
 async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::TelemetryFrame> {
     Json(harness.telemetry())
+}
+
+async fn localization_status(
+    State(harness): State<Harness>,
+) -> Json<crate::localization::LocalizationProviderStatus> {
+    Json(harness.localization_provider_status())
+}
+
+async fn localization_update(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    Json(update): Json<LocalizationProviderUpdate>,
+) -> Response {
+    let expected = match localization_ingress_token() {
+        Ok(token) => token,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"ok": false, "error": error.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    if !localization_authorized(&headers, &expected) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"ok": false, "error": "localization ingress authorization failed"})),
+        )
+            .into_response();
+    }
+    if let Err(error) = harness.submit_localization_update(update) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ok": true,
+            "localization_provider": harness.localization_provider_status()
+        })),
+    )
+        .into_response()
+}
+
+fn localization_ingress_token() -> Result<String> {
+    let path = env::var("LEASH_LOCALIZATION_INGRESS_TOKEN_FILE").map_err(|_| {
+        anyhow::anyhow!(
+            "localization ingress is disabled; set LEASH_LOCALIZATION_INGRESS_TOKEN_FILE"
+        )
+    })?;
+    let token = std::fs::read_to_string(&path)
+        .map_err(|error| anyhow::anyhow!("cannot read localization ingress token file: {error}"))?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        anyhow::bail!("localization ingress token file is empty");
+    }
+    Ok(token)
+}
+
+fn localization_authorized(headers: &HeaderMap, expected: &str) -> bool {
+    let provided = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    provided.is_some_and(|provided| constant_time_eq(provided.as_bytes(), expected.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 async fn sensors(State(harness): State<Harness>) -> Json<Value> {
@@ -1659,7 +1746,22 @@ impl IntoResponse for HttpError {
 
 #[cfg(test)]
 mod tests {
-    use super::{camera_activity, CameraRuntimeState, CAMERA_RUNTIME_STATE};
+    use std::fs;
+
+    use axum::{
+        extract::State,
+        http::{header::AUTHORIZATION, HeaderMap, HeaderValue, StatusCode},
+        Json,
+    };
+
+    use super::{
+        camera_activity, localization_authorized, localization_update, CameraRuntimeState,
+        CAMERA_RUNTIME_STATE,
+    };
+    use crate::{Harness, HarnessConfig, LocalizationProviderUpdate};
+    use tokio::sync::Mutex;
+
+    static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[test]
     fn camera_runtime_state_tracks_owner_recovery_and_bounded_failures() {
@@ -1701,5 +1803,50 @@ mod tests {
         );
         drop(mjpeg);
         *CAMERA_RUNTIME_STATE.lock() = CameraRuntimeState::default();
+    }
+
+    #[test]
+    fn localization_ingress_requires_an_exact_bearer_token() {
+        let mut headers = HeaderMap::new();
+        assert!(!localization_authorized(&headers, "bridge-secret"));
+
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer wrong"));
+        assert!(!localization_authorized(&headers, "bridge-secret"));
+
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer bridge-secret"),
+        );
+        assert!(localization_authorized(&headers, "bridge-secret"));
+    }
+
+    #[tokio::test]
+    async fn localization_http_ingress_projects_into_the_generic_provider_queue() {
+        let _guard = LOCALIZATION_ENV_LOCK.lock().await;
+        let token_path =
+            std::env::temp_dir().join(format!("leash-localization-token-{}", std::process::id()));
+        fs::write(&token_path, "bridge-secret\n").unwrap();
+        std::env::set_var("LEASH_LOCALIZATION_INGRESS_TOKEN_FILE", &token_path);
+
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let update = LocalizationProviderUpdate::from_telemetry(2, &harness.telemetry());
+        let unauthorized = localization_update(
+            State(harness.clone()),
+            HeaderMap::new(),
+            Json(update.clone()),
+        )
+        .await;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer bridge-secret"),
+        );
+        let accepted = localization_update(State(harness), headers, Json(update)).await;
+        assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+
+        std::env::remove_var("LEASH_LOCALIZATION_INGRESS_TOKEN_FILE");
+        fs::remove_file(token_path).unwrap();
     }
 }
