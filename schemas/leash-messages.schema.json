@@ -2360,6 +2360,922 @@
       "title": "LocalizationHealth",
       "type": "object"
     },
+    "LocalizationProviderSnapshot": {
+      "$defs": {
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
+        "LocalizationFrame": {
+          "properties": {
+            "health": {
+              "$ref": "#/$defs/LocalizationHealth",
+              "default": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapIdentity",
+              "default": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              }
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-localization-v1",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ts_ms"
+          ],
+          "type": "object"
+        },
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationProviderState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "LocalizationProviderStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "generation": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_received_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "sequence": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stale_after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/LocalizationProviderState"
+            }
+          },
+          "required": [
+            "provider",
+            "state",
+            "generation",
+            "stale_after_ms",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "costmap": {
+          "$ref": "#/$defs/CostmapFrame"
+        },
+        "localization": {
+          "$ref": "#/$defs/LocalizationFrame"
+        },
+        "map": {
+          "$ref": "#/$defs/MapMetadata"
+        },
+        "occupancy_grid": {
+          "$ref": "#/$defs/OccupancyGridFrame"
+        },
+        "status": {
+          "$ref": "#/$defs/LocalizationProviderStatus"
+        }
+      },
+      "required": [
+        "status",
+        "localization",
+        "map",
+        "occupancy_grid",
+        "costmap"
+      ],
+      "title": "LocalizationProviderSnapshot",
+      "type": "object"
+    },
+    "LocalizationProviderState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "initializing",
+        "tracking",
+        "degraded",
+        "stale",
+        "disconnected",
+        "failed",
+        "unavailable"
+      ],
+      "title": "LocalizationProviderState",
+      "type": "string"
+    },
+    "LocalizationProviderStatus": {
+      "$defs": {
+        "LocalizationProviderState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_received_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "last_update_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "sequence": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stale_after_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/LocalizationProviderState"
+        }
+      },
+      "required": [
+        "provider",
+        "state",
+        "generation",
+        "stale_after_ms",
+        "message"
+      ],
+      "title": "LocalizationProviderStatus",
+      "type": "object"
+    },
+    "LocalizationProviderUpdate": {
+      "$defs": {
+        "CostmapFrame": {
+          "properties": {
+            "costs": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "costs"
+          ],
+          "type": "object"
+        },
+        "LocalizationFrame": {
+          "properties": {
+            "health": {
+              "$ref": "#/$defs/LocalizationHealth",
+              "default": {
+                "error": null,
+                "last_update_ms": null,
+                "message": "",
+                "status": "unavailable"
+              }
+            },
+            "map": {
+              "$ref": "#/$defs/MapIdentity",
+              "default": {
+                "frame_id": "",
+                "map_id": "",
+                "map_revision": ""
+              }
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-localization-v1",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ts_ms"
+          ],
+          "type": "object"
+        },
+        "LocalizationHealth": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LocalizationStatus"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationStatus": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "lost",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "MapMetadata": {
+          "properties": {
+            "cell_order": {
+              "type": "string"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "map_id",
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cell_order"
+          ],
+          "type": "object"
+        },
+        "OccupancyGridFrame": {
+          "properties": {
+            "cells": {
+              "items": {
+                "format": "int8",
+                "maximum": 127,
+                "minimum": -128,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metadata": {
+              "$ref": "#/$defs/MapMetadata",
+              "default": {
+                "cell_order": "",
+                "frame_id": "",
+                "height": 0,
+                "map_id": "",
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "resolution_m": 0.0,
+                "ts_ms": 0,
+                "width": 0
+              }
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "resolution_m",
+            "origin",
+            "cells"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "PoseWithCovariance2d": {
+          "properties": {
+            "covariance": {
+              "description": "Row-major 3x3 covariance for x, y, and yaw.",
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "pose": {
+              "$ref": "#/$defs/Pose2d"
+            }
+          },
+          "required": [
+            "pose",
+            "covariance"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "costmap": {
+          "$ref": "#/$defs/CostmapFrame"
+        },
+        "localization": {
+          "$ref": "#/$defs/LocalizationFrame"
+        },
+        "map": {
+          "$ref": "#/$defs/MapMetadata"
+        },
+        "occupancy_grid": {
+          "$ref": "#/$defs/OccupancyGridFrame"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "default": "leash-localization-provider-v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "localization",
+        "map",
+        "occupancy_grid",
+        "costmap"
+      ],
+      "title": "LocalizationProviderUpdate",
+      "type": "object"
+    },
     "LocalizationStatus": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "enum": [
@@ -4962,6 +5878,27 @@
       "type": "object"
     },
     "SavedWaypoint": {
+      "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        }
+      },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "created_at_ms": {
@@ -4974,6 +5911,17 @@
         },
         "id": {
           "type": "string"
+        },
+        "map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "name": {
           "type": "string"
@@ -5011,6 +5959,25 @@
     },
     "SavedWaypointList": {
       "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
         "SavedWaypoint": {
           "properties": {
             "created_at_ms": {
@@ -5023,6 +5990,17 @@
             },
             "id": {
               "type": "string"
+            },
+            "map": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MapIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "name": {
               "type": "string"
@@ -5515,6 +6493,25 @@
     },
     "SpatialMemoryEntry": {
       "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
         "SpatialMemoryKind": {
           "enum": [
             "location",
@@ -5538,6 +6535,17 @@
         },
         "kind": {
           "$ref": "#/$defs/SpatialMemoryKind"
+        },
+        "map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "name": {
           "type": "string"
@@ -5590,6 +6598,25 @@
     },
     "SpatialMemoryStatus": {
       "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
         "SpatialMemoryEntry": {
           "properties": {
             "confidence": {
@@ -5605,6 +6632,17 @@
             },
             "kind": {
               "$ref": "#/$defs/SpatialMemoryKind"
+            },
+            "map": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MapIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "name": {
               "type": "string"
@@ -6181,6 +7219,83 @@
           },
           "required": [
             "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationProviderState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "LocalizationProviderStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "generation": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_received_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "sequence": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stale_after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/LocalizationProviderState"
+            }
+          },
+          "required": [
+            "provider",
+            "state",
+            "generation",
+            "stale_after_ms",
             "message"
           ],
           "type": "object"
@@ -6889,6 +8004,20 @@
             "pose": null,
             "ts_ms": 0,
             "version": "leash-localization-v1"
+          }
+        },
+        "localization_provider": {
+          "$ref": "#/$defs/LocalizationProviderStatus",
+          "default": {
+            "error": null,
+            "generation": 0,
+            "last_received_ms": null,
+            "last_update_ms": null,
+            "message": "localization provider unavailable",
+            "provider": "none",
+            "sequence": null,
+            "stale_after_ms": 1000,
+            "state": "unavailable"
           }
         },
         "map": {
@@ -7715,6 +8844,83 @@
           },
           "required": [
             "status",
+            "message"
+          ],
+          "type": "object"
+        },
+        "LocalizationProviderState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "LocalizationProviderStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "generation": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_received_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "sequence": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stale_after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/LocalizationProviderState"
+            }
+          },
+          "required": [
+            "provider",
+            "state",
+            "generation",
+            "stale_after_ms",
             "message"
           ],
           "type": "object"
@@ -8610,6 +9816,20 @@
                 "version": "leash-localization-v1"
               }
             },
+            "localization_provider": {
+              "$ref": "#/$defs/LocalizationProviderStatus",
+              "default": {
+                "error": null,
+                "generation": 0,
+                "last_received_ms": null,
+                "last_update_ms": null,
+                "message": "localization provider unavailable",
+                "provider": "none",
+                "sequence": null,
+                "stale_after_ms": 1000,
+                "state": "unavailable"
+              }
+            },
             "map": {
               "$ref": "#/$defs/MapMetadata",
               "default": {
@@ -8960,6 +10180,20 @@
                 "version": "leash-localization-v1"
               }
             },
+            "localization_provider": {
+              "$ref": "#/$defs/LocalizationProviderStatus",
+              "default": {
+                "error": null,
+                "generation": 0,
+                "last_received_ms": null,
+                "last_update_ms": null,
+                "message": "localization provider unavailable",
+                "provider": "none",
+                "sequence": null,
+                "stale_after_ms": 1000,
+                "state": "unavailable"
+              }
+            },
             "map": {
               "$ref": "#/$defs/MapMetadata",
               "default": {
@@ -9174,6 +10408,17 @@
               "pose": null,
               "ts_ms": 0,
               "version": "leash-localization-v1"
+            },
+            "localization_provider": {
+              "error": null,
+              "generation": 0,
+              "last_received_ms": null,
+              "last_update_ms": null,
+              "message": "localization provider unavailable",
+              "provider": "none",
+              "sequence": null,
+              "stale_after_ms": 1000,
+              "state": "unavailable"
             },
             "map": {
               "cell_order": "",
@@ -9795,6 +11040,83 @@
           ],
           "type": "object"
         },
+        "LocalizationProviderState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "LocalizationProviderStatus": {
+          "properties": {
+            "error": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "generation": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_received_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_update_ms": {
+              "default": null,
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "sequence": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stale_after_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/LocalizationProviderState"
+            }
+          },
+          "required": [
+            "provider",
+            "state",
+            "generation",
+            "stale_after_ms",
+            "message"
+          ],
+          "type": "object"
+        },
         "LocalizationStatus": {
           "enum": [
             "initializing",
@@ -10385,6 +11707,20 @@
             "pose": null,
             "ts_ms": 0,
             "version": "leash-localization-v1"
+          }
+        },
+        "localization_provider": {
+          "$ref": "#/$defs/LocalizationProviderStatus",
+          "default": {
+            "error": null,
+            "generation": 0,
+            "last_received_ms": null,
+            "last_update_ms": null,
+            "message": "localization provider unavailable",
+            "provider": "none",
+            "sequence": null,
+            "stale_after_ms": 1000,
+            "state": "unavailable"
           }
         },
         "map": {

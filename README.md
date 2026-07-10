@@ -258,6 +258,7 @@ invokes `POST /stop` against sim HTTP.
 - `autonomy`: active patrol mode, strategy, goal, and visited cells
 - `range_scan` / `imu`: the exact versioned sensor status objects from telemetry
 - `localization`: map identity, localized pose/covariance, and health
+- `localization_provider`: provider state, sequence, map generation, freshness, and errors
 
 Frame conventions are deliberately small: `map` is the global 2D frame for
 poses, paths, occupancy grids, and costmaps; `base_link` is the robot-local
@@ -269,7 +270,10 @@ Range scans and IMU samples live under `TelemetryFrame.sensors` and use generic
 SI-unit contracts; see [docs/SENSORS.md](docs/SENSORS.md). Hardware model,
 device, calibration, and middleware choices stay in concrete implementations.
 The version and compatibility rules for localization, streams, and replay are in
-[docs/LOCALIZATION.md](docs/LOCALIZATION.md).
+[docs/LOCALIZATION.md](docs/LOCALIZATION.md). Provider implementations use the
+generic boundary in
+[docs/LOCALIZATION_PROVIDERS.md](docs/LOCALIZATION_PROVIDERS.md); ROS, SLAM,
+vendor SDKs, device paths, and calibration stay outside the core library.
 
 External viewers can subscribe to the stream endpoints and render those fields
 without linking a viewer SDK into the core crate.

@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    accelerator::AcceleratorStatus, capability::CapabilityDescriptor, module::ModuleInfo,
-    stack::AdapterProfile, worker::ExternalWorkerStatus,
+    accelerator::AcceleratorStatus, capability::CapabilityDescriptor,
+    localization::LocalizationProviderStatus, module::ModuleInfo, stack::AdapterProfile,
+    worker::ExternalWorkerStatus,
 };
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,6 +113,8 @@ pub struct TelemetryFrame {
     pub sensors: SensorSnapshot,
     #[serde(default)]
     pub localization: LocalizationFrame,
+    #[serde(default)]
+    pub localization_provider: LocalizationProviderStatus,
     #[serde(default)]
     pub map: MapMetadata,
     #[serde(default)]
@@ -231,6 +234,7 @@ impl TelemetryStreamFrame {
             || self.telemetry.occupancy_grid != self.visualization.occupancy_grid
             || self.telemetry.costmap != self.visualization.costmap
             || self.telemetry.localization != self.visualization.localization
+            || self.telemetry.localization_provider != self.visualization.localization_provider
             || self.telemetry.sensors.range_scan != self.visualization.range_scan
             || self.telemetry.sensors.imu != self.visualization.imu
         {
@@ -350,6 +354,8 @@ pub struct VisualizationFrame {
     pub imu: ImuStatus,
     #[serde(default)]
     pub localization: LocalizationFrame,
+    #[serde(default)]
+    pub localization_provider: LocalizationProviderStatus,
 }
 
 impl Default for VisualizationFrame {
@@ -372,6 +378,7 @@ impl Default for VisualizationFrame {
             range_scan: RangeScanStatus::default(),
             imu: ImuStatus::default(),
             localization: LocalizationFrame::default(),
+            localization_provider: LocalizationProviderStatus::default(),
         }
     }
 }
@@ -721,6 +728,8 @@ pub struct SavedWaypoint {
     pub id: String,
     pub name: String,
     pub frame_id: String,
+    #[serde(default)]
+    pub map: Option<MapIdentity>,
     pub x_m: f64,
     pub y_m: f64,
     pub tolerance_m: f64,
@@ -856,6 +865,8 @@ pub struct SpatialMemoryEntry {
     pub name: String,
     pub kind: SpatialMemoryKind,
     pub frame_id: String,
+    #[serde(default)]
+    pub map: Option<MapIdentity>,
     pub x_m: f64,
     pub y_m: f64,
     pub observed_at_ms: u128,
@@ -1605,6 +1616,7 @@ mod tests {
             range_scan: RangeScanStatus::default(),
             imu: ImuStatus::default(),
             localization: LocalizationFrame::default(),
+            localization_provider: LocalizationProviderStatus::default(),
         };
 
         let value = serde_json::to_value(&frame).unwrap();

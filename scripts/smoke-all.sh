@@ -439,6 +439,9 @@ const checks = [
         if (frame.telemetry?.localization?.health?.status !== "tracking") {
           throw new Error("mapping replay localization was missing");
         }
+        if (frame.telemetry?.localization_provider?.state !== "tracking" || frame.telemetry.localization_provider.generation !== 1) {
+          throw new Error("mapping replay provider status was missing");
+        }
         if (frame.visualization?.localization?.map?.map_id !== frame.telemetry.localization.map.map_id) {
           throw new Error("mapping replay visualization lost map identity");
         }

@@ -1150,6 +1150,22 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
         localized.pose.ts_ms = ts_ms;
         frame.telemetry.localization.health.last_update_ms = Some(ts_ms);
     }
+    if frame
+        .telemetry
+        .localization_provider
+        .last_update_ms
+        .is_some()
+    {
+        frame.telemetry.localization_provider.last_update_ms = Some(ts_ms);
+    }
+    if frame
+        .telemetry
+        .localization_provider
+        .last_received_ms
+        .is_some()
+    {
+        frame.telemetry.localization_provider.last_received_ms = Some(ts_ms);
+    }
     frame.telemetry.map.ts_ms = ts_ms;
     frame.telemetry.map.origin.ts_ms = ts_ms;
     frame.telemetry.occupancy_grid.ts_ms = ts_ms;
@@ -1176,6 +1192,7 @@ fn normalize_replay_frame_timestamps(frame: &mut TelemetryStreamFrame, ts_ms: u1
     frame.visualization.range_scan = frame.telemetry.sensors.range_scan.clone();
     frame.visualization.imu = frame.telemetry.sensors.imu.clone();
     frame.visualization.localization = frame.telemetry.localization.clone();
+    frame.visualization.localization_provider = frame.telemetry.localization_provider.clone();
     frame.visualization.map = frame.telemetry.map.clone();
     frame.visualization.occupancy_grid = frame.telemetry.occupancy_grid.clone();
     frame.visualization.costmap = frame.telemetry.costmap.clone();

@@ -122,6 +122,7 @@ assert_localization_contract() {
 const localization = payload.localization;
 if (localization?.version !== "leash-localization-v1") throw new Error("localization version was missing");
 if (localization.health?.status !== "tracking") throw new Error("localization status was not tracking");
+if (payload.localization_provider?.state !== "tracking" || payload.localization_provider?.generation !== 1) throw new Error("localization provider status was missing");
 if (localization.map?.map_id !== "sim-local" || localization.map?.frame_id !== "map") throw new Error("map identity was wrong");
 if (localization.pose?.pose?.frame_id !== "map") throw new Error("localized pose was missing");
 if (!Array.isArray(localization.pose?.covariance) || localization.pose.covariance.length !== 9) throw new Error("pose covariance was missing");
@@ -137,6 +138,7 @@ if (!payload.telemetry || payload.telemetry.profile !== "sim") throw new Error("
 if (payload.telemetry.sensors?.range_scan?.status !== "available") throw new Error("stream range scan was missing");
 if (payload.telemetry.sensors?.imu?.status !== "available") throw new Error("stream IMU was missing");
 if (payload.telemetry.localization?.health?.status !== "tracking") throw new Error("stream localization health was missing");
+if (JSON.stringify(payload.visualization.localization_provider) !== JSON.stringify(payload.telemetry.localization_provider)) throw new Error("visualization localization provider did not match telemetry");
 if (payload.visualization?.localization?.map?.map_id !== payload.telemetry.localization.map.map_id) throw new Error("visualization localization did not match telemetry");
 if (JSON.stringify(payload.visualization.map) !== JSON.stringify(payload.telemetry.map)) throw new Error("visualization map did not match telemetry");
 if (JSON.stringify(payload.visualization.occupancy_grid) !== JSON.stringify(payload.telemetry.occupancy_grid)) throw new Error("visualization occupancy grid did not match telemetry");
