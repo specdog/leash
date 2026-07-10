@@ -30,6 +30,9 @@ pub mod transport;
 pub mod types;
 #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
 pub mod v4l2_camera;
+#[cfg(feature = "waveshare-ugv")]
+#[path = "../implementations/waveshare-ugv/adapter.rs"]
+mod waveshare_ugv;
 #[cfg(feature = "webrtc")]
 pub mod webrtc_camera;
 pub mod worker;

@@ -419,6 +419,10 @@ second UGV, then complete
 [docs/ADAPTER_SMOKE_TEMPLATE.md](docs/ADAPTER_SMOKE_TEMPLATE.md) before fleet
 operation.
 
+The concrete Waveshare LD06 and base-IMU configuration, axes, collision gate,
+fixtures, and stationary proof live in the
+[Waveshare UGV implementation guide](implementations/waveshare-ugv/README.md#ld06-lidar-and-base-imu).
+
 ## Features
 
 | Feature | Description | Default |
