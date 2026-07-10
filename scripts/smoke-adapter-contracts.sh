@@ -7,10 +7,27 @@ cd "$repo_root"
 cargo test --quiet adapter::tests
 
 for contract in "trait MobileBaseAdapter" "trait GimbalAdapter" "trait CameraAdapter" "impl MobileBaseAdapter for WaveshareUgvDriver" "impl GimbalAdapter for WaveshareUgvDriver"; do
-  if ! grep -R -q -- "$contract" src; then
+  if ! grep -R -q -- "$contract" src implementations/waveshare-ugv; then
     echo "missing adapter contract proof: $contract" >&2
     exit 1
   fi
+done
+
+sensor_script="implementations/waveshare-ugv/sensor-soak.sh"
+bash -n "$sensor_script"
+sensor_help="$(bash "$sensor_script" --help)"
+for option in "--duration-secs" "--max-sensor-age-ms" "--max-rss-growth-mb" "--output"; do
+  if ! grep -Fq -- "$option" <<<"$sensor_help"; then
+    echo "sensor soak help missing: $option" >&2
+    exit 1
+  fi
+done
+
+for fixture in "examples/waveshare-ugv/sensor-fixture.json" "examples/replay/waveshare-ugv-sensors.jsonl"; do
+  [[ -s "$fixture" ]] || {
+    echo "missing Waveshare sensor fixture: $fixture" >&2
+    exit 1
+  }
 done
 
 for heading in "## No-hardware proof" "## Bench preflight" "## Gimbal and camera" "## Telemetry and soak" "## Evidence and sign-off"; do
@@ -30,7 +47,7 @@ for command in "capture" "verify" "rollback" "--source-revision" "--build-featur
   fi
 done
 
-for heading in "## Deployment baseline and rollback" "## USB bring-up without committed identity"; do
+for heading in "## Deployment baseline and rollback" "## USB bring-up without committed identity" "## LD06 lidar and base IMU" "### Stationary proof"; do
   if ! grep -Fq -- "$heading" implementations/waveshare-ugv/README.md; then
     echo "UGV implementation guide missing: $heading" >&2
     exit 1
@@ -42,4 +59,4 @@ if grep -R -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])19
   exit 1
 fi
 
-printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true}\n'
+printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2}\n'

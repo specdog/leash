@@ -8,24 +8,18 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(feature = "waveshare-ugv")]
-use std::io::{BufRead, BufReader, ErrorKind, Write};
-#[cfg(feature = "waveshare-ugv")]
-use std::thread;
-
-#[cfg(feature = "waveshare-ugv")]
-use anyhow::Context;
 use anyhow::{anyhow, Result};
 use parking_lot::{Mutex, RwLock};
-#[cfg(feature = "waveshare-ugv")]
-use serde_json::json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 #[cfg(feature = "waveshare-ugv")]
-use crate::adapter::waveshare_drive_values;
+use crate::waveshare_ugv::{
+    imu_with_freshness, read_base_telemetry_loop, scan_blocks_motion, spawn_ld06_reader,
+    with_freshness, BaseTelemetryUpdate, WaveshareSensorConfig, WaveshareUgvDriver,
+};
 
 #[cfg(feature = "mavlink-drone")]
 use crate::types::DroneCommandStatus;
@@ -116,7 +110,7 @@ impl PatrolState {
     }
 }
 
-trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
+pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
     #[cfg(feature = "waveshare-ugv")]
     fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
         Ok(None)
@@ -230,95 +224,6 @@ impl MobileBaseAdapter for ManipulatorDriver {
 
 #[cfg(feature = "manipulator")]
 impl GimbalAdapter for ManipulatorDriver {}
-
-#[cfg(feature = "waveshare-ugv")]
-struct WaveshareUgvDriver {
-    writer: Mutex<Box<dyn serialport::SerialPort>>,
-    drive_invert: bool,
-    drive_swap: bool,
-}
-
-#[cfg(feature = "waveshare-ugv")]
-impl WaveshareUgvDriver {
-    fn open(config: &HarnessConfig) -> Result<Self> {
-        let port = serialport::new(&config.serial_port, config.serial_baud)
-            .timeout(Duration::from_millis(200))
-            .open()
-            .with_context(|| {
-                format!(
-                    "open Waveshare UGV serial port {} @ {}",
-                    config.serial_port, config.serial_baud
-                )
-            })?;
-        Ok(Self {
-            writer: Mutex::new(port),
-            drive_invert: config.drive_invert,
-            drive_swap: config.drive_swap,
-        })
-    }
-
-    fn write_json(&self, payload: Value, context: &'static str) -> Result<()> {
-        let line = payload.to_string() + "\n";
-        let mut writer = self.writer.lock();
-        writer.write_all(line.as_bytes()).context(context)?;
-        writer.flush().context(context)?;
-        Ok(())
-    }
-}
-
-#[cfg(feature = "waveshare-ugv")]
-impl RobotDriver for WaveshareUgvDriver {
-    fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
-        let writer = self.writer.lock();
-        writer
-            .try_clone()
-            .map(Some)
-            .context("clone Waveshare UGV serial port for telemetry")
-    }
-
-    fn enable_telemetry(&self) -> Result<()> {
-        self.write_json(
-            json!({"T": 142, "cmd": 100}),
-            "set Waveshare UGV telemetry interval",
-        )?;
-        self.write_json(
-            json!({"T": 131, "cmd": 1}),
-            "enable Waveshare UGV telemetry flow",
-        )?;
-        self.request_telemetry()
-    }
-
-    fn request_telemetry(&self) -> Result<()> {
-        self.write_json(json!({"T": 130}), "request Waveshare UGV base telemetry")
-    }
-}
-
-#[cfg(feature = "waveshare-ugv")]
-impl MobileBaseAdapter for WaveshareUgvDriver {
-    fn drive(&self, left: f64, right: f64) -> Result<()> {
-        let (left, right) = waveshare_drive_values(left, right, self.drive_invert, self.drive_swap);
-        self.write_json(
-            json!({"T": 1, "L": left, "R": right}),
-            "write Waveshare UGV drive command",
-        )
-    }
-}
-
-#[cfg(feature = "waveshare-ugv")]
-impl GimbalAdapter for WaveshareUgvDriver {
-    fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        self.write_json(
-            json!({
-                "T": 133,
-                "X": pan_deg,
-                "Y": tilt_deg,
-                "SPD": speed,
-                "ACC": accel
-            }),
-            "write Waveshare UGV camera gimbal command",
-        )
-    }
-}
 
 #[derive(Debug, Clone)]
 struct PilotSession {
@@ -453,6 +358,8 @@ pub struct Harness {
     localization_provider: InProcessLocalizationProvider,
     localization_input: ExternalLocalizationProvider,
     localization_seq: Arc<AtomicU64>,
+    #[cfg(feature = "waveshare-ugv")]
+    waveshare_sensors: Option<Arc<WaveshareSensorConfig>>,
     #[cfg(feature = "physical-navigation")]
     physical_navigation_lease: Arc<Mutex<Option<PhysicalNavigationLease>>>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
@@ -485,6 +392,11 @@ impl Harness {
     ) -> Result<Self> {
         config.validate()?;
         let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
+        #[cfg(feature = "waveshare-ugv")]
+        let waveshare_sensors = (config.profile == Profile::WaveshareUgv)
+            .then(WaveshareSensorConfig::from_env)
+            .transpose()?
+            .map(Arc::new);
         let instance_id = HARNESS_INSTANCE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         let memory_path =
             memory_path.unwrap_or_else(|| default_spatial_memory_path(&config, instance_id));
@@ -573,6 +485,8 @@ impl Harness {
             localization_provider,
             localization_input,
             localization_seq: Arc::new(AtomicU64::new(localization_sequence)),
+            #[cfg(feature = "waveshare-ugv")]
+            waveshare_sensors,
             #[cfg(feature = "physical-navigation")]
             physical_navigation_lease: Arc::new(Mutex::new(None)),
             coordinator: Arc::new(RwLock::new(coordinator)),
@@ -1326,10 +1240,16 @@ impl Harness {
     }
 
     pub fn health(&self) -> Health {
+        #[cfg(feature = "waveshare-ugv")]
+        self.refresh_waveshare_sensor_freshness();
         let command = self.command.lock().clone();
         let coordinator = self.coordinator.read();
+        #[cfg(feature = "waveshare-ugv")]
+        let sensors_ok = self.waveshare_sensor_health_ok();
+        #[cfg(not(feature = "waveshare-ugv"))]
+        let sensors_ok = true;
         Health {
-            ok: coordinator.is_healthy(),
+            ok: coordinator.is_healthy() && sensors_ok,
             mode: self.runtime_mode().to_string(),
             replay: self.replay.is_some(),
             role: self.config.role.clone(),
@@ -1422,6 +1342,8 @@ impl Harness {
         }
 
         let now = now_ms();
+        #[cfg(feature = "waveshare-ugv")]
+        self.refresh_waveshare_sensor_freshness();
         let command = self.command.lock().clone();
         let raw = self.raw.read().clone();
         let sensors = sensor_snapshot(&raw);
@@ -1479,6 +1401,36 @@ impl Harness {
             source: raw.source,
         };
         self.telemetry_with_vision(telemetry)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn refresh_waveshare_sensor_freshness(&self) {
+        if self.config.profile != Profile::WaveshareUgv {
+            return;
+        }
+        let Some(config) = self.waveshare_sensors.as_ref() else {
+            return;
+        };
+        let now = now_ms();
+        let mut raw = self.raw.write();
+        raw.imu = imu_with_freshness(raw.imu.clone(), now, config.imu.stale_after_ms);
+        if let Some(stale_after_ms) = config.lidar_stale_after_ms() {
+            raw.range_scan = with_freshness(raw.range_scan.clone(), now, stale_after_ms);
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn waveshare_sensor_health_ok(&self) -> bool {
+        if self.config.profile != Profile::WaveshareUgv {
+            return true;
+        }
+        let Some(config) = self.waveshare_sensors.as_ref() else {
+            return false;
+        };
+        let raw = self.raw.read();
+        raw.imu.status == crate::types::SensorDataStatus::Available
+            && (!config.lidar_is_configured()
+                || raw.range_scan.status == crate::types::SensorDataStatus::Available)
     }
 
     fn telemetry_with_vision(&self, mut telemetry: TelemetryFrame) -> TelemetryFrame {
@@ -1740,6 +1692,16 @@ impl Harness {
             self.command.lock().speed_mode = speed_mode;
         }
 
+        #[cfg(feature = "waveshare-ugv")]
+        if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
+            && self.obstacle_blocks_motion()
+        {
+            self.stop_for_obstacle()?;
+            return Err(anyhow!(
+                "drive blocked by the configured lidar collision threshold"
+            ));
+        }
+
         let mut command = self.command.lock();
         if command.estop {
             return Err(anyhow!("estop is latched; call estop/reset before driving"));
@@ -1774,6 +1736,61 @@ impl Harness {
             stopped_by_deadman: command.stopped_by_deadman,
             soft_odometry_limited: command.soft_odometry_limited,
         })
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn obstacle_blocks_motion(&self) -> bool {
+        if self.config.profile != Profile::WaveshareUgv {
+            return false;
+        }
+        let Some(config) = self.waveshare_sensors.as_ref() else {
+            return false;
+        };
+        let Some(threshold_m) = config.collision_threshold_m() else {
+            return false;
+        };
+        let Some(stale_after_ms) = config.lidar_stale_after_ms() else {
+            return false;
+        };
+        let status = with_freshness(self.raw.read().range_scan.clone(), now_ms(), stale_after_ms);
+        scan_blocks_motion(&status, threshold_m)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn enforce_obstacle_stop(&self) {
+        if !self.obstacle_blocks_motion() {
+            return;
+        }
+        let moving = {
+            let command = self.command.lock();
+            command.left_cmd.abs() > f64::EPSILON || command.right_cmd.abs() > f64::EPSILON
+        };
+        if moving {
+            if let Err(error) = self.stop_for_obstacle() {
+                warn!(?error, "lidar collision stop failed");
+            }
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn stop_for_obstacle(&self) -> Result<()> {
+        self.driver.stop()?;
+        {
+            let mut command = self.command.lock();
+            command.left_cmd = 0.0;
+            command.right_cmd = 0.0;
+            command.last_cmd_at = Some(Instant::now());
+        }
+        self.clear_physical_navigation_lease();
+        self.cancel_planner_state(
+            "collision-stop",
+            "planner movement cancelled by lidar collision threshold",
+        );
+        self.cancel_patrol_state(
+            "collision-stop",
+            "patrol movement cancelled by lidar collision threshold",
+        );
+        Ok(())
     }
 
     pub fn camera_aim(
@@ -2473,14 +2490,35 @@ impl Harness {
         if self.config.profile != Profile::WaveshareUgv {
             return;
         }
+        let Some(sensor_config) = self.waveshare_sensors.as_ref().cloned() else {
+            return;
+        };
 
         match self.driver.telemetry_reader() {
             Ok(Some(port)) => {
                 let raw = self.raw.clone();
-                thread::spawn(move || read_waveshare_telemetry_loop(port, raw));
+                let publish = Arc::new(move |update: BaseTelemetryUpdate| {
+                    apply_waveshare_update(&raw, update);
+                });
+                let raw = self.raw.clone();
+                let publish_status = Arc::new(move |status: ImuStatus| {
+                    raw.write().imu = status;
+                });
+                let imu = sensor_config.imu.clone();
+                std::thread::spawn(move || {
+                    read_base_telemetry_loop(port, imu, publish, publish_status)
+                });
             }
             Ok(None) => {}
             Err(err) => warn!(?err, "waveshare telemetry reader unavailable"),
+        }
+
+        if let Some(lidar) = sensor_config.lidar.clone() {
+            let raw = self.raw.clone();
+            let publish = Arc::new(move |status: RangeScanStatus| {
+                raw.write().range_scan = status;
+            });
+            spawn_ld06_reader(lidar, publish);
         }
 
         let driver = self.driver.clone();
@@ -2510,6 +2548,8 @@ impl Harness {
             let mut interval = time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
+                #[cfg(feature = "waveshare-ugv")]
+                harness.enforce_obstacle_stop();
                 let telemetry = harness.telemetry();
                 let _ = harness.telemetry_tx.send(telemetry.clone());
                 if let Ok(payload) = serde_json::to_value(harness.telemetry_stream_frame()) {
@@ -2526,139 +2566,23 @@ fn operator_owner_id(token: &str) -> String {
 }
 
 #[cfg(feature = "waveshare-ugv")]
-fn read_waveshare_telemetry_loop(
-    port: Box<dyn serialport::SerialPort>,
-    raw: Arc<RwLock<RawTelemetry>>,
-) {
-    let mut reader = BufReader::new(port);
-    loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => continue,
-            Ok(_) => {
-                let Some(frame) = parse_waveshare_frame(&line) else {
-                    continue;
-                };
-                if apply_waveshare_frame(&raw, frame) {
-                    continue;
-                }
-            }
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    ErrorKind::TimedOut | ErrorKind::WouldBlock | ErrorKind::Interrupted
-                ) =>
-            {
-                continue;
-            }
-            Err(err) => {
-                warn!(?err, "read Waveshare telemetry failed");
-                thread::sleep(Duration::from_millis(500));
-            }
-        }
-    }
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn parse_waveshare_frame(line: &str) -> Option<Value> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return Some(value);
-    }
-    let start = trimmed.find('{')?;
-    let end = trimmed.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    serde_json::from_str::<Value>(&trimmed[start..=end]).ok()
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn apply_waveshare_frame(raw: &Arc<RwLock<RawTelemetry>>, frame: Value) -> bool {
-    if !is_waveshare_base_feedback(&frame) {
-        return false;
-    }
-
+fn apply_waveshare_update(raw: &Arc<RwLock<RawTelemetry>>, update: BaseTelemetryUpdate) {
     let mut next = raw.write();
-    if let Some(voltage) = waveshare_voltage(&frame) {
+    if let Some(voltage) = update.battery_v {
         next.battery_v = Some(round3(voltage));
         next.battery_pct = battery_percent_from_voltage(voltage);
     }
-    if let Some(left_m) = waveshare_odometry_m(&frame, "odl", &["odometry_left", "left_m"]) {
+    if let Some(left_m) = update.odometry_left_m {
         next.odometry_left = Some(round3(left_m));
     }
-    if let Some(right_m) = waveshare_odometry_m(&frame, "odr", &["odometry_right", "right_m"]) {
+    if let Some(right_m) = update.odometry_right_m {
         next.odometry_right = Some(round3(right_m));
     }
+    if let Some(imu) = update.imu {
+        next.imu = imu;
+    }
     next.last_raw_frame_ms = Some(now_ms());
-    next.last_raw_payload = Some(frame);
-    true
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn is_waveshare_base_feedback(frame: &Value) -> bool {
-    frame
-        .get("T")
-        .and_then(json_number)
-        .is_some_and(|kind| (kind - 1001.0).abs() < f64::EPSILON)
-        || frame.get("v").is_some()
-        || frame.get("odl").is_some()
-        || frame.get("odr").is_some()
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn waveshare_voltage(frame: &Value) -> Option<f64> {
-    const DIRECT_KEYS: &[&str] = &[
-        "battery_v",
-        "voltage_v",
-        "loadVoltage_V",
-        "load_voltage_v",
-        "busVoltage_V",
-        "bus_voltage_v",
-        "vbat",
-        "VBAT",
-        "voltage",
-    ];
-    for key in DIRECT_KEYS {
-        if let Some(value) = frame.get(*key).and_then(json_number) {
-            return normalize_voltage(value);
-        }
-    }
-    frame
-        .get("v")
-        .and_then(json_number)
-        .and_then(normalize_voltage)
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn normalize_voltage(value: f64) -> Option<f64> {
-    let voltage = if value > 100.0 { value / 100.0 } else { value };
-    (voltage > 3.0 && voltage < 30.0).then_some(voltage)
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn waveshare_odometry_m(frame: &Value, centimeters_key: &str, meter_keys: &[&str]) -> Option<f64> {
-    for key in meter_keys {
-        if let Some(value) = frame.get(*key).and_then(json_number) {
-            return Some(value);
-        }
-    }
-    frame
-        .get(centimeters_key)
-        .and_then(json_number)
-        .map(|centimeters| centimeters / 100.0)
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn json_number(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(number) => number.as_f64(),
-        Value::String(text) => text.trim().parse::<f64>().ok(),
-        _ => None,
-    }
+    next.last_raw_payload = Some(update.raw);
 }
 
 fn battery_percent_from_voltage(voltage: f64) -> Option<f64> {
@@ -3243,6 +3167,110 @@ pub fn now_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "waveshare-ugv")]
+    type RecordedCommands = Arc<Mutex<Vec<(f64, f64)>>>;
+
+    #[cfg(feature = "waveshare-ugv")]
+    struct RecordingUgvDriver {
+        commands: RecordedCommands,
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl RobotDriver for RecordingUgvDriver {}
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl MobileBaseAdapter for RecordingUgvDriver {
+        fn drive(&self, left: f64, right: f64) -> Result<()> {
+            self.commands.lock().push((left, right));
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl GimbalAdapter for RecordingUgvDriver {}
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn waveshare_sensor_harness() -> (Harness, RecordedCommands) {
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let driver = Arc::new(RecordingUgvDriver {
+            commands: commands.clone(),
+        });
+        let mut harness = Harness::new_inner_with_driver(
+            HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_physical_actuation: true,
+                deadman_ms: 5_000,
+                ..HarnessConfig::default()
+            },
+            None,
+            Some(driver),
+        )
+        .unwrap();
+        harness.waveshare_sensors = Some(Arc::new(
+            WaveshareSensorConfig::from_lookup(|key| {
+                (key == "LEASH_UGV_LIDAR_DEVICE").then(|| "/dev/test-lidar".to_string())
+            })
+            .unwrap(),
+        ));
+        (harness, commands)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_collision_gate_stops_active_motion_and_blocks_restart() {
+        let (harness, commands) = waveshare_sensor_harness();
+        harness
+            .update_range_scan_status(simulated_range_scan(now_ms()))
+            .unwrap();
+        harness.drive(None, 0.1, 0.1, Some(SpeedMode::Low)).unwrap();
+
+        let mut blocked = simulated_range_scan(now_ms());
+        blocked.sample.as_mut().unwrap().ranges_m[0] = Some(0.2);
+        harness.update_range_scan_status(blocked).unwrap();
+        harness.enforce_obstacle_stop();
+
+        let command = harness.command.lock().clone();
+        assert_eq!((command.left_cmd, command.right_cmd), (0.0, 0.0));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+        let error = harness
+            .drive(None, 0.1, 0.1, Some(SpeedMode::Low))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("lidar collision threshold"));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_sensor_health_tracks_imu_lidar_disconnect_and_staleness() {
+        let (harness, _) = waveshare_sensor_harness();
+        let ts_ms = now_ms();
+        {
+            let mut raw = harness.raw.write();
+            raw.imu = simulated_imu_sample(ts_ms);
+            raw.range_scan = RangeScanStatus {
+                status: crate::types::SensorDataStatus::Disconnected,
+                source: "test-lidar".to_string(),
+                error: Some("disconnected".to_string()),
+                ..RangeScanStatus::default()
+            };
+        }
+        assert!(!harness.health().ok);
+
+        harness
+            .update_range_scan_status(simulated_range_scan(ts_ms))
+            .unwrap();
+        assert!(harness.health().ok);
+
+        let stale_ts = now_ms().saturating_sub(501);
+        harness.raw.write().imu = simulated_imu_sample(stale_ts);
+        assert!(!harness.health().ok);
+        assert_eq!(
+            harness.telemetry().sensors.imu.status,
+            crate::types::SensorDataStatus::Stale
+        );
+    }
 
     #[tokio::test]
     async fn sim_harness_drives_and_deadman_stops() {

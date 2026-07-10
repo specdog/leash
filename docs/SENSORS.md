@@ -28,10 +28,14 @@ radians and ranges use meters. `angle_min_rad` is the first sample,
 `angle_max_rad` is the last, and `angle_increment_rad` may be positive or
 negative. `ranges_m` uses `null`/`None` for an explicitly invalid return;
 non-null values must fall inside the declared inclusive range limits.
+`ranges_m.len()` is the stable point/bin count, each option is its validity,
+and `scan_rate_hz` carries the measured revolutions per second when the device
+reports it.
 
 Validation rejects empty scans, non-finite metadata, a zero angle increment,
 angle/count mismatches, spans greater than one turn, invalid ranges, and an
-intensity vector whose length differs from the range vector.
+intensity vector whose length differs from the range vector. A present scan rate
+must be finite and positive.
 
 ## IMU samples
 

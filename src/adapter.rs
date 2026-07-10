@@ -72,6 +72,7 @@ pub fn simulated_range_scan(ts_ms: u128) -> RangeScanStatus {
         range_max_m: 12.0,
         ranges_m: vec![Some(2.0), Some(1.5), Some(1.0), Some(1.5), Some(2.0)],
         intensities: vec![Some(10.0), Some(20.0), Some(30.0), Some(20.0), Some(10.0)],
+        scan_rate_hz: Some(10.0),
     };
     RangeScanStatus {
         status: SensorDataStatus::Available,

@@ -90,3 +90,79 @@ and rejects a foreign device owner. It never sends a drive command.
 The older runnable adapter example remains at
 [`examples/waveshare-ugv/`](../../examples/waveshare-ugv/). This folder is the
 canonical home for the complete UGV implementation.
+
+## LD06 lidar and base IMU
+
+The `waveshare-ugv` feature compiles the implementation in this folder into the
+Leash binary. Leash remains the sole owner of the motor/base serial device and,
+when configured, the LD06-compatible lidar device. No ROS or SLAM process opens
+either device.
+
+```mermaid
+flowchart LR
+  base["ESP32 base serial\nJSON telemetry"] --> imu["UGV IMU calibration\nraw axes to body SI"]
+  lidar["LD06 serial\nCRC packets"] --> scan["full-turn assembler\nangle transform, masks, bins"]
+  imu --> contracts["generic Leash sensor contracts"]
+  scan --> contracts
+  contracts --> outputs["telemetry, record/replay, visualization, health"]
+  scan --> collision["Leash collision threshold"]
+  collision --> stop["zero-speed MobileBaseAdapter stop"]
+```
+
+Configure the implementation in the private service environment. Leaving
+`LEASH_UGV_LIDAR_DEVICE` empty disables lidar ownership; IMU ingestion continues
+on the already-owned base serial stream.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `LEASH_UGV_LIDAR_DEVICE` | empty | Explicit LD06 serial path; no globbing or discovery. |
+| `LEASH_UGV_LIDAR_BAUD` | `230400` | LD06 serial baud. |
+| `LEASH_UGV_LIDAR_FRAME_ID` | `base_scan` | Output scan frame. |
+| `LEASH_UGV_LIDAR_RANGE_MIN_M` / `MAX_M` | `0.02` / `12.0` | Inclusive valid range. |
+| `LEASH_UGV_LIDAR_BINS` | `360` | Even bins across one full turn. |
+| `LEASH_UGV_LIDAR_MIN_INTENSITY` | `0` | Returns below this device confidence are invalid. |
+| `LEASH_UGV_LIDAR_YAW_OFFSET_DEG` | `180` | Sensor-to-body yaw transform. |
+| `LEASH_UGV_LIDAR_CLOCKWISE` | `false` | Reverse the raw positive-angle direction. |
+| `LEASH_UGV_LIDAR_BODY_MASKS_DEG` | empty | Comma-separated output-frame sectors such as `170:-170`. |
+| `LEASH_UGV_LIDAR_STALE_MS` | `500` | Maximum scan age before health becomes stale. |
+| `LEASH_UGV_COLLISION_THRESHOLD_M` | `0.25` | Clear, valid return at/below this distance forces stop. |
+| `LEASH_UGV_IMU_FRAME_ID` | `base_link` | Right-handed output body frame. |
+| `LEASH_UGV_IMU_ACCEL_LSB_PER_G` | `8192` | Base-controller acceleration scale. |
+| `LEASH_UGV_IMU_GYRO_DPS_PER_LSB` | `0.0164` | Base-controller gyro scale before conversion to rad/s. |
+| `LEASH_UGV_IMU_AXIS_MAP` | `x,y,z` | Signed raw-to-body axes, e.g. `y,-x,z`. |
+| `LEASH_UGV_IMU_STALE_MS` | `500` | Maximum IMU age before health becomes stale. |
+
+The default body convention is +X forward, +Y left, +Z up. Acceleration is
+converted to m/s² and gyro values to rad/s. The sample timestamp is the Leash
+host receipt time because the base JSON frame does not provide an epoch clock;
+orientation remains absent rather than publishing an unverified quaternion.
+Change scales or signed axes only from measured calibration proof for the
+mounted unit.
+
+The LD06 parser accepts the vendor 47-byte `0x54 0x2c` packet, checks CRC-8,
+interpolates its 12 angles from packet start/end, applies the configured body
+transform and masks, and assembles an evenly binned full revolution. Invalid
+range/confidence returns stay explicit `null` values. `scan_rate_hz`, bin count,
+validity, source, and freshness are visible on `/sensors` and every normal
+telemetry/recording surface.
+
+The scrubbed parser input is
+[`examples/waveshare-ugv/sensor-fixture.json`](../../examples/waveshare-ugv/sensor-fixture.json),
+and its middleware-neutral replay form is
+[`examples/replay/waveshare-ugv-sensors.jsonl`](../../examples/replay/waveshare-ugv-sensors.jsonl).
+
+### Stationary proof
+
+After configuration and with the UGV stationary, run the implementation-owned
+ten-minute check locally on the robot:
+
+```bash
+implementations/waveshare-ugv/sensor-soak.sh \
+  --duration-secs 600 \
+  --output ~/.local/state/leash/waveshare-ugv-sensor-proof.json
+```
+
+It sends stop before and after the run and never sends drive. It requires one
+unchanged service PID, available/fresh lidar and IMU samples, positive scan
+rate, stable point count, and bounded RSS spread. Keep the output private; it
+contains live process measurements.

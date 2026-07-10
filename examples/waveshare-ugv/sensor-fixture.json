@@ -1,0 +1,26 @@
+{
+  "base_frame": {
+    "T": 1001,
+    "L": 0,
+    "R": 0,
+    "v": 1206,
+    "odl": 5,
+    "odr": 3,
+    "ax": 128,
+    "ay": -146,
+    "az": 8230,
+    "gx": -28,
+    "gy": 16,
+    "gz": 5
+  },
+  "ld06_packet_hex": "542c100e0000e80314f20315fc03160604171004181a041924041a2e041b38041c42041d4c041e56041f84032a00bb",
+  "expected": {
+    "battery_v": 12.06,
+    "odometry_left_m": 0.05,
+    "odometry_right_m": 0.03,
+    "packet_speed_hz": 10.0,
+    "packet_start_angle_deg": 0.0,
+    "packet_end_angle_deg": 9.0,
+    "packet_point_count": 12
+  }
+}

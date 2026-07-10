@@ -5208,6 +5208,15 @@
           },
           "type": "array"
         },
+        "scan_rate_hz": {
+          "default": null,
+          "description": "Optional measured revolutions per second for the completed scan.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "ts_ms": {
           "description": "Sensor capture time in Unix epoch milliseconds.",
           "format": "uint128",
@@ -5663,6 +5672,15 @@
                 ]
               },
               "type": "array"
+            },
+            "scan_rate_hz": {
+              "default": null,
+              "description": "Optional measured revolutions per second for the completed scan.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "ts_ms": {
               "description": "Sensor capture time in Unix epoch milliseconds.",
@@ -6306,6 +6324,15 @@
                 ]
               },
               "type": "array"
+            },
+            "scan_rate_hz": {
+              "default": null,
+              "description": "Optional measured revolutions per second for the completed scan.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "ts_ms": {
               "description": "Sensor capture time in Unix epoch milliseconds.",
@@ -7589,6 +7616,15 @@
                 ]
               },
               "type": "array"
+            },
+            "scan_rate_hz": {
+              "default": null,
+              "description": "Optional measured revolutions per second for the completed scan.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "ts_ms": {
               "description": "Sensor capture time in Unix epoch milliseconds.",
@@ -9357,6 +9393,15 @@
                 ]
               },
               "type": "array"
+            },
+            "scan_rate_hz": {
+              "default": null,
+              "description": "Optional measured revolutions per second for the completed scan.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "ts_ms": {
               "description": "Sensor capture time in Unix epoch milliseconds.",
@@ -11341,6 +11386,15 @@
                 ]
               },
               "type": "array"
+            },
+            "scan_rate_hz": {
+              "default": null,
+              "description": "Optional measured revolutions per second for the completed scan.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "ts_ms": {
               "description": "Sensor capture time in Unix epoch milliseconds.",
