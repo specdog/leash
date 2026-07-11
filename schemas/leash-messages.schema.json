@@ -2784,6 +2784,130 @@
             "covariance"
           ],
           "type": "object"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        },
+        "VoxelCell": {
+          "properties": {
+            "occupancy": {
+              "format": "int8",
+              "maximum": 127,
+              "minimum": -128,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "z": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "occupancy"
+          ],
+          "type": "object"
+        },
+        "VoxelGridFrame": {
+          "properties": {
+            "depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed_3d": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "origin_z_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-voxel-grid-v1",
+              "type": "string"
+            },
+            "voxels": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/VoxelCell"
+              },
+              "type": "array"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "depth",
+            "resolution_m",
+            "origin",
+            "origin_z_m",
+            "source",
+            "observed_3d"
+          ],
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2800,8 +2924,14 @@
         "occupancy_grid": {
           "$ref": "#/$defs/OccupancyGridFrame"
         },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath"
+        },
         "status": {
           "$ref": "#/$defs/LocalizationProviderStatus"
+        },
+        "voxel_grid": {
+          "$ref": "#/$defs/VoxelGridFrame"
         }
       },
       "required": [
@@ -2809,7 +2939,9 @@
         "localization",
         "map",
         "occupancy_grid",
-        "costmap"
+        "costmap",
+        "path",
+        "voxel_grid"
       ],
       "title": "LocalizationProviderSnapshot",
       "type": "object"
@@ -3248,6 +3380,130 @@
             "covariance"
           ],
           "type": "object"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        },
+        "VoxelCell": {
+          "properties": {
+            "occupancy": {
+              "format": "int8",
+              "maximum": 127,
+              "minimum": -128,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "z": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "occupancy"
+          ],
+          "type": "object"
+        },
+        "VoxelGridFrame": {
+          "properties": {
+            "depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed_3d": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "origin_z_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-voxel-grid-v1",
+              "type": "string"
+            },
+            "voxels": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/VoxelCell"
+              },
+              "type": "array"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "depth",
+            "resolution_m",
+            "origin",
+            "origin_z_m",
+            "source",
+            "observed_3d"
+          ],
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3264,6 +3520,14 @@
         "occupancy_grid": {
           "$ref": "#/$defs/OccupancyGridFrame"
         },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath",
+          "default": {
+            "frame_id": "",
+            "poses": [],
+            "ts_ms": 0
+          }
+        },
         "sequence": {
           "format": "uint64",
           "minimum": 0,
@@ -3272,6 +3536,29 @@
         "version": {
           "default": "leash-localization-provider-v1",
           "type": "string"
+        },
+        "voxel_grid": {
+          "$ref": "#/$defs/VoxelGridFrame",
+          "default": {
+            "depth": 0,
+            "frame_id": "",
+            "height": 0,
+            "observed_3d": false,
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "origin_z_m": 0.0,
+            "resolution_m": 0.0,
+            "source": "unavailable",
+            "ts_ms": 0,
+            "version": "leash-voxel-grid-v1",
+            "voxels": [],
+            "width": 0
+          }
         }
       },
       "required": [
@@ -7959,6 +8246,130 @@
           ],
           "type": "object"
         },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        },
+        "VoxelCell": {
+          "properties": {
+            "occupancy": {
+              "format": "int8",
+              "maximum": 127,
+              "minimum": -128,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "z": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "occupancy"
+          ],
+          "type": "object"
+        },
+        "VoxelGridFrame": {
+          "properties": {
+            "depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed_3d": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "origin_z_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-voxel-grid-v1",
+              "type": "string"
+            },
+            "voxels": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/VoxelCell"
+              },
+              "type": "array"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "depth",
+            "resolution_m",
+            "origin",
+            "origin_z_m",
+            "source",
+            "observed_3d"
+          ],
+          "type": "object"
+        },
         "WorkerHealthCheck": {
           "enum": [
             "process"
@@ -8146,6 +8557,14 @@
             "null"
           ]
         },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath",
+          "default": {
+            "frame_id": "",
+            "poses": [],
+            "ts_ms": 0
+          }
+        },
         "profile": {
           "type": "string"
         },
@@ -8206,6 +8625,29 @@
             "ok": false,
             "source": "none",
             "status": "unavailable"
+          }
+        },
+        "voxel_grid": {
+          "$ref": "#/$defs/VoxelGridFrame",
+          "default": {
+            "depth": 0,
+            "frame_id": "",
+            "height": 0,
+            "observed_3d": false,
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "origin_z_m": 0.0,
+            "resolution_m": 0.0,
+            "source": "unavailable",
+            "ts_ms": 0,
+            "version": "leash-voxel-grid-v1",
+            "voxels": [],
+            "width": 0
           }
         },
         "workers": {
@@ -9973,6 +10415,14 @@
                 "null"
               ]
             },
+            "path": {
+              "$ref": "#/$defs/VisualizationPath",
+              "default": {
+                "frame_id": "",
+                "poses": [],
+                "ts_ms": 0
+              }
+            },
             "profile": {
               "type": "string"
             },
@@ -10033,6 +10483,29 @@
                 "ok": false,
                 "source": "none",
                 "status": "unavailable"
+              }
+            },
+            "voxel_grid": {
+              "$ref": "#/$defs/VoxelGridFrame",
+              "default": {
+                "depth": 0,
+                "frame_id": "",
+                "height": 0,
+                "observed_3d": false,
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "origin_z_m": 0.0,
+                "resolution_m": 0.0,
+                "source": "unavailable",
+                "ts_ms": 0,
+                "version": "leash-voxel-grid-v1",
+                "voxels": [],
+                "width": 0
               }
             },
             "workers": {
@@ -10323,6 +10796,29 @@
             },
             "version": {
               "type": "string"
+            },
+            "voxel_grid": {
+              "$ref": "#/$defs/VoxelGridFrame",
+              "default": {
+                "depth": 0,
+                "frame_id": "",
+                "height": 0,
+                "observed_3d": false,
+                "origin": {
+                  "frame_id": "",
+                  "ts_ms": 0,
+                  "x_m": 0.0,
+                  "y_m": 0.0,
+                  "yaw_rad": 0.0
+                },
+                "origin_z_m": 0.0,
+                "resolution_m": 0.0,
+                "source": "unavailable",
+                "ts_ms": 0,
+                "version": "leash-voxel-grid-v1",
+                "voxels": [],
+                "width": 0
+              }
             }
           },
           "required": [
@@ -10360,6 +10856,106 @@
           "required": [
             "frame_id",
             "poses"
+          ],
+          "type": "object"
+        },
+        "VoxelCell": {
+          "properties": {
+            "occupancy": {
+              "format": "int8",
+              "maximum": 127,
+              "minimum": -128,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "z": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "occupancy"
+          ],
+          "type": "object"
+        },
+        "VoxelGridFrame": {
+          "properties": {
+            "depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed_3d": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "origin_z_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-voxel-grid-v1",
+              "type": "string"
+            },
+            "voxels": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/VoxelCell"
+              },
+              "type": "array"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "depth",
+            "resolution_m",
+            "origin",
+            "origin_z_m",
+            "source",
+            "observed_3d"
           ],
           "type": "object"
         },
@@ -10568,7 +11164,27 @@
               "linear_y_mps": 0.0,
               "ts_ms": 0
             },
-            "version": "leash-visualization-v1"
+            "version": "leash-visualization-v1",
+            "voxel_grid": {
+              "depth": 0,
+              "frame_id": "",
+              "height": 0,
+              "observed_3d": false,
+              "origin": {
+                "frame_id": "",
+                "ts_ms": 0,
+                "x_m": 0.0,
+                "y_m": 0.0,
+                "yaw_rad": 0.0
+              },
+              "origin_z_m": 0.0,
+              "resolution_m": 0.0,
+              "source": "unavailable",
+              "ts_ms": 0,
+              "version": "leash-voxel-grid-v1",
+              "voxels": [],
+              "width": 0
+            }
           }
         }
       },
@@ -11695,6 +12311,106 @@
             "poses"
           ],
           "type": "object"
+        },
+        "VoxelCell": {
+          "properties": {
+            "occupancy": {
+              "format": "int8",
+              "maximum": 127,
+              "minimum": -128,
+              "type": "integer"
+            },
+            "x": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "y": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "z": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "z",
+            "occupancy"
+          ],
+          "type": "object"
+        },
+        "VoxelGridFrame": {
+          "properties": {
+            "depth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "frame_id": {
+              "type": "string"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "observed_3d": {
+              "type": "boolean"
+            },
+            "origin": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "origin_z_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "resolution_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "source": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "default": "leash-voxel-grid-v1",
+              "type": "string"
+            },
+            "voxels": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/VoxelCell"
+              },
+              "type": "array"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "width",
+            "height",
+            "depth",
+            "resolution_m",
+            "origin",
+            "origin_z_m",
+            "source",
+            "observed_3d"
+          ],
+          "type": "object"
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -11861,6 +12577,29 @@
         },
         "version": {
           "type": "string"
+        },
+        "voxel_grid": {
+          "$ref": "#/$defs/VoxelGridFrame",
+          "default": {
+            "depth": 0,
+            "frame_id": "",
+            "height": 0,
+            "observed_3d": false,
+            "origin": {
+              "frame_id": "",
+              "ts_ms": 0,
+              "x_m": 0.0,
+              "y_m": 0.0,
+              "yaw_rad": 0.0
+            },
+            "origin_z_m": 0.0,
+            "resolution_m": 0.0,
+            "source": "unavailable",
+            "ts_ms": 0,
+            "version": "leash-voxel-grid-v1",
+            "voxels": [],
+            "width": 0
+          }
         }
       },
       "required": [

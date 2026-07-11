@@ -31,7 +31,7 @@ use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
-    config::{HarnessConfig, Profile},
+    config::{AcceleratorBackend, HarnessConfig, Profile},
     localization::{
         ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationProvider,
         LocalizationProviderStatus, LocalizationProviderUpdate,
@@ -55,8 +55,9 @@ use crate::{
         PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
         SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
         TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-        COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-        SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+        VoxelCell, VoxelGridFrame, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
+        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+        VOXEL_GRID_VERSION,
     },
 };
 
@@ -437,6 +438,7 @@ impl Harness {
             let ts_ms = now_ms();
             let localization = simulated_localization_frame(ts_ms, &raw);
             let (map, occupancy_grid, costmap) = simulated_map_frames(ts_ms);
+            let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
             localization_provider.apply_at(
                 LocalizationProviderUpdate {
                     version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
@@ -445,6 +447,8 @@ impl Harness {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 ts_ms,
             )?;
@@ -1340,6 +1344,7 @@ impl Harness {
             );
             let snapshot = self.localization_provider.snapshot(now);
             apply_localization_snapshot(&mut telemetry, snapshot);
+            telemetry.voxel_grid = self.voxel_grid_for(&telemetry.occupancy_grid);
             return self.telemetry_with_vision(telemetry);
         }
 
@@ -1352,6 +1357,7 @@ impl Harness {
         if self.config.profile == Profile::Sim {
             let localization = simulated_localization_frame(now, &raw);
             let (map, occupancy_grid, costmap) = simulated_map_frames(now);
+            let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
             let sequence = self.localization_seq.fetch_add(1, Ordering::Relaxed) + 1;
             let _ = self.localization_provider.apply_at(
                 LocalizationProviderUpdate {
@@ -1361,11 +1367,14 @@ impl Harness {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 now,
             );
         }
         let localization_snapshot = self.localization_provider.snapshot(now);
+        let voxel_grid = self.voxel_grid_for(&localization_snapshot.occupancy_grid);
         let resource = self.config.resource_sampling.then(current_resource_sample);
         let workers = if self.config.profile == Profile::Sim {
             vec![crate::worker::simulated_perception_worker_status()]
@@ -1396,6 +1405,8 @@ impl Harness {
             map: localization_snapshot.map,
             occupancy_grid: localization_snapshot.occupancy_grid,
             costmap: localization_snapshot.costmap,
+            path: localization_snapshot.path,
+            voxel_grid,
             vision: VisionResult::default(),
             workers,
             motion_events: Vec::new(),
@@ -1419,6 +1430,23 @@ impl Harness {
         if let Some(stale_after_ms) = config.lidar_stale_after_ms() {
             raw.range_scan = with_freshness(raw.range_scan.clone(), now, stale_after_ms);
         }
+    }
+
+    fn voxel_grid_for(&self, grid: &OccupancyGridFrame) -> VoxelGridFrame {
+        if self.accelerator.active == AcceleratorBackend::Cuda {
+            #[cfg(feature = "cuda")]
+            match cuda_projected_voxel_grid(grid, 0.25) {
+                Ok(voxels) => return voxels,
+                Err(error) => {
+                    tracing::error!(?error, "CUDA voxel projection failed after startup probe");
+                    return VoxelGridFrame {
+                        source: "cuda-error".to_string(),
+                        ..VoxelGridFrame::default()
+                    };
+                }
+            }
+        }
+        projected_voxel_grid(grid, 0.25)
     }
 
     #[cfg(feature = "waveshare-ugv")]
@@ -1550,25 +1578,13 @@ impl Harness {
             pose: pose.clone(),
             twist,
             path: if planner_path.poses.is_empty() {
-                VisualizationPath {
-                    ts_ms: telemetry.ts_ms,
-                    frame_id: "map".to_string(),
-                    poses: vec![
-                        Pose2d {
-                            ts_ms: telemetry.ts_ms,
-                            frame_id: "map".to_string(),
-                            x_m: 0.0,
-                            y_m: 0.0,
-                            yaw_rad: 0.0,
-                        },
-                        pose.clone(),
-                    ],
-                }
+                telemetry.path.clone()
             } else {
                 planner_path
             },
             occupancy_grid: telemetry.occupancy_grid.clone(),
             costmap: telemetry.costmap.clone(),
+            voxel_grid: telemetry.voxel_grid.clone(),
             point_cloud: PointCloudMetadata {
                 ts_ms: telemetry.ts_ms,
                 frame_id: "base_link".to_string(),
@@ -2790,8 +2806,99 @@ fn apply_localization_snapshot(
     telemetry.map = snapshot.map;
     telemetry.occupancy_grid = snapshot.occupancy_grid;
     telemetry.costmap = snapshot.costmap;
+    telemetry.path = snapshot.path;
+    telemetry.voxel_grid = snapshot.voxel_grid;
 }
 
+fn projected_voxel_grid(grid: &OccupancyGridFrame, obstacle_height_m: f64) -> VoxelGridFrame {
+    if grid.width == 0 || grid.height == 0 || grid.resolution_m <= 0.0 {
+        return VoxelGridFrame::default();
+    }
+    let depth = (obstacle_height_m / grid.resolution_m).ceil().max(1.0) as u32;
+    let voxels = grid
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(_, occupancy)| **occupancy > OCCUPANCY_FREE)
+        .flat_map(|(index, occupancy)| {
+            let x = index as u32 % grid.width;
+            let y = index as u32 / grid.width;
+            (0..depth).map(move |z| VoxelCell {
+                x,
+                y,
+                z,
+                occupancy: *occupancy,
+            })
+        })
+        .collect();
+    VoxelGridFrame {
+        version: VOXEL_GRID_VERSION.to_string(),
+        ts_ms: grid.ts_ms,
+        frame_id: grid.frame_id.clone(),
+        width: grid.width,
+        height: grid.height,
+        depth,
+        resolution_m: grid.resolution_m,
+        origin: grid.origin.clone(),
+        origin_z_m: 0.0,
+        source: "projected-occupancy".to_string(),
+        observed_3d: false,
+        voxels,
+    }
+}
+
+#[cfg(feature = "cuda")]
+fn cuda_projected_voxel_grid(
+    grid: &OccupancyGridFrame,
+    obstacle_height_m: f64,
+) -> Result<VoxelGridFrame> {
+    if grid.width == 0 || grid.height == 0 || grid.resolution_m <= 0.0 {
+        return Ok(VoxelGridFrame::default());
+    }
+    let depth = (obstacle_height_m / grid.resolution_m).ceil().max(1.0) as u32;
+    let projected = crate::cuda_voxel::project_occupancy(&grid.cells, depth)?;
+    let voxels = projected
+        .into_iter()
+        .enumerate()
+        .filter(|(_, occupancy)| *occupancy > 0)
+        .map(|(index, occupancy)| {
+            let cell_index = index / depth as usize;
+            VoxelCell {
+                x: cell_index as u32 % grid.width,
+                y: cell_index as u32 / grid.width,
+                z: index as u32 % depth,
+                occupancy: occupancy as i8,
+            }
+        })
+        .collect();
+    Ok(VoxelGridFrame {
+        version: VOXEL_GRID_VERSION.to_string(),
+        ts_ms: grid.ts_ms,
+        frame_id: grid.frame_id.clone(),
+        width: grid.width,
+        height: grid.height,
+        depth,
+        resolution_m: grid.resolution_m,
+        origin: grid.origin.clone(),
+        origin_z_m: 0.0,
+        source: "cuda-projected-occupancy".to_string(),
+        observed_3d: false,
+        voxels,
+    })
+}
+
+#[cfg(all(test, feature = "cuda"))]
+#[test]
+fn cuda_voxel_projection_matches_cpu_when_device_is_available() {
+    if crate::cuda_voxel::probe().is_err() {
+        return;
+    }
+    let (_, grid, _) = simulated_map_frames(42);
+    let cpu = projected_voxel_grid(&grid, 0.25);
+    let cuda = cuda_projected_voxel_grid(&grid, 0.25).unwrap();
+    assert_eq!(cuda.voxels, cpu.voxels);
+    assert_eq!(cuda.source, "cuda-projected-occupancy");
+}
 #[cfg(feature = "physical-navigation")]
 fn physical_patrol_goal(
     strategy: PatrolStrategy,
@@ -3320,6 +3427,7 @@ mod tests {
         let raw = RawTelemetry::sim();
         let localization = simulated_localization_frame(ts_ms, &raw);
         let (map, occupancy_grid, costmap) = simulated_map_frames(ts_ms);
+        let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
         harness
             .localization_provider
             .apply_at(
@@ -3330,6 +3438,8 @@ mod tests {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 ts_ms,
             )
@@ -3819,13 +3929,16 @@ mod tests {
         assert!(frame.visualization.pose.x_m > 0.0);
         assert_eq!(frame.visualization.twist.frame_id, "base_link");
         assert!(frame.visualization.twist.linear_x_mps > 0.0);
-        assert_eq!(frame.visualization.path.poses.len(), 2);
+        assert!(frame.visualization.path.poses.is_empty());
         assert_eq!(frame.visualization.occupancy_grid.cells.len(), 16);
         assert_eq!(
             frame.visualization.occupancy_grid.metadata,
             frame.visualization.map
         );
         assert_eq!(frame.visualization.costmap.costs.len(), 16);
+        assert_eq!(frame.visualization.voxel_grid.source, "projected-occupancy");
+        assert!(!frame.visualization.voxel_grid.observed_3d);
+        assert_eq!(frame.visualization.voxel_grid.voxels.len(), 1);
         assert_eq!(
             frame.visualization.localization.health.status,
             LocalizationStatus::Tracking

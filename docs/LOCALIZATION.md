@@ -40,13 +40,27 @@ public validator and are rejected when loaded from replay.
 
 `TelemetryFrame.localization`, `TelemetryFrame.map`,
 `TelemetryFrame.occupancy_grid`, and `TelemetryFrame.costmap` are the canonical
-values. HTTP telemetry, MCP observe, WebSocket/SSE frames, local transports, TCP
+values. `TelemetryFrame.path` carries a provider planner path without inventing
+one while the planner is idle. `TelemetryFrame.voxel_grid` carries sparse voxel
+cells with source provenance and an `observed_3d` flag. The Waveshare ROS bridge
+subscribes to `/plan`; its current voxel layer is explicitly
+`source: projected-occupancy` and `observed_3d: false`, because Pinkie's planar
+lidar does not measure obstacle height. A future depth or 3D lidar provider must
+publish observed voxels rather than relabeling this projection. HTTP telemetry,
+MCP observe, WebSocket/SSE frames, local transports, TCP
 JSONL payloads, recording, and replay serialize those same types without field
 renaming. The visualization frame carries exact copies plus the same range-scan
 and IMU status objects used by telemetry, so a native viewer can render pose,
 uncertainty, occupancy/cost maps, and sensor health from one frame.
 Provider extension and isolation behavior is documented in
 [`LOCALIZATION_PROVIDERS.md`](LOCALIZATION_PROVIDERS.md).
+
+When Leash is built with `--features cuda` and started with
+`--accelerator cuda --require-accelerator`, the occupancy projection runs through
+an NVRTC-compiled CUDA kernel. Startup accepts CUDA only after a device context,
+kernel launch, and readback probe succeed; otherwise required-CUDA startup fails
+closed. GPU-projected frames use `source: cuda-projected-occupancy` and remain
+`observed_3d: false`.
 
 `SensorSnapshot.version` is `leash-sensors-v1`; localization is independently
 versioned as `leash-localization-v1`. Outer TCP frames remain

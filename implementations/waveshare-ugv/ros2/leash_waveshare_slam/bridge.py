@@ -13,7 +13,7 @@ from typing import Any
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped
-from nav_msgs.msg import OccupancyGrid, Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavigationPath
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu, LaserScan
@@ -68,6 +68,7 @@ class LeashRosBridge(Node):
         self._sequence_initialized = False
         self._map_sample: dict[str, Any] | None = None
         self._pose_sample: dict[str, Any] | None = None
+        self._path_sample: dict[str, Any] | None = None
         self._last_posted_pose_ms: int | None = None
         self._last_posted_at_s: float | None = None
         self._last_error_log_s = 0.0
@@ -85,6 +86,7 @@ class LeashRosBridge(Node):
         self.create_subscription(
             PoseWithCovarianceStamped, "/pose", self._on_pose, 10
         )
+        self.create_subscription(NavigationPath, "/plan", self._on_path, 10)
         self._static_broadcaster = StaticTransformBroadcaster(self)
         self._publish_static_transforms()
         self.create_timer(0.1, self._poll_leash)
@@ -278,6 +280,28 @@ class LeashRosBridge(Node):
             "covariance": list(message.pose.covariance),
         }
 
+    def _on_path(self, message: NavigationPath) -> None:
+        frame_id = message.header.frame_id or "map"
+        self._path_sample = {
+            "ts_ms": self._ts_ms(message.header.stamp),
+            "frame_id": frame_id,
+            "poses": [
+                {
+                    "ts_ms": self._ts_ms(stamped.header.stamp),
+                    "frame_id": stamped.header.frame_id or frame_id,
+                    "x_m": stamped.pose.position.x,
+                    "y_m": stamped.pose.position.y,
+                    "yaw_rad": yaw_from_quaternion(
+                        stamped.pose.orientation.x,
+                        stamped.pose.orientation.y,
+                        stamped.pose.orientation.z,
+                        stamped.pose.orientation.w,
+                    ),
+                }
+                for stamped in message.poses
+            ],
+        }
+
     def _post_localization(self) -> None:
         if self._map_sample is None or self._pose_sample is None:
             return
@@ -297,7 +321,11 @@ class LeashRosBridge(Node):
                 self._sequence_initialized = True
             self._sequence += 1
             update = build_localization_update(
-                self._sequence, self._map_id, self._map_sample, self._pose_sample
+                self._sequence,
+                self._map_id,
+                self._map_sample,
+                self._pose_sample,
+                self._path_sample,
             )
             self._request_json("/localization/update", update)
             self._last_posted_pose_ms = pose_ts_ms
