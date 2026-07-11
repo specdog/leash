@@ -55,6 +55,13 @@ uncertainty, occupancy/cost maps, and sensor health from one frame.
 Provider extension and isolation behavior is documented in
 [`LOCALIZATION_PROVIDERS.md`](LOCALIZATION_PROVIDERS.md).
 
+When Leash is built with `--features cuda` and started with
+`--accelerator cuda --require-accelerator`, the occupancy projection runs through
+an NVRTC-compiled CUDA kernel. Startup accepts CUDA only after a device context,
+kernel launch, and readback probe succeed; otherwise required-CUDA startup fails
+closed. GPU-projected frames use `source: cuda-projected-occupancy` and remain
+`observed_3d: false`.
+
 `SensorSnapshot.version` is `leash-sensors-v1`; localization is independently
 versioned as `leash-localization-v1`. Outer TCP frames remain
 `leash-stream-jsonl-v1`, and recordings remain `leash-replay-v1`.
