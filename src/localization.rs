@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     CostmapFrame, LocalizationFrame, LocalizationStatus, MapMetadata, OccupancyGridFrame,
-    TelemetryFrame,
+    TelemetryFrame, VisualizationPath, VoxelGridFrame, VOXEL_GRID_VERSION,
 };
 
 pub const LOCALIZATION_PROVIDER_UPDATE_VERSION: &str = "leash-localization-provider-v1";
@@ -74,6 +74,10 @@ pub struct LocalizationProviderUpdate {
     pub map: MapMetadata,
     pub occupancy_grid: OccupancyGridFrame,
     pub costmap: CostmapFrame,
+    #[serde(default)]
+    pub path: VisualizationPath,
+    #[serde(default)]
+    pub voxel_grid: VoxelGridFrame,
 }
 
 impl LocalizationProviderUpdate {
@@ -108,6 +112,17 @@ impl LocalizationProviderUpdate {
         {
             return Err(LocalizationProviderError::GridFrameMismatch);
         }
+        if !self.path.poses.is_empty()
+            && (self.path.frame_id != self.map.frame_id
+                || self
+                    .path
+                    .poses
+                    .iter()
+                    .any(|pose| pose.frame_id != self.map.frame_id))
+        {
+            return Err(LocalizationProviderError::PathFrameMismatch);
+        }
+        validate_voxel_grid(&self.voxel_grid, &self.map)?;
         Ok(())
     }
 
@@ -119,6 +134,8 @@ impl LocalizationProviderUpdate {
             map: telemetry.map.clone(),
             occupancy_grid: telemetry.occupancy_grid.clone(),
             costmap: telemetry.costmap.clone(),
+            path: telemetry.path.clone(),
+            voxel_grid: telemetry.voxel_grid.clone(),
         }
     }
 }
@@ -131,6 +148,8 @@ pub struct LocalizationProviderSnapshot {
     pub map: MapMetadata,
     pub occupancy_grid: OccupancyGridFrame,
     pub costmap: CostmapFrame,
+    pub path: VisualizationPath,
+    pub voxel_grid: VoxelGridFrame,
 }
 
 pub trait LocalizationProvider: Send + Sync {
@@ -152,6 +171,8 @@ pub enum LocalizationProviderError {
     GridFrameMismatch,
     GridSizeMismatch,
     GridMetadataMismatch,
+    PathFrameMismatch,
+    InvalidVoxelGrid,
     ExternalQueueFull,
     ExternalQueueDisconnected,
 }
@@ -176,6 +197,12 @@ impl std::fmt::Display for LocalizationProviderError {
             }
             Self::GridMetadataMismatch => {
                 formatter.write_str("mapping grid metadata does not match map metadata")
+            }
+            Self::PathFrameMismatch => {
+                formatter.write_str("planner path frame does not match map frame")
+            }
+            Self::InvalidVoxelGrid => {
+                formatter.write_str("voxel grid is malformed or does not match the active map")
             }
             Self::ExternalQueueFull => {
                 formatter.write_str("external localization update queue is full")
@@ -320,6 +347,8 @@ impl LocalizationProvider for InProcessLocalizationProvider {
             map: update.map,
             occupancy_grid: update.occupancy_grid,
             costmap: update.costmap,
+            path: update.path,
+            voxel_grid: update.voxel_grid,
         }
     }
 }
@@ -497,6 +526,33 @@ fn validate_grid(
     }
     if metadata != map || width != map.width || height != map.height {
         return Err(LocalizationProviderError::GridMetadataMismatch);
+    }
+    Ok(())
+}
+
+fn validate_voxel_grid(
+    grid: &VoxelGridFrame,
+    map: &MapMetadata,
+) -> Result<(), LocalizationProviderError> {
+    if grid.voxels.is_empty() && grid.width == 0 && grid.height == 0 && grid.depth == 0 {
+        return Ok(());
+    }
+    if grid.version != VOXEL_GRID_VERSION
+        || grid.frame_id != map.frame_id
+        || grid.width != map.width
+        || grid.height != map.height
+        || grid.depth == 0
+        || !grid.resolution_m.is_finite()
+        || grid.resolution_m <= 0.0
+        || !grid.origin_z_m.is_finite()
+        || grid.voxels.iter().any(|voxel| {
+            voxel.x >= grid.width
+                || voxel.y >= grid.height
+                || voxel.z >= grid.depth
+                || !(0..=100).contains(&voxel.occupancy)
+        })
+    {
+        return Err(LocalizationProviderError::InvalidVoxelGrid);
     }
     Ok(())
 }

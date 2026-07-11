@@ -74,12 +74,28 @@ class BridgeContractTests(unittest.TestCase):
             "yaw_rad": 0.2,
             "covariance": covariance,
         }
-        update = build_localization_update(7, "fixture-map", map_sample, pose_sample)
+        path_sample = {
+            "ts_ms": 2_100,
+            "frame_id": "map",
+            "poses": [
+                {"ts_ms": 2_100, "frame_id": "map", "x_m": 0.25, "y_m": -0.10, "yaw_rad": 0.2},
+                {"ts_ms": 2_200, "frame_id": "map", "x_m": 0.75, "y_m": -0.10, "yaw_rad": 0.0},
+            ],
+        }
+        update = build_localization_update(
+            7, "fixture-map", map_sample, pose_sample, path_sample
+        )
         self.assertEqual(update["version"], "leash-localization-provider-v1")
         self.assertEqual(update["sequence"], 7)
         self.assertEqual(update["localization"]["health"]["status"], "tracking")
         self.assertEqual(update["occupancy_grid"]["cells"], [-1, 0, 50, 100])
         self.assertEqual(update["costmap"]["costs"], [255, 0, 127, 254])
+        self.assertEqual(len(update["path"]["poses"]), 2)
+        self.assertEqual(update["path"]["frame_id"], "map")
+        self.assertEqual(update["voxel_grid"]["source"], "projected-occupancy")
+        self.assertFalse(update["voxel_grid"]["observed_3d"])
+        self.assertEqual(update["voxel_grid"]["depth"], 5)
+        self.assertEqual(len(update["voxel_grid"]["voxels"]), 10)
         self.assertEqual(
             update["localization"]["pose"]["covariance"],
             [0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03],

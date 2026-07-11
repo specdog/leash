@@ -75,12 +75,17 @@ impl AcceleratorProvider for CudaAccelerator {
     }
 
     fn available(&self) -> bool {
+        #[cfg(feature = "cuda")]
+        {
+            crate::cuda_voxel::probe().is_ok()
+        }
+        #[cfg(not(feature = "cuda"))]
         false
     }
 
     fn message(&self) -> &'static str {
         if cfg!(feature = "cuda") {
-            "CUDA feature compiled; device probe not implemented"
+            "CUDA feature compiled; device and voxel kernel are probed at runtime"
         } else {
             "CUDA feature not compiled"
         }
@@ -131,7 +136,17 @@ pub fn probe_inventory(selected: AcceleratorBackend) -> Vec<AcceleratorProbe> {
 }
 
 fn cuda_status(required: bool) -> Result<AcceleratorStatus> {
-    let cuda_probe = CudaAccelerator.probe(false);
+    let cuda_probe = CudaAccelerator.probe(true);
+    if cuda_probe.available {
+        return Ok(AcceleratorStatus {
+            requested: AcceleratorBackend::Cuda,
+            active: AcceleratorBackend::Cuda,
+            available: true,
+            required,
+            message: "CUDA accelerator active; voxel kernel probe passed".to_string(),
+            probes: probe_inventory(AcceleratorBackend::Cuda),
+        });
+    }
     if required {
         bail!(
             "CUDA accelerator requested as required but unavailable: {}",
@@ -182,28 +197,42 @@ mod tests {
     fn cuda_selection_has_ci_safe_behavior() {
         let status = resolve_accelerator(AcceleratorBackend::Cuda, false).unwrap();
         assert_eq!(status.requested, AcceleratorBackend::Cuda);
-        assert_eq!(status.active, AcceleratorBackend::Cpu);
-        assert!(!status.available);
+        let cuda_available = cfg!(feature = "cuda") && CudaAccelerator.available();
+        assert_eq!(status.available, cuda_available);
+        assert_eq!(
+            status.active,
+            if cuda_available {
+                AcceleratorBackend::Cuda
+            } else {
+                AcceleratorBackend::Cpu
+            }
+        );
         assert_eq!(
             probe_for(&status, AcceleratorBackend::Cuda).map(|probe| probe.compiled),
             Some(cfg!(feature = "cuda"))
         );
         assert_eq!(
             probe_for(&status, AcceleratorBackend::Cuda).map(|probe| probe.available),
-            Some(false)
+            Some(cuda_available)
         );
         assert_eq!(
             probe_for(&status, AcceleratorBackend::Cpu).map(|probe| probe.selected),
-            Some(true)
+            Some(!cuda_available)
         );
     }
 
     #[test]
     fn required_cuda_requires_available_backend() {
-        let err = resolve_accelerator(AcceleratorBackend::Cuda, true)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("unavailable"));
+        if cfg!(feature = "cuda") && CudaAccelerator.available() {
+            let status = resolve_accelerator(AcceleratorBackend::Cuda, true).unwrap();
+            assert_eq!(status.active, AcceleratorBackend::Cuda);
+            assert!(status.available);
+        } else {
+            let err = resolve_accelerator(AcceleratorBackend::Cuda, true)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("unavailable"));
+        }
     }
 
     #[test]

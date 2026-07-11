@@ -30,6 +30,7 @@ impl SpeedMode {
 }
 
 pub const VISUALIZATION_FRAME_VERSION: &str = "leash-visualization-v1";
+pub const VOXEL_GRID_VERSION: &str = "leash-voxel-grid-v1";
 pub const OCCUPANCY_UNKNOWN: i8 = -1;
 pub const OCCUPANCY_FREE: i8 = 0;
 pub const OCCUPANCY_OCCUPIED: i8 = 100;
@@ -125,6 +126,10 @@ pub struct TelemetryFrame {
     pub occupancy_grid: OccupancyGridFrame,
     #[serde(default)]
     pub costmap: CostmapFrame,
+    #[serde(default)]
+    pub path: VisualizationPath,
+    #[serde(default)]
+    pub voxel_grid: VoxelGridFrame,
     #[serde(default)]
     pub vision: VisionResult,
     #[serde(default)]
@@ -349,6 +354,8 @@ pub struct VisualizationFrame {
     pub occupancy_grid: OccupancyGridFrame,
     #[serde(default)]
     pub costmap: CostmapFrame,
+    #[serde(default)]
+    pub voxel_grid: VoxelGridFrame,
     pub point_cloud: PointCloudMetadata,
     pub detections: Vec<DetectionFrame>,
     pub command: CommandOverlay,
@@ -377,6 +384,7 @@ impl Default for VisualizationFrame {
             path: VisualizationPath::default(),
             occupancy_grid: OccupancyGridFrame::default(),
             costmap: CostmapFrame::default(),
+            voxel_grid: VoxelGridFrame::default(),
             point_cloud: PointCloudMetadata::default(),
             detections: Vec::new(),
             command: CommandOverlay::default(),
@@ -622,6 +630,58 @@ pub struct CostmapFrame {
     #[serde(default)]
     pub metadata: MapMetadata,
     pub costs: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VoxelCell {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub occupancy: i8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VoxelGridFrame {
+    #[serde(default = "default_voxel_grid_version")]
+    pub version: String,
+    #[serde(default)]
+    pub ts_ms: u128,
+    pub frame_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub resolution_m: f64,
+    pub origin: Pose2d,
+    pub origin_z_m: f64,
+    pub source: String,
+    pub observed_3d: bool,
+    #[serde(default)]
+    pub voxels: Vec<VoxelCell>,
+}
+
+impl Default for VoxelGridFrame {
+    fn default() -> Self {
+        Self {
+            version: default_voxel_grid_version(),
+            ts_ms: 0,
+            frame_id: String::new(),
+            width: 0,
+            height: 0,
+            depth: 0,
+            resolution_m: 0.0,
+            origin: Pose2d::default(),
+            origin_z_m: 0.0,
+            source: "unavailable".to_string(),
+            observed_3d: false,
+            voxels: Vec::new(),
+        }
+    }
+}
+
+fn default_voxel_grid_version() -> String {
+    VOXEL_GRID_VERSION.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1602,8 +1662,27 @@ mod tests {
                 height: 2,
                 resolution_m: 0.25,
                 origin: map.origin.clone(),
-                metadata: map,
+                metadata: map.clone(),
                 costs: vec![COST_FREE, 10, COST_LETHAL, COST_UNKNOWN],
+            },
+            voxel_grid: VoxelGridFrame {
+                version: VOXEL_GRID_VERSION.to_string(),
+                ts_ms: 42,
+                frame_id: "map".to_string(),
+                width: 2,
+                height: 2,
+                depth: 1,
+                resolution_m: 0.25,
+                origin: map.origin.clone(),
+                origin_z_m: 0.0,
+                source: "projected-occupancy".to_string(),
+                observed_3d: false,
+                voxels: vec![VoxelCell {
+                    x: 1,
+                    y: 1,
+                    z: 0,
+                    occupancy: OCCUPANCY_OCCUPIED,
+                }],
             },
             point_cloud: PointCloudMetadata {
                 ts_ms: 42,

@@ -9,6 +9,8 @@ pub mod adapter;
 pub mod agent;
 pub mod capability;
 pub mod config;
+#[cfg(feature = "cuda")]
+mod cuda_voxel;
 pub mod daemon;
 #[cfg(feature = "http")]
 pub mod http;
