@@ -40,7 +40,14 @@ public validator and are rejected when loaded from replay.
 
 `TelemetryFrame.localization`, `TelemetryFrame.map`,
 `TelemetryFrame.occupancy_grid`, and `TelemetryFrame.costmap` are the canonical
-values. HTTP telemetry, MCP observe, WebSocket/SSE frames, local transports, TCP
+values. `TelemetryFrame.path` carries a provider planner path without inventing
+one while the planner is idle. `TelemetryFrame.voxel_grid` carries sparse voxel
+cells with source provenance and an `observed_3d` flag. The Waveshare ROS bridge
+subscribes to `/plan`; its current voxel layer is explicitly
+`source: projected-occupancy` and `observed_3d: false`, because Pinkie's planar
+lidar does not measure obstacle height. A future depth or 3D lidar provider must
+publish observed voxels rather than relabeling this projection. HTTP telemetry,
+MCP observe, WebSocket/SSE frames, local transports, TCP
 JSONL payloads, recording, and replay serialize those same types without field
 renaming. The visualization frame carries exact copies plus the same range-scan
 and IMU status objects used by telemetry, so a native viewer can render pose,

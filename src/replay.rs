@@ -468,6 +468,8 @@ mod tests {
             map: Default::default(),
             occupancy_grid: Default::default(),
             costmap: Default::default(),
+            path: Default::default(),
+            voxel_grid: Default::default(),
             vision: Default::default(),
             workers: Vec::new(),
             motion_events: Vec::new(),

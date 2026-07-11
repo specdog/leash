@@ -55,8 +55,9 @@ use crate::{
         PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
         SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
         TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-        COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED,
-        SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+        VoxelCell, VoxelGridFrame, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
+        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+        VOXEL_GRID_VERSION,
     },
 };
 
@@ -437,6 +438,7 @@ impl Harness {
             let ts_ms = now_ms();
             let localization = simulated_localization_frame(ts_ms, &raw);
             let (map, occupancy_grid, costmap) = simulated_map_frames(ts_ms);
+            let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
             localization_provider.apply_at(
                 LocalizationProviderUpdate {
                     version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
@@ -445,6 +447,8 @@ impl Harness {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 ts_ms,
             )?;
@@ -1352,6 +1356,7 @@ impl Harness {
         if self.config.profile == Profile::Sim {
             let localization = simulated_localization_frame(now, &raw);
             let (map, occupancy_grid, costmap) = simulated_map_frames(now);
+            let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
             let sequence = self.localization_seq.fetch_add(1, Ordering::Relaxed) + 1;
             let _ = self.localization_provider.apply_at(
                 LocalizationProviderUpdate {
@@ -1361,6 +1366,8 @@ impl Harness {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 now,
             );
@@ -1396,6 +1403,8 @@ impl Harness {
             map: localization_snapshot.map,
             occupancy_grid: localization_snapshot.occupancy_grid,
             costmap: localization_snapshot.costmap,
+            path: localization_snapshot.path,
+            voxel_grid: localization_snapshot.voxel_grid,
             vision: VisionResult::default(),
             workers,
             motion_events: Vec::new(),
@@ -1550,25 +1559,13 @@ impl Harness {
             pose: pose.clone(),
             twist,
             path: if planner_path.poses.is_empty() {
-                VisualizationPath {
-                    ts_ms: telemetry.ts_ms,
-                    frame_id: "map".to_string(),
-                    poses: vec![
-                        Pose2d {
-                            ts_ms: telemetry.ts_ms,
-                            frame_id: "map".to_string(),
-                            x_m: 0.0,
-                            y_m: 0.0,
-                            yaw_rad: 0.0,
-                        },
-                        pose.clone(),
-                    ],
-                }
+                telemetry.path.clone()
             } else {
                 planner_path
             },
             occupancy_grid: telemetry.occupancy_grid.clone(),
             costmap: telemetry.costmap.clone(),
+            voxel_grid: telemetry.voxel_grid.clone(),
             point_cloud: PointCloudMetadata {
                 ts_ms: telemetry.ts_ms,
                 frame_id: "base_link".to_string(),
@@ -2790,6 +2787,45 @@ fn apply_localization_snapshot(
     telemetry.map = snapshot.map;
     telemetry.occupancy_grid = snapshot.occupancy_grid;
     telemetry.costmap = snapshot.costmap;
+    telemetry.path = snapshot.path;
+    telemetry.voxel_grid = snapshot.voxel_grid;
+}
+
+fn projected_voxel_grid(grid: &OccupancyGridFrame, obstacle_height_m: f64) -> VoxelGridFrame {
+    if grid.width == 0 || grid.height == 0 || grid.resolution_m <= 0.0 {
+        return VoxelGridFrame::default();
+    }
+    let depth = (obstacle_height_m / grid.resolution_m).ceil().max(1.0) as u32;
+    let voxels = grid
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(_, occupancy)| **occupancy > OCCUPANCY_FREE)
+        .flat_map(|(index, occupancy)| {
+            let x = index as u32 % grid.width;
+            let y = index as u32 / grid.width;
+            (0..depth).map(move |z| VoxelCell {
+                x,
+                y,
+                z,
+                occupancy: *occupancy,
+            })
+        })
+        .collect();
+    VoxelGridFrame {
+        version: VOXEL_GRID_VERSION.to_string(),
+        ts_ms: grid.ts_ms,
+        frame_id: grid.frame_id.clone(),
+        width: grid.width,
+        height: grid.height,
+        depth,
+        resolution_m: grid.resolution_m,
+        origin: grid.origin.clone(),
+        origin_z_m: 0.0,
+        source: "projected-occupancy".to_string(),
+        observed_3d: false,
+        voxels,
+    }
 }
 
 #[cfg(feature = "physical-navigation")]
@@ -3320,6 +3356,7 @@ mod tests {
         let raw = RawTelemetry::sim();
         let localization = simulated_localization_frame(ts_ms, &raw);
         let (map, occupancy_grid, costmap) = simulated_map_frames(ts_ms);
+        let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
         harness
             .localization_provider
             .apply_at(
@@ -3330,6 +3367,8 @@ mod tests {
                     map,
                     occupancy_grid,
                     costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
                 },
                 ts_ms,
             )
@@ -3819,13 +3858,16 @@ mod tests {
         assert!(frame.visualization.pose.x_m > 0.0);
         assert_eq!(frame.visualization.twist.frame_id, "base_link");
         assert!(frame.visualization.twist.linear_x_mps > 0.0);
-        assert_eq!(frame.visualization.path.poses.len(), 2);
+        assert!(frame.visualization.path.poses.is_empty());
         assert_eq!(frame.visualization.occupancy_grid.cells.len(), 16);
         assert_eq!(
             frame.visualization.occupancy_grid.metadata,
             frame.visualization.map
         );
         assert_eq!(frame.visualization.costmap.costs.len(), 16);
+        assert_eq!(frame.visualization.voxel_grid.source, "projected-occupancy");
+        assert!(!frame.visualization.voxel_grid.observed_3d);
+        assert_eq!(frame.visualization.voxel_grid.voxels.len(), 1);
         assert_eq!(
             frame.visualization.localization.health.status,
             LocalizationStatus::Tracking

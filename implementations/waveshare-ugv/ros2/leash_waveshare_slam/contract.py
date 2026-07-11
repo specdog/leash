@@ -163,6 +163,7 @@ def build_localization_update(
     map_id: str,
     map_sample: dict[str, Any],
     pose_sample: dict[str, Any],
+    path_sample: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     map_id = map_id.strip()
     if not map_id:
@@ -206,6 +207,44 @@ def build_localization_update(
         "yaw_rad": float(pose_sample["yaw_rad"]),
     }
     costs = [255 if value < 0 else min(254, round(value * 2.54)) for value in cells]
+    obstacle_height_m = 0.25
+    voxel_depth = max(1, math.ceil(obstacle_height_m / float(map_sample["resolution_m"])))
+    voxels = [
+        {"x": index % width, "y": index // width, "z": z, "occupancy": value}
+        for index, value in enumerate(cells)
+        if value > 0
+        for z in range(voxel_depth)
+    ]
+    path = {"ts_ms": 0, "frame_id": "", "poses": []}
+    if path_sample is not None and path_sample.get("poses"):
+        path_frame = str(path_sample["frame_id"])
+        if path_frame != frame_id:
+            raise ValueError("planner path and map frame ids differ")
+        path_poses = []
+        for item in path_sample["poses"]:
+            if str(item["frame_id"]) != frame_id:
+                raise ValueError("planner path pose and map frame ids differ")
+            values = (
+                float(item["x_m"]),
+                float(item["y_m"]),
+                float(item["yaw_rad"]),
+            )
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError("planner path pose must be finite")
+            path_poses.append(
+                {
+                    "ts_ms": int(item["ts_ms"]),
+                    "frame_id": frame_id,
+                    "x_m": values[0],
+                    "y_m": values[1],
+                    "yaw_rad": values[2],
+                }
+            )
+        path = {
+            "ts_ms": int(path_sample["ts_ms"]),
+            "frame_id": frame_id,
+            "poses": path_poses,
+        }
     grid_common = {
         "ts_ms": map_ts_ms,
         "frame_id": frame_id,
@@ -240,4 +279,19 @@ def build_localization_update(
         "map": metadata,
         "occupancy_grid": {**grid_common, "cells": cells},
         "costmap": {**grid_common, "costs": costs},
+        "path": path,
+        "voxel_grid": {
+            "version": "leash-voxel-grid-v1",
+            "ts_ms": map_ts_ms,
+            "frame_id": frame_id,
+            "width": width,
+            "height": height,
+            "depth": voxel_depth,
+            "resolution_m": float(map_sample["resolution_m"]),
+            "origin": origin,
+            "origin_z_m": 0.0,
+            "source": "projected-occupancy",
+            "observed_3d": False,
+            "voxels": voxels,
+        },
     }
