@@ -77,7 +77,7 @@ impl AcceleratorProvider for CudaAccelerator {
     fn available(&self) -> bool {
         #[cfg(feature = "cuda")]
         {
-            return crate::cuda_voxel::probe().is_ok();
+            crate::cuda_voxel::probe().is_ok()
         }
         #[cfg(not(feature = "cuda"))]
         false

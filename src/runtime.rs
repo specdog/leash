@@ -1439,9 +1439,10 @@ impl Harness {
                 Ok(voxels) => return voxels,
                 Err(error) => {
                     tracing::error!(?error, "CUDA voxel projection failed after startup probe");
-                    let mut unavailable = VoxelGridFrame::default();
-                    unavailable.source = "cuda-error".to_string();
-                    return unavailable;
+                    return VoxelGridFrame {
+                        source: "cuda-error".to_string(),
+                        ..VoxelGridFrame::default()
+                    };
                 }
             }
         }
