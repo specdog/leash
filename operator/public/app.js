@@ -510,15 +510,20 @@ function maybeStartStream(robot, camera) {
     return;
   }
   if (current.streaming || current.streamReconnectTimer) return;
-  if (robot.videoTransport === "webrtc" && !camera?.webrtc_url) {
-    current.streamStatus = "webrtc unavailable";
-    current.cameraStatus = "fault";
-    updateHud(robot);
-    updateSelectorStatus();
-    refreshSnapshot(robot, { force: true, cacheOnly: true });
+  const transport = chooseVideoTransport({
+    configured: robot.videoTransport,
+    webrtcUrl: camera?.webrtc_url,
+    webRtcSupported: Boolean(window.RTCPeerConnection),
+    rtcFallback: current.rtcFallback,
+  });
+  if (transport === "unavailable") {
+    const enteringUnavailable = current.streamStatus !== "webrtc unavailable";
+    markWebRtcUnavailable(robot, enteringUnavailable ? "webrtc unavailable" : null, {
+      refreshSnapshot: enteringUnavailable,
+    });
     return;
   }
-  if (robot.videoTransport !== "mjpeg" && camera?.webrtc_url && !current.rtcFallback) {
+  if (transport === "webrtc") {
     startWebRtcStream(robot, camera);
     return;
   }
@@ -552,6 +557,41 @@ function maybeStartStream(robot, camera) {
   log(robot, "camera stream connected");
 }
 
+function markWebRtcUnavailable(robot, message, options = {}) {
+  const current = robotState(robot);
+  if (current.rtc || current.rtcStarting) closeWebRtc(robot);
+  current.rtcFallback = true;
+  current.streaming = false;
+  current.streamStatus = "webrtc unavailable";
+  current.cameraStatus = "fault";
+  if (message) log(robot, message);
+  recordOperatorEvent("frame-health", robot, { status: "fault", ok: false }, {
+    transition: true,
+  });
+  updateHud(robot);
+  updateSelectorStatus();
+  if (options.refreshSnapshot) {
+    refreshSnapshot(robot, { force: true, preserveStatus: true });
+  }
+}
+
+function failWebRtcStream(robot, camera, message) {
+  const current = robotState(robot);
+  closeWebRtc(robot);
+  if (robot.videoTransport === "webrtc") {
+    markWebRtcUnavailable(robot, message || "webrtc unavailable", { refreshSnapshot: true });
+    return;
+  }
+  current.rtcFallback = true;
+  current.streaming = false;
+  current.streamStatus = "reconnecting";
+  current.cameraStatus = "reconnecting";
+  log(robot, `${message || "webrtc unavailable"}; falling back`);
+  updateHud(robot);
+  updateSelectorStatus();
+  maybeStartStream(robot, camera);
+}
+
 async function startWebRtcStream(robot, camera) {
   const current = robotState(robot);
   if (current.rtcStarting || current.rtc) return;
@@ -559,8 +599,7 @@ async function startWebRtcStream(robot, camera) {
   const video = card?.querySelector(".webrtc-video");
   const image = card?.querySelector(".snapshot");
   if (!video || !image || !window.RTCPeerConnection) {
-    current.rtcFallback = true;
-    maybeStartStream(robot, camera);
+    failWebRtcStream(robot, camera, "webrtc unavailable");
     return;
   }
 
@@ -570,34 +609,35 @@ async function startWebRtcStream(robot, camera) {
   updateHud(robot);
   updateSelectorStatus();
 
-  const pc = new RTCPeerConnection({ iceServers: [] });
-  const ws = new WebSocket(webrtcSignalUrl(robot, camera));
-  current.rtc = { pc, ws };
+  let pc;
+  let ws;
+  try {
+    pc = new RTCPeerConnection({ iceServers: [] });
+    ws = new WebSocket(webrtcSignalUrl(robot, camera));
+  } catch (error) {
+    current.rtcStarting = false;
+    pc?.close();
+    failWebRtcStream(robot, camera, error.message);
+    return;
+  }
+
+  const session = { pc, ws, failed: false, pendingCandidates: [] };
+  current.rtc = session;
 
   const fail = (message) => {
-    closeWebRtc(robot);
-    if (robot.videoTransport === "webrtc") {
-      current.streaming = false;
-      current.streamStatus = "webrtc unavailable";
-      current.cameraStatus = "fault";
-      log(robot, message || "webrtc unavailable");
-      updateHud(robot);
-      updateSelectorStatus();
-      refreshSnapshot(robot, { force: true, cacheOnly: true });
-      return;
-    }
-    current.rtcFallback = true;
-    current.streaming = false;
-    current.streamStatus = "reconnecting";
-    current.cameraStatus = "reconnecting";
-    log(robot, message || "webrtc unavailable; falling back");
-    updateHud(robot);
-    updateSelectorStatus();
-    maybeStartStream(robot, camera);
+    if (session.failed || current.rtc !== session) return;
+    session.failed = true;
+    failWebRtcStream(robot, camera, message);
   };
 
-  pc.addTransceiver("video", { direction: "recvonly" });
+  try {
+    pc.addTransceiver("video", { direction: "recvonly" });
+  } catch (error) {
+    fail(error.message);
+    return;
+  }
   pc.ontrack = (event) => {
+    if (current.rtc !== session) return;
     const stream = event.streams?.[0] || new MediaStream([event.track]);
     video.srcObject = stream;
     video.classList.add("active");
@@ -606,17 +646,20 @@ async function startWebRtcStream(robot, camera) {
     current.streamReconnectAttempts = 0;
     current.streamStatus = "webrtc live";
     current.cameraStatus = "live";
+    recordOperatorEvent("frame-health", robot, { status: "live", ok: true }, {
+      transition: true,
+    });
     updateHud(robot);
     updateSelectorStatus();
   };
   pc.onicecandidate = (event) => {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (current.rtc === session && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
     }
   };
   pc.onconnectionstatechange = () => {
     if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-      fail(`webrtc ${pc.connectionState}; falling back`);
+      fail(`webrtc ${pc.connectionState}`);
     }
   };
 
@@ -634,10 +677,17 @@ async function startWebRtcStream(robot, camera) {
       const message = JSON.parse(event.data);
       if (message.type === "answer") {
         await pc.setRemoteDescription(message);
+        for (const candidate of session.pendingCandidates.splice(0)) {
+          await pc.addIceCandidate(candidate);
+        }
       } else if (message.type === "candidate" && message.candidate) {
-        await pc.addIceCandidate(message.candidate);
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(message.candidate);
+        } else {
+          session.pendingCandidates.push(message.candidate);
+        }
       } else if (message.type === "ended") {
-        fail(message.reason || "webrtc ended; falling back");
+        fail(message.reason || "webrtc ended");
       } else if (message.type === "error") {
         fail(message.error);
       }
@@ -645,10 +695,10 @@ async function startWebRtcStream(robot, camera) {
       fail(error.message);
     }
   };
-  ws.onerror = () => fail("webrtc signal failed; falling back");
+  ws.onerror = () => fail("webrtc signal failed");
   ws.onclose = () => {
-    if (current.rtc?.ws === ws && !current.streaming) {
-      fail("webrtc signal closed; falling back");
+    if (current.rtc === session && !current.streaming) {
+      fail("webrtc signal closed");
     }
   };
   current.rtcStarting = false;
@@ -717,6 +767,7 @@ function resetCameraStream(robot, reason = "camera refresh") {
   }
   current.streamNonce += 1;
   current.streaming = false;
+  current.snapshotBusy = false;
   current.streamReconnectAttempts = 0;
   current.rtcFallback = false;
   current.streamStatus = reason;
@@ -778,10 +829,12 @@ function refreshSnapshot(robot, options = {}) {
   if (debugReplayActive) return;
   const image = document.querySelector(`[data-robot-id="${robot.id}"] .snapshot`);
   const current = robotState(robot);
+  const strictWebRtcUnavailable = current.streamStatus === "webrtc unavailable";
   if (
     !image ||
     current.snapshotBusy ||
-    (!options.force && (current.streaming || current.streamCapable))
+    (!options.force &&
+      (current.streaming || (current.streamCapable && !strictWebRtcUnavailable)))
   ) {
     return;
   }
@@ -792,19 +845,22 @@ function refreshSnapshot(robot, options = {}) {
     image.onerror = null;
     updateSelectorStatus();
   };
+  const preserveStatus = () =>
+    options.preserveStatus || current.streamStatus === "webrtc unavailable";
   image.onload = () => {
-    current.cameraStatus = "snapshot";
+    if (!preserveStatus()) current.cameraStatus = "snapshot";
     recordOperatorEvent("frame-health", robot, { status: "snapshot", ok: true }, {
       transition: true,
     });
     done();
   };
   image.onerror = () => {
-    current.cameraStatus = "fault";
+    if (!preserveStatus()) current.cameraStatus = "fault";
     recordOperatorEvent("frame-health", robot, { status: "fault", ok: false }, {
       transition: true,
     });
     done();
+    image.removeAttribute("src");
   };
   const params = new URLSearchParams({ t: String(Date.now()) });
   if (options.cacheOnly) params.set("cache", "1");

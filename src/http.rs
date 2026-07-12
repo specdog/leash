@@ -710,12 +710,14 @@ fn camera_now_ms() -> u128 {
 
 #[cfg(feature = "webrtc")]
 pub(crate) fn camera_webrtc_enabled() -> bool {
-    let Some(value) = camera_env_arg("LEASH_WEBRTC_ENABLED") else {
-        return true;
+    let value = match env::var("LEASH_WEBRTC_ENABLED") {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => return true,
+        Err(env::VarError::NotUnicode(_)) => return false,
     };
-    !matches!(
-        value.to_ascii_lowercase().as_str(),
-        "0" | "false" | "no" | "off" | "disabled"
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on" | "enabled"
     )
 }
 
