@@ -462,6 +462,24 @@ fixtures, and stationary proof live in the
 | `mavlink-drone` | MAVLink drone adapter skeleton, sim/replay proof, and gated physical profile | opt-in |
 | `manipulator` | Manipulator adapter skeleton, mock arm teleop, and gated physical profile | opt-in |
 | `bridge-compat` | Legacy robot bridge compatibility | opt-in |
+| `webrtc` | H.264 camera streaming and WebSocket signaling | opt-in |
+| `v4l2-camera` | Native Linux V4L2 MJPEG capture and streaming | opt-in |
+
+### Camera streaming configuration
+
+With the `webrtc` feature enabled, `/camera/status` advertises
+`/camera/webrtc/ws` when `LEASH_WEBRTC_ENABLED` is not disabled. Accepted true
+values are `1`, `true`, `yes`, `on`, and `enabled`; any other explicit value
+fails closed (matching is case-insensitive). The WebRTC status endpoint remains
+available at `/camera/webrtc` and reports
+`status: "disabled"` when the transport is turned off.
+
+Optional FFmpeg rate controls are passed through with
+`LEASH_WEBRTC_BITRATE`, `LEASH_WEBRTC_MAXRATE`, and
+`LEASH_WEBRTC_BUFSIZE` (for example `900k`, `1100k`, and `1800k`). Existing
+camera input controls such as `LEASH_CAMERA_DEVICE`,
+`LEASH_CAMERA_INPUT_FORMAT`, `LEASH_CAMERA_VIDEO_SIZE`, and
+`LEASH_CAMERA_FRAMERATE` apply to both MJPEG and WebRTC capture.
 
 ## MAVLink Drone Skeleton
 

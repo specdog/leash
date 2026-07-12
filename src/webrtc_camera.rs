@@ -45,12 +45,13 @@ use crate::http::{
 pub async fn camera_webrtc_status() -> Json<Value> {
     let device = camera_device_path();
     let enabled = camera_webrtc_enabled();
-    let available = enabled && Path::new(&device).exists();
+    let device_exists = Path::new(&device).exists();
+    let available = enabled && device_exists;
     Json(json!({
         "ok": available,
         "status": if !enabled {
             "disabled"
-        } else if Path::new(&device).exists() {
+        } else if device_exists {
             "available"
         } else {
             "unavailable"
@@ -491,7 +492,41 @@ fn find_start_code(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::drain_h264_nals;
+    use std::{env, ffi::OsString};
+
+    use tokio::sync::Mutex;
+
+    use super::{camera_webrtc_ffmpeg_args, camera_webrtc_status, drain_h264_nals};
+
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    struct EnvGuard(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvGuard {
+        fn set(values: &[(&'static str, &'static str)]) -> Self {
+            let previous = values
+                .iter()
+                .map(|(name, value)| {
+                    let previous = env::var_os(name);
+                    env::set_var(name, value);
+                    (*name, previous)
+                })
+                .collect();
+            Self(previous)
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                if let Some(value) = value {
+                    env::set_var(name, value);
+                } else {
+                    env::remove_var(name);
+                }
+            }
+        }
+    }
 
     #[test]
     fn drains_annex_b_nals_and_keeps_partial_tail() {
@@ -503,5 +538,73 @@ mod tests {
         let nals = drain_h264_nals(&mut buffer, true);
         assert_eq!(nals, vec![b"de".to_vec()]);
         assert!(buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn disabled_webrtc_is_not_advertised() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = EnvGuard::set(&[
+            ("LEASH_CAMERA_DEVICE", "/dev/null"),
+            ("LEASH_WEBRTC_ENABLED", "off"),
+        ]);
+
+        let status = camera_webrtc_status().await.0;
+        assert_eq!(status["ok"], false);
+        assert_eq!(status["status"], "disabled");
+        assert!(status["signaling_url"].is_null());
+    }
+
+    #[tokio::test]
+    async fn invalid_webrtc_flag_fails_closed() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = EnvGuard::set(&[
+            ("LEASH_CAMERA_DEVICE", "/dev/null"),
+            ("LEASH_WEBRTC_ENABLED", "flase"),
+        ]);
+
+        let status = camera_webrtc_status().await.0;
+        assert_eq!(status["status"], "disabled");
+        assert!(status["signaling_url"].is_null());
+    }
+
+    #[tokio::test]
+    async fn explicit_auto_webrtc_flag_fails_closed() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = EnvGuard::set(&[
+            ("LEASH_CAMERA_DEVICE", "/dev/null"),
+            ("LEASH_WEBRTC_ENABLED", "auto"),
+        ]);
+
+        let status = camera_webrtc_status().await.0;
+        assert_eq!(status["status"], "disabled");
+        assert!(status["signaling_url"].is_null());
+    }
+
+    #[tokio::test]
+    async fn explicit_blank_webrtc_flag_fails_closed() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = EnvGuard::set(&[
+            ("LEASH_CAMERA_DEVICE", "/dev/null"),
+            ("LEASH_WEBRTC_ENABLED", "   "),
+        ]);
+
+        let status = camera_webrtc_status().await.0;
+        assert_eq!(status["status"], "disabled");
+        assert!(status["signaling_url"].is_null());
+    }
+
+    #[tokio::test]
+    async fn includes_configured_encoder_rate_controls() {
+        let _lock = ENV_LOCK.lock().await;
+        let _env = EnvGuard::set(&[
+            ("LEASH_WEBRTC_BITRATE", "900k"),
+            ("LEASH_WEBRTC_MAXRATE", "1100k"),
+            ("LEASH_WEBRTC_BUFSIZE", "1800k"),
+        ]);
+
+        let args = camera_webrtc_ffmpeg_args("/dev/video-test");
+        assert!(args.windows(2).any(|pair| pair == ["-b:v", "900k"]));
+        assert!(args.windows(2).any(|pair| pair == ["-maxrate", "1100k"]));
+        assert!(args.windows(2).any(|pair| pair == ["-bufsize", "1800k"]));
     }
 }
