@@ -18,7 +18,7 @@ def candidate_profile() -> dict:
         "measurement": {
             "procedure_revision": "issue-166-v1",
             "measured_at": "2026-07-10T00:00:00Z",
-            "evidence_sha256": [],
+            "acceptance_manifest_sha256": None,
         },
         "wheels": {"track_width_m": 0.2, "distance_scale": 1.0},
         "lidar": {

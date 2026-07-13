@@ -72,13 +72,16 @@ def validate(
     measured_at = measurement.get("measured_at")
     if not isinstance(measured_at, str) or not measured_at.strip():
         fail("measurement.measured_at is required for a candidate or accepted profile")
-    evidence = measurement.get("evidence_sha256")
-    if not isinstance(evidence, list):
-        fail("measurement.evidence_sha256 must be a list")
-    if status == "accepted" and not evidence:
-        fail("an accepted profile requires evidence_sha256 entries")
-    if any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item) for item in evidence):
-        fail("each evidence_sha256 entry must be a lowercase SHA-256 digest")
+    if "evidence_sha256" in measurement:
+        fail("measurement.evidence_sha256 is legacy; use acceptance_manifest_sha256")
+    manifest_digest = measurement.get("acceptance_manifest_sha256")
+    if status == "accepted" and manifest_digest is None:
+        fail("an accepted profile requires acceptance_manifest_sha256")
+    if manifest_digest is not None and (
+        not isinstance(manifest_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", manifest_digest)
+    ):
+        fail("measurement.acceptance_manifest_sha256 must be a lowercase SHA-256 digest or null")
 
     wheels = profile.get("wheels")
     if not isinstance(wheels, dict):

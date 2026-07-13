@@ -5,7 +5,7 @@
   "measurement": {
     "procedure_revision": "issue-166-v1",
     "measured_at": null,
-    "evidence_sha256": []
+    "acceptance_manifest_sha256": null
   },
   "wheels": {
     "track_width_m": null,

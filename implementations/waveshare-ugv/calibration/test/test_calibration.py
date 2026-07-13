@@ -21,7 +21,7 @@ def candidate_profile() -> dict:
         "measurement": {
             "procedure_revision": "issue-166-v1",
             "measured_at": "2026-07-10T00:00:00Z",
-            "evidence_sha256": [],
+            "acceptance_manifest_sha256": None,
         },
         "wheels": {"track_width_m": 0.2, "distance_scale": 1.0},
         "lidar": {
@@ -200,7 +200,7 @@ class CalibrationTests(unittest.TestCase):
         candidate = candidate_profile()
         accepted = copy.deepcopy(candidate)
         accepted["status"] = "accepted"
-        accepted["measurement"]["evidence_sha256"] = ["a" * 64]
+        accepted["measurement"]["acceptance_manifest_sha256"] = "a" * 64
         validate(accepted, require_accepted=True)
         self.assertEqual(canonical_bytes(candidate), canonical_bytes(accepted))
 

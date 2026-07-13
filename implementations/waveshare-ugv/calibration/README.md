@@ -13,7 +13,8 @@ flowchart LR
   capture --> analyze["offline thresholds"]
   analyze --> repeat["3 square loops"]
   repeat --> reload["save, restart, reload"]
-  reload --> accepted["accepted profile plus evidence digests"]
+  reload --> manifest["typed Stage 1 acceptance manifest"]
+  manifest --> accepted["accepted profile plus manifest digest"]
 ```
 
 ## Safety gate
@@ -27,10 +28,13 @@ Before any motion capture, an on-site operator must confirm all of the following
 - Leash is the sole base/lidar device owner and the ROS container has no devices.
 - A stop command has been observed; no patrol or autonomous goal is active.
 
-`capture.sh` requires `--operator-confirmed` for every motion phase. That flag is
-an audit assertion, not a substitute for the physical check. The recorder sends
-stop at entry, exit, interruption, and failure. The operator drives with the
-existing supervised Leash controls; the recorder has no actuation path.
+`capture.sh` requires `--operator-confirmed` and a private `--pilot-token-file`
+for every phase. The flag is an audit assertion, not a substitute for the
+physical check. The recorder enters only the requested bounded calibration
+phase/run, records its active status in every sample, and exits through typed
+verified-zero evidence. The operator drives through the existing supervised
+Leash controls with the same pilot token; the recorder never sends non-zero
+motion commands.
 
 ## 1. Create a candidate
 
@@ -46,8 +50,8 @@ Copy `pinkie-v1.json`, keep the generic profile name, and measure from the
    by Pinkie; wraparound syntax such as `170:-170` is allowed.
 5. Confirm IMU signed axes by tilting one body axis at a time. Start biases at
    zero. Record scale sources in the issue, not private device identifiers.
-6. Set `status` to `candidate`, add the measurement time, and leave evidence
-   digests empty until the accepted runs exist.
+6. Set `status` to `candidate`, add the measurement time, and leave
+   `acceptance_manifest_sha256` null until the typed manifest is complete.
 
 Validate values and emit only the calibration assignments:
 
@@ -72,9 +76,10 @@ Run for at least 60 seconds after localization is tracking:
 
 ```bash
 implementations/waveshare-ugv/calibration/capture.sh \
-  --phase stationary \
+  --phase stationary --operator-confirmed \
   --profile implementations/waveshare-ugv/calibration/pinkie-v1.json \
   --env-file ~/.config/leash/waveshare-ros.env \
+  --pilot-token-file ~/.config/leash/pilot-token \
   --duration-secs 60 \
   --output ~/.local/state/leash/calibration/stationary.jsonl \
   --replay-output ~/.local/state/leash/calibration/stationary-replay.jsonl
@@ -84,8 +89,10 @@ python3 implementations/waveshare-ugv/calibration/analyze.py \
   ~/.local/state/leash/calibration/stationary.jsonl
 ```
 
-The analyzer requires drift at or below 0.05 m and 2 degrees. It records the
-residual mean gyro vector and acceleration vector/norm. For a level stationary
+The analyzer uses sample timestamps for the full 60-second duration and rejects
+any intermediate excursion above 0.05 m or 2 degrees, even if Pinkie returns to
+the starting pose. It records the residual mean gyro vector and acceleration
+vector/norm. For a level stationary
 robot, refine gyro bias by adding the residual gyro to the current bias; refine
 acceleration bias by adding the residual from the expected body vector
 `[0, 0, 9.80665]`. Re-deploy and repeat instead of editing evidence.
@@ -108,12 +115,15 @@ implementations/waveshare-ugv/calibration/capture.sh \
   --phase straight --operator-confirmed --expected-distance-m 1.0 \
   --profile implementations/waveshare-ugv/calibration/pinkie-v1.json \
   --env-file ~/.config/leash/waveshare-ros.env \
+  --pilot-token-file ~/.config/leash/pilot-token \
   --output ~/.local/state/leash/calibration/straight.jsonl \
   --replay-output ~/.local/state/leash/calibration/straight-replay.jsonl
 ```
 
-The analysis reports measured wheel/localized distances, both 10% acceptance
-checks, and a candidate wheel scale. Next mark heading on the floor and perform
+The analysis requires the declared ground truth to be exactly 1.0 m, wheel and
+localized distance to remain within 0.90-1.10 m, and maximum lateral deviation
+to remain at or below 0.15 m. It also reports a candidate wheel scale. Next mark
+heading on the floor and perform
 one slow full in-place rotation:
 
 ```bash
@@ -121,12 +131,15 @@ implementations/waveshare-ugv/calibration/capture.sh \
   --phase turn --operator-confirmed --expected-turn-deg 360 \
   --profile implementations/waveshare-ugv/calibration/pinkie-v1.json \
   --env-file ~/.config/leash/waveshare-ros.env \
+  --pilot-token-file ~/.config/leash/pilot-token \
   --output ~/.local/state/leash/calibration/turn.jsonl \
   --replay-output ~/.local/state/leash/calibration/turn-replay.jsonl
 ```
 
-The analyzer unwraps localized yaw, derives wheel yaw, requires both within 10
-degrees, and reports a candidate effective track width. Apply one candidate
+The analyzer accumulates signed localized yaw, permits no more than 10 degrees
+of backtracking, limits translation to 0.20 m, requires wheel and localized turns
+within 10 degrees of 360, and reports a candidate effective track width. Apply
+one candidate
 change at a time and repeat stationary/straight/turn before square evidence.
 
 Mark a one-meter square. Capture three consecutive, separately indexed loops:
@@ -137,6 +150,7 @@ for run in 1 2 3; do
     --phase square --run-index "$run" --expected-side-m 1.0 --operator-confirmed \
     --profile implementations/waveshare-ugv/calibration/pinkie-v1.json \
     --env-file ~/.config/leash/waveshare-ros.env \
+    --pilot-token-file ~/.config/leash/pilot-token \
     --output "$HOME/.local/state/leash/calibration/square-$run.jsonl" \
     --replay-output "$HOME/.local/state/leash/calibration/square-$run-replay.jsonl"
 done
@@ -147,7 +161,9 @@ python3 implementations/waveshare-ugv/calibration/analyze.py \
   "$HOME"/.local/state/leash/calibration/square-{1,2,3}.jsonl
 ```
 
-Every loop must close within 0.25 m and 15 degrees. Captures contain only
+The three runs are mandatory. Each loop must contain four ordered 0.90-1.10 m
+sides and four same-direction 75-105 degree corners, total 3.60-4.40 m of
+localized travel, and close within 0.25 m and 15 degrees. Captures contain only
 scrubbed health, sensor, localization/covariance, resource, motion/stop, and
 container data. They omit tokens, addresses, serials, camera URLs, and raw base
 frames. Keep full captures private; attach scrubbed analysis totals and hashes.
@@ -174,14 +190,39 @@ implementations/waveshare-ugv/calibration/map-reload-proof.sh \
   --output ~/.local/state/leash/calibration/map-reload.json
 ```
 
-This requires all four occupancy/pose-graph files, restarts only the read-only
-container, reloads the graph, waits for tracking/covariance, verifies map
-identity and the unchanged Leash PID, and leaves motors stopped.
+This requires the complete occupancy/pose-graph/lineage artifact set, restarts
+only the read-only container, reloads the exact lineage, waits for fresh
+tracking/covariance, verifies the unchanged Leash PID, and leaves motors stopped.
 
-Finally add the SHA-256 digests of accepted private capture/analysis/reload
-artifacts to the profile, set `status` to `accepted`, rerun validation, and check
-in only the profile plus scrubbed summaries. No autonomous patrol is enabled by
-this procedure.
+## 5. Build the typed acceptance manifest
+
+After reviewing a scrubbed body-artifact image, build the public Stage 1 manifest
+from the accepted analysis files and map reload proof:
+
+```bash
+python3 implementations/waveshare-ugv/calibration/acceptance.py build \
+  --profile implementations/waveshare-ugv/calibration/pinkie-v1.json \
+  --map-proof ~/.local/state/leash/calibration/map-reload.json \
+  --body-artifact ~/.local/state/leash/calibration/body-artifact.png \
+  --body-artifact-reviewed \
+  --output ~/.local/state/leash/calibration/pinkie-v1.acceptance.json \
+  ~/.local/state/leash/calibration/{stationary,straight,turn,square}-analysis.json
+
+python3 implementations/waveshare-ugv/calibration/acceptance.py digest \
+  ~/.local/state/leash/calibration/pinkie-v1.acceptance.json
+```
+
+Record that digest in `measurement.acceptance_manifest_sha256`, then set the
+profile status to `accepted` and validate both files. The digest is intentionally
+outside the canonical calibration bytes, so promotion does not invalidate the
+capture calibration digest.
+
+The default manifest records the process-termination, event-loop-stall, and
+serial-disconnect watchdogs as `not-proven`. Stage 1 may therefore report
+`calibration_accepted: true` and `mapping_ready: true`, while
+`physical_autonomous_exploration_ready` remains false. That final readiness may
+be true only when all three independent watchdog proofs record TTLs at or below
+250 ms. This procedure never enables autonomous patrol or exploration.
 
 Run the no-hardware gate with:
 
