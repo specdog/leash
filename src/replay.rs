@@ -377,6 +377,31 @@ mod tests {
     }
 
     #[test]
+    fn replay_fixture_preserves_path_and_voxel_evidence() {
+        let source = telemetry_frame(25);
+        let recording = ReplayRecording::new(vec![ReplayEvent::new(
+            25,
+            0,
+            ReplayEventKind::Telemetry,
+            serde_json::to_value(source).unwrap(),
+        )]);
+        let text = recording.to_jsonl();
+        let frame = ReplayRecording::from_jsonl(&text)
+            .unwrap()
+            .telemetry_streams()
+            .unwrap()
+            .pop()
+            .unwrap()
+            .1;
+
+        assert!(!frame.telemetry.path.poses.is_empty());
+        assert_eq!(frame.telemetry.path, frame.visualization.path);
+        assert_eq!(frame.telemetry.voxel_grid, frame.visualization.voxel_grid);
+        assert_eq!(frame.telemetry.voxel_grid.source, "costmap-extruded");
+        assert!(!frame.telemetry.voxel_grid.observed_3d);
+    }
+
+    #[test]
     fn bundled_waveshare_sensor_fixture_round_trips_generic_contracts() {
         let text = include_str!("../examples/replay/waveshare-ugv-sensors.jsonl");
         let recording = ReplayRecording::from_jsonl(text).unwrap();
@@ -418,6 +443,42 @@ mod tests {
     }
 
     fn telemetry_frame(ts_ms: u128) -> TelemetryStreamFrame {
+        let path = crate::types::VisualizationPath {
+            ts_ms,
+            frame_id: "map".to_string(),
+            poses: vec![crate::types::Pose2d {
+                ts_ms,
+                frame_id: "map".to_string(),
+                x_m: 0.25,
+                y_m: -0.5,
+                yaw_rad: 0.125,
+            }],
+        };
+        let voxel_grid = crate::types::VoxelGridFrame {
+            version: crate::types::VOXEL_GRID_VERSION.to_string(),
+            ts_ms,
+            frame_id: "map".to_string(),
+            width: 2,
+            height: 2,
+            depth: 1,
+            resolution_m: 0.1,
+            origin: crate::types::Pose2d {
+                ts_ms,
+                frame_id: "map".to_string(),
+                x_m: -0.1,
+                y_m: -0.1,
+                yaw_rad: 0.0,
+            },
+            origin_z_m: 0.0,
+            source: "costmap-extruded".to_string(),
+            observed_3d: false,
+            voxels: vec![crate::types::VoxelCell {
+                x: 1,
+                y: 0,
+                z: 0,
+                occupancy: 100,
+            }],
+        };
         let telemetry = TelemetryFrame {
             ts_ms,
             robot: "robot".to_string(),
@@ -468,8 +529,8 @@ mod tests {
             map: Default::default(),
             occupancy_grid: Default::default(),
             costmap: Default::default(),
-            path: Default::default(),
-            voxel_grid: Default::default(),
+            path: path.clone(),
+            voxel_grid: voxel_grid.clone(),
             vision: Default::default(),
             workers: Vec::new(),
             motion_events: Vec::new(),
@@ -515,7 +576,11 @@ mod tests {
                 physical_actuation_enabled: false,
                 physical_navigation_enabled: false,
             },
-            visualization: Default::default(),
+            visualization: crate::types::VisualizationFrame {
+                path,
+                voxel_grid,
+                ..Default::default()
+            },
         }
     }
 }

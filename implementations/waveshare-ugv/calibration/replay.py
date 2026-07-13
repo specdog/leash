@@ -61,6 +61,17 @@ def normalize_and_scrub(source: dict[str, Any], timestamp_ms: int) -> dict[str, 
             grid["metadata"]["ts_ms"] = timestamp_ms
             set_timestamp(grid["metadata"], "origin", timestamp_ms)
 
+    path = telemetry.get("path")
+    if isinstance(path, dict):
+        path["ts_ms"] = timestamp_ms
+        for pose in path.get("poses", []):
+            if isinstance(pose, dict):
+                pose["ts_ms"] = timestamp_ms
+    voxel_grid = telemetry.get("voxel_grid")
+    if isinstance(voxel_grid, dict):
+        voxel_grid["ts_ms"] = timestamp_ms
+        set_timestamp(voxel_grid, "origin", timestamp_ms)
+
     frame["health"].update(
         {
             "mode": "replay",
@@ -93,6 +104,10 @@ def normalize_and_scrub(source: dict[str, Any], timestamp_ms: int) -> dict[str, 
     visualization["map"] = copy.deepcopy(telemetry["map"])
     visualization["occupancy_grid"] = copy.deepcopy(telemetry["occupancy_grid"])
     visualization["costmap"] = copy.deepcopy(telemetry["costmap"])
+    if isinstance(path, dict):
+        visualization["path"] = path
+    if isinstance(voxel_grid, dict):
+        visualization["voxel_grid"] = voxel_grid
     return frame
 
 
