@@ -119,8 +119,18 @@ class CalibrationTests(unittest.TestCase):
         expected_turn_deg: float = 360.0,
         expected_side_m: float | None = None,
         legacy_zero: bool = False,
+        include_calibration_status: bool = True,
     ) -> dict:
         digest = __import__("hashlib").sha256(canonical_bytes(profile)).hexdigest()
+        samples = copy.deepcopy(samples)
+        if include_calibration_status:
+            for event in samples:
+                event["calibration"] = {
+                    "active": True,
+                    "phase": phase,
+                    "run_index": 1,
+                    "calibration_sha256": digest,
+                }
         repository = pathlib.Path(__file__).resolve().parents[4]
         source_event = next(
             json.loads(line)
@@ -191,8 +201,10 @@ class CalibrationTests(unittest.TestCase):
         repository = pathlib.Path(__file__).resolve().parents[4]
         script = (repository / "implementations/waveshare-ugv/calibration/capture.sh").read_text()
 
-        self.assertIn('verified_stop calibration-entry', script)
-        self.assertIn('verified_stop calibration-exit', script)
+        self.assertIn('--pilot-token-file', script)
+        self.assertIn('"$leash_url/calibration/enter"', script)
+        self.assertIn('"$leash_url/calibration/status"', script)
+        self.assertIn('"$leash_url/calibration/exit"', script)
         self.assertIn('verified_zero:$verified_zero', script)
         self.assertNotIn('initial_motor_stop:true', script)
         self.assertNotIn('final_motor_stop:true', script)
@@ -206,6 +218,15 @@ class CalibrationTests(unittest.TestCase):
         self.assertIn('verified_stop map-reload-entry', script)
         self.assertIn('verified_stop map-reload-exit', script)
         self.assertNotIn('final_motor_stop:true', script)
+
+    def test_analysis_requires_calibration_status_on_every_sample(self):
+        with self.assertRaisesRegex(ValueError, "calibration status"):
+            self.capture_result(
+                candidate_profile(),
+                "stationary",
+                [sample(0), sample(60_000)],
+                include_calibration_status=False,
+            )
 
     def test_analysis_rejects_legacy_boolean_only_stop_evidence(self):
         with self.assertRaisesRegex(ValueError, "verified zero"):

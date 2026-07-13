@@ -30,6 +30,9 @@ use crate::types::{
 use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
+    calibration::{
+        CalibrationEnterRequest, CalibrationEnterResult, CalibrationLease, CalibrationStatus,
+    },
     capability::{default_capability_descriptors, CapabilityRegistry},
     config::{AcceleratorBackend, HarnessConfig, Profile},
     localization::{
@@ -363,6 +366,7 @@ pub struct Harness {
     dashboard_events: Arc<Mutex<VecDeque<String>>>,
     planner: Arc<Mutex<PlannerStatus>>,
     patrol: Arc<Mutex<PatrolState>>,
+    calibration: Arc<Mutex<Option<CalibrationLease>>>,
     spatial_memory: Arc<SpatialMemoryStore>,
     navigation: Arc<NavigationStore>,
     perception: PerceptionRuntime,
@@ -495,6 +499,7 @@ impl Harness {
             dashboard_events: Arc::new(Mutex::new(VecDeque::new())),
             planner: Arc::new(Mutex::new(PlannerStatus::default())),
             patrol: Arc::new(Mutex::new(PatrolState::default())),
+            calibration: Arc::new(Mutex::new(None)),
             spatial_memory,
             navigation,
             perception: PerceptionRuntime::fake(),
@@ -1126,6 +1131,11 @@ impl Harness {
         token: Option<&str>,
         approval: bool,
     ) -> Result<String> {
+        if self.calibration.lock().is_some() {
+            return Err(anyhow!(
+                "physical navigation is unavailable while calibration motion is active"
+            ));
+        }
         if !self.config.allow_physical_navigation {
             return Err(anyhow!(
                 "physical navigation requires --allow-physical-navigation or LEASH_ALLOW_PHYSICAL_NAVIGATION=1"
@@ -1648,6 +1658,141 @@ impl Harness {
             && self.physical_actuation_enabled()
     }
 
+    pub fn calibration_motion_enabled(&self) -> bool {
+        self.config.profile == Profile::WaveshareUgv
+            && self.physical_actuation_enabled()
+            && (self.config.allow_calibration_motion
+                || std::env::var("LEASH_ALLOW_CALIBRATION_MOTION")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
+    }
+
+    pub fn calibration_status(&self) -> CalibrationStatus {
+        self.calibration
+            .lock()
+            .as_ref()
+            .map(CalibrationLease::status)
+            .unwrap_or_default()
+    }
+
+    pub fn enter_calibration(
+        &self,
+        mut request: CalibrationEnterRequest,
+    ) -> Result<CalibrationEnterResult> {
+        if !self.calibration_motion_enabled() {
+            return Err(anyhow!(
+                "calibration motion gate requires --allow-calibration-motion or LEASH_ALLOW_CALIBRATION_MOTION=1"
+            ));
+        }
+        if !self.config.resource_sampling {
+            return Err(anyhow!("calibration motion requires resource sampling"));
+        }
+        if self.command.lock().estop {
+            return Err(anyhow!("calibration motion is blocked by latched estop"));
+        }
+        if self.planner.lock().active {
+            return Err(anyhow!(
+                "calibration motion rejects an active planner lease"
+            ));
+        }
+        if self.patrol.lock().status.active {
+            return Err(anyhow!("calibration motion rejects an active patrol lease"));
+        }
+        #[cfg(feature = "physical-navigation")]
+        if self.physical_navigation_lease.lock().is_some() {
+            return Err(anyhow!(
+                "calibration motion rejects an active physical navigation lease"
+            ));
+        }
+
+        request.token = request.token.trim().to_string();
+        let session = self
+            .validate_session(Some(&request.token))?
+            .ok_or_else(|| anyhow!("calibration motion requires a pilot token"))?;
+        let (start_left_m, start_right_m) = {
+            let raw = self.raw.read();
+            (
+                raw.odometry_left
+                    .ok_or_else(|| anyhow!("calibration motion requires left wheel odometry"))?,
+                raw.odometry_right
+                    .ok_or_else(|| anyhow!("calibration motion requires right wheel odometry"))?,
+            )
+        };
+        let mut calibration = self.calibration.lock();
+        if calibration.is_some() {
+            return Err(anyhow!("a calibration motion lease is already active"));
+        }
+        let lease =
+            CalibrationLease::enter(request.clone(), now_ms(), start_left_m, start_right_m)?;
+        let verified_zero = self.stop_verified(ZeroCommandReason::CalibrationEntry)?;
+        self.sessions.lock().insert(request.token, session);
+        self.command.lock().speed_mode = SpeedMode::Low;
+        let status = lease.status();
+        *calibration = Some(lease);
+        Ok(CalibrationEnterResult {
+            status,
+            verified_zero,
+        })
+    }
+
+    pub fn exit_calibration(&self, token: &str) -> Result<VerifiedZeroEvidence> {
+        let owner_matches = self
+            .calibration
+            .lock()
+            .as_ref()
+            .is_some_and(|lease| lease.owner() == token);
+        if !owner_matches {
+            return Err(anyhow!(
+                "calibration exit owner does not match active lease"
+            ));
+        }
+        self.clear_calibration_lease();
+        self.stop_verified(ZeroCommandReason::CalibrationExit)
+    }
+
+    fn clear_calibration_lease(&self) {
+        *self.calibration.lock() = None;
+    }
+
+    fn validate_calibration_drive(&self, token: Option<&str>, left: f64, right: f64) -> Result<()> {
+        let (odometry_left_m, odometry_right_m) = {
+            let raw = self.raw.read();
+            (
+                raw.odometry_left.unwrap_or(f64::NAN),
+                raw.odometry_right.unwrap_or(f64::NAN),
+            )
+        };
+        let validation = {
+            let mut calibration = self.calibration.lock();
+            let Some(lease) = calibration.as_mut() else {
+                return Ok(());
+            };
+            let token =
+                token.ok_or_else(|| anyhow!("calibration drive requires the lease owner"))?;
+            lease.validate_drive(
+                token,
+                left,
+                right,
+                now_ms(),
+                odometry_left_m,
+                odometry_right_m,
+            )
+        };
+        if let Err(error) = validation {
+            self.clear_calibration_lease();
+            self.sessions.lock().clear();
+            let _ = self.write_stop_command();
+            let mut command = self.command.lock();
+            command.left_cmd = 0.0;
+            command.right_cmd = 0.0;
+            command.last_cmd_at = Some(Instant::now());
+            command.active_session_id = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn write_drive_command(&self, left: f64, right: f64) -> Result<u64> {
         let mut io = self.command_io.lock();
         if io.verified_zero_in_progress && (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
@@ -1675,6 +1820,9 @@ impl Harness {
             ));
         }
 
+        if reason != ZeroCommandReason::CalibrationEntry {
+            self.clear_calibration_lease();
+        }
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("verified-zero", "patrol movement stopped for verified zero");
         self.cancel_planner_state(
@@ -1763,6 +1911,16 @@ impl Harness {
         if token.is_empty() {
             return Err(anyhow!("token cannot be empty"));
         }
+        if self
+            .calibration
+            .lock()
+            .as_ref()
+            .is_some_and(|lease| lease.owner() != token)
+        {
+            return Err(anyhow!(
+                "cannot replace the operator while calibration motion is active"
+            ));
+        }
 
         let should_stop_previous_owner = {
             let command = self.command.lock();
@@ -1834,6 +1992,7 @@ impl Harness {
         if let Some(speed_mode) = speed_mode {
             self.command.lock().speed_mode = speed_mode;
         }
+        self.validate_calibration_drive(token, left, right)?;
 
         #[cfg(feature = "waveshare-ugv")]
         if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
@@ -1969,6 +2128,7 @@ impl Harness {
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
+        self.clear_calibration_lease();
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("stopped", "patrol movement stopped");
         self.cancel_planner_state("stopped", "planner movement stopped");
@@ -1994,6 +2154,7 @@ impl Harness {
     }
 
     pub fn estop(&self) -> Result<()> {
+        self.clear_calibration_lease();
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
@@ -3484,10 +3645,15 @@ mod tests {
         sequence: u64,
     ) {
         let raw = harness.raw.clone();
+        let initial_command_count = commands.lock().len();
         std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(1);
             while Instant::now() < deadline {
-                if commands.lock().last() == Some(&(0.0, 0.0)) {
+                let commands = commands.lock();
+                let wrote_new_zero =
+                    commands.len() > initial_command_count && commands.last() == Some(&(0.0, 0.0));
+                drop(commands);
+                if wrote_new_zero {
                     let mut raw = raw.write();
                     raw.adapter_sample_sequence = sequence;
                     raw.last_raw_frame_ms = Some(now_ms());
@@ -3590,6 +3756,148 @@ mod tests {
 
         assert!(authority_revoked.load(Ordering::Relaxed));
         assert!(!harness.operator_token_status().active);
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn calibration_harness(
+        allow_calibration_motion: bool,
+        resource_sampling: bool,
+    ) -> (Harness, Arc<VerifiedZeroTestDriver>) {
+        let driver = Arc::new(VerifiedZeroTestDriver {
+            commands: Arc::new(Mutex::new(Vec::new())),
+            fail_zero: std::sync::atomic::AtomicBool::new(false),
+            telemetry_requests: AtomicU64::new(0),
+        });
+        let harness = Harness::new_inner_with_driver(
+            HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_untokened_drive: false,
+                allow_physical_actuation: true,
+                allow_calibration_motion,
+                resource_sampling,
+                deadman_ms: 5_000,
+                ..HarnessConfig::default()
+            },
+            None,
+            Some(driver.clone()),
+        )
+        .unwrap();
+        {
+            let mut raw = harness.raw.write();
+            raw.odometry_left = Some(0.0);
+            raw.odometry_right = Some(0.0);
+        }
+        harness
+            .authorize("calibration-token".to_string(), 300, SpeedMode::Low)
+            .unwrap();
+        (harness, driver)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn calibration_request(
+        phase: crate::calibration::CalibrationPhase,
+        run_index: u8,
+    ) -> crate::calibration::CalibrationEnterRequest {
+        crate::calibration::CalibrationEnterRequest {
+            token: "calibration-token".to_string(),
+            approval: true,
+            calibration_sha256: "a".repeat(64),
+            phase,
+            run_index,
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn calibration_entry_requires_gates_resources_and_no_competing_authority() {
+        let (disabled, _) = calibration_harness(false, true);
+        assert!(disabled
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Straight,
+                1,
+            ))
+            .unwrap_err()
+            .to_string()
+            .contains("calibration motion gate"));
+
+        let (no_resources, _) = calibration_harness(true, false);
+        assert!(no_resources
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Straight,
+                1,
+            ))
+            .unwrap_err()
+            .to_string()
+            .contains("resource sampling"));
+
+        let (competing, _) = calibration_harness(true, true);
+        competing.planner.lock().active = true;
+        assert!(competing
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Straight,
+                1,
+            ))
+            .unwrap_err()
+            .to_string()
+            .contains("planner"));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn calibration_drive_is_owner_bounded_and_stop_estop_clear_the_lease() {
+        let (harness, driver) = calibration_harness(true, true);
+        publish_adapter_sample_after_zero(&harness, driver.commands.clone(), 1);
+        let result = harness
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Straight,
+                1,
+            ))
+            .unwrap();
+        assert!(result.status.active);
+        assert_eq!(
+            result.status.phase,
+            Some(crate::calibration::CalibrationPhase::Straight)
+        );
+
+        assert!(harness
+            .drive(Some("wrong-owner"), 0.05, 0.05, Some(SpeedMode::Low))
+            .is_err());
+        harness
+            .drive(Some("calibration-token"), 0.10, 0.10, Some(SpeedMode::Low))
+            .unwrap();
+        harness.stop().unwrap();
+        assert!(!harness.calibration_status().active);
+
+        harness
+            .authorize("calibration-token".to_string(), 300, SpeedMode::Low)
+            .unwrap();
+        publish_adapter_sample_after_zero(&harness, driver.commands.clone(), 2);
+        harness
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Straight,
+                1,
+            ))
+            .unwrap();
+        assert!(harness
+            .drive(Some("calibration-token"), 0.19, 0.19, Some(SpeedMode::Low),)
+            .unwrap_err()
+            .to_string()
+            .contains("command bound"));
+        assert!(!harness.calibration_status().active);
+        assert!(!harness.operator_token_status().active);
+
+        harness
+            .authorize("calibration-token".to_string(), 300, SpeedMode::Low)
+            .unwrap();
+        publish_adapter_sample_after_zero(&harness, driver.commands.clone(), 3);
+        harness
+            .enter_calibration(calibration_request(
+                crate::calibration::CalibrationPhase::Stationary,
+                1,
+            ))
+            .unwrap();
+        harness.estop().unwrap();
+        assert!(!harness.calibration_status().active);
     }
 
     #[cfg(feature = "waveshare-ugv")]

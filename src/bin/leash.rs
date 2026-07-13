@@ -134,6 +134,9 @@ struct RuntimeArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     allow_physical_navigation: bool,
 
+    #[arg(long, action = ArgAction::SetTrue)]
+    allow_calibration_motion: bool,
+
     #[arg(long)]
     deadman_ms: Option<u64>,
 
@@ -994,6 +997,7 @@ impl RuntimeArgs {
             },
             allow_physical_actuation: self.allow_physical_actuation.then_some(true),
             allow_physical_navigation: self.allow_physical_navigation.then_some(true),
+            allow_calibration_motion: self.allow_calibration_motion.then_some(true),
             deadman_ms: self.deadman_ms,
             soft_odometry_limit_m: self.soft_odometry_limit_m,
             serial_port: self.serial_port,
@@ -1348,6 +1352,9 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     }
     if config.allow_physical_navigation {
         args.push("--allow-physical-navigation".to_string());
+    }
+    if config.allow_calibration_motion {
+        args.push("--allow-calibration-motion".to_string());
     }
     if let Some(path) = &config.replay_source {
         args.push("--replay-source".to_string());

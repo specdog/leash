@@ -415,6 +415,284 @@
       "title": "BatteryStatus",
       "type": "object"
     },
+    "CalibrationEnterRequest": {
+      "$defs": {
+        "CalibrationPhase": {
+          "enum": [
+            "stationary",
+            "straight",
+            "turn",
+            "square"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "approval": {
+          "type": "boolean"
+        },
+        "calibration_sha256": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/CalibrationPhase"
+        },
+        "run_index": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "approval",
+        "calibration_sha256",
+        "phase",
+        "run_index"
+      ],
+      "title": "CalibrationEnterRequest",
+      "type": "object"
+    },
+    "CalibrationEnterResult": {
+      "$defs": {
+        "CalibrationPhase": {
+          "enum": [
+            "stationary",
+            "straight",
+            "turn",
+            "square"
+          ],
+          "type": "string"
+        },
+        "CalibrationStatus": {
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "calibration_sha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "deadline_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "entered_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_command": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "max_wheel_travel_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "phase": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CalibrationPhase"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run_index": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "active",
+            "message"
+          ],
+          "type": "object"
+        },
+        "VerifiedZeroEvidence": {
+          "properties": {
+            "acknowledged": {
+              "type": "boolean"
+            },
+            "adapter_sample_sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command_sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "confirmation_received_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "write_completed_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command_sequence",
+            "write_completed_at_ms",
+            "acknowledged",
+            "adapter_sample_sequence",
+            "confirmation_received_at_ms",
+            "source",
+            "statement"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/CalibrationStatus"
+        },
+        "verified_zero": {
+          "$ref": "#/$defs/VerifiedZeroEvidence"
+        }
+      },
+      "required": [
+        "status",
+        "verified_zero"
+      ],
+      "title": "CalibrationEnterResult",
+      "type": "object"
+    },
+    "CalibrationPhase": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "stationary",
+        "straight",
+        "turn",
+        "square"
+      ],
+      "title": "CalibrationPhase",
+      "type": "string"
+    },
+    "CalibrationStatus": {
+      "$defs": {
+        "CalibrationPhase": {
+          "enum": [
+            "stationary",
+            "straight",
+            "turn",
+            "square"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "calibration_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deadline_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entered_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_command": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_wheel_travel_m": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalibrationPhase"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_index": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "active",
+        "message"
+      ],
+      "title": "CalibrationStatus",
+      "type": "object"
+    },
     "CameraRecoveryResponse": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {

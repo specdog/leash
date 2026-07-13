@@ -7,6 +7,7 @@
 pub mod accelerator;
 pub mod adapter;
 pub mod agent;
+pub mod calibration;
 pub mod capability;
 pub mod config;
 #[cfg(feature = "cuda")]
@@ -46,6 +47,10 @@ pub use adapter::{
     MobileBaseAdapter, RangeScanAdapter,
 };
 pub use agent::complete as complete_agent_prompt;
+pub use calibration::{
+    CalibrationEnterRequest, CalibrationEnterResult, CalibrationEnvelope, CalibrationPhase,
+    CalibrationStatus,
+};
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};

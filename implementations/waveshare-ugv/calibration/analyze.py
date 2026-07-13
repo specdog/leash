@@ -138,6 +138,17 @@ def generic_metrics(
         raise ValueError("capture end verified zero command is not newer than capture start")
     if final_zero["adapter_sample_sequence"] <= initial_zero["adapter_sample_sequence"]:
         raise ValueError("capture end verified zero sample is not newer than capture start")
+    calibration_status_recorded = all(
+        isinstance(event.get("calibration"), dict)
+        and event["calibration"].get("active") is True
+        and event["calibration"].get("phase") == header.get("phase")
+        and event["calibration"].get("run_index") == header.get("run_index")
+        and event["calibration"].get("calibration_sha256")
+        == header.get("calibration_sha256")
+        for event in samples
+    )
+    if not calibration_status_recorded:
+        raise ValueError("capture is missing the active calibration status on every sample")
     health_ok = all(event["health"].get("ok") is True for event in samples)
     tracking = all(event["provider"].get("state") == "tracking" for event in samples)
     sensors_ok = all(
@@ -171,6 +182,7 @@ def generic_metrics(
             tracking,
             sensors_ok,
             container_ok,
+            calibration_status_recorded,
             len(restarts) == 1,
             max(lidar_ages) <= 1000,
             max(imu_ages) <= 1000,
@@ -186,6 +198,7 @@ def generic_metrics(
         "tracking": tracking,
         "sensors_available": sensors_ok,
         "container_healthy": container_ok,
+        "calibration_status_recorded": calibration_status_recorded,
         "container_restarts": max(restarts) - min(restarts) if restarts else None,
         "max_lidar_age_ms": max(lidar_ages),
         "max_imu_age_ms": max(imu_ages),

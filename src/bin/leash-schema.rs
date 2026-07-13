@@ -5,6 +5,9 @@ use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Value};
 
 use leash_harness::{
+    calibration::{
+        CalibrationEnterRequest, CalibrationEnterResult, CalibrationPhase, CalibrationStatus,
+    },
     capability::{CapabilityDescriptor, InvocationOrigin, SafetyClass},
     localization::{
         LocalizationProviderSnapshot, LocalizationProviderState, LocalizationProviderStatus,
@@ -140,6 +143,10 @@ fn schema_document() -> Result<Value> {
     insert::<LocalizationProviderStatus>(&mut schemas, "LocalizationProviderStatus")?;
     insert::<LocalizationProviderUpdate>(&mut schemas, "LocalizationProviderUpdate")?;
     insert::<LocalizationProviderSnapshot>(&mut schemas, "LocalizationProviderSnapshot")?;
+    insert::<CalibrationPhase>(&mut schemas, "CalibrationPhase")?;
+    insert::<CalibrationEnterRequest>(&mut schemas, "CalibrationEnterRequest")?;
+    insert::<CalibrationEnterResult>(&mut schemas, "CalibrationEnterResult")?;
+    insert::<CalibrationStatus>(&mut schemas, "CalibrationStatus")?;
     insert::<SpeedMode>(&mut schemas, "SpeedMode")?;
     insert::<ResourceSample>(&mut schemas, "ResourceSample")?;
     insert::<RunLogEntry>(&mut schemas, "RunLogEntry")?;

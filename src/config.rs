@@ -115,6 +115,7 @@ pub struct HarnessConfig {
     pub allow_untokened_drive: bool,
     pub allow_physical_actuation: bool,
     pub allow_physical_navigation: bool,
+    pub allow_calibration_motion: bool,
     pub deadman_ms: u64,
     pub soft_odometry_limit_m: f64,
     pub serial_port: String,
@@ -156,6 +157,8 @@ pub struct PartialHarnessConfig {
     pub allow_physical_actuation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_physical_navigation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_calibration_motion: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadman_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,6 +263,7 @@ struct ConfigBuilder {
     allow_untokened_drive: Resolved<bool>,
     allow_physical_actuation: Resolved<bool>,
     allow_physical_navigation: Resolved<bool>,
+    allow_calibration_motion: Resolved<bool>,
     deadman_ms: Resolved<u64>,
     soft_odometry_limit_m: Resolved<f64>,
     serial_port: Resolved<String>,
@@ -291,6 +295,7 @@ impl Default for HarnessConfig {
             allow_untokened_drive: true,
             allow_physical_actuation: false,
             allow_physical_navigation: false,
+            allow_calibration_motion: false,
             deadman_ms: 400,
             soft_odometry_limit_m: 0.0,
             serial_port: "/dev/ttyTHS1".to_string(),
@@ -338,6 +343,12 @@ impl HarnessConfig {
         }
         if self.allow_physical_navigation && self.profile != Profile::WaveshareUgv {
             anyhow::bail!("physical navigation runtime opt-in requires a mobile-base profile");
+        }
+        if self.allow_calibration_motion && self.profile != Profile::WaveshareUgv {
+            anyhow::bail!("calibration motion runtime opt-in requires the Waveshare UGV profile");
+        }
+        if self.allow_calibration_motion && !self.allow_physical_actuation {
+            anyhow::bail!("calibration motion requires physical actuation to be enabled");
         }
         if self.replay_source.is_some() && self.profile != Profile::Replay {
             anyhow::bail!("replay_source requires profile 'replay'");
@@ -431,6 +442,7 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         allow_untokened_drive: parse_env(env, "LEASH_ALLOW_UNTOKENED_DRIVE", parse_bool)?,
         allow_physical_actuation: parse_env(env, "LEASH_ALLOW_PHYSICAL_ACTUATION", parse_bool)?,
         allow_physical_navigation: parse_env(env, "LEASH_ALLOW_PHYSICAL_NAVIGATION", parse_bool)?,
+        allow_calibration_motion: parse_env(env, "LEASH_ALLOW_CALIBRATION_MOTION", parse_bool)?,
         deadman_ms: parse_env(env, "LEASH_DEADMAN_MS", parse_u64)?,
         soft_odometry_limit_m: parse_env(env, "LEASH_SOFT_ODOMETRY_LIMIT_M", parse_f64)?,
         serial_port: env.get("LEASH_SERIAL_PORT").cloned(),
@@ -546,6 +558,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "allow_untokened_drive" => "LEASH_ALLOW_UNTOKENED_DRIVE",
         "allow_physical_actuation" => "LEASH_ALLOW_PHYSICAL_ACTUATION",
         "allow_physical_navigation" => "LEASH_ALLOW_PHYSICAL_NAVIGATION",
+        "allow_calibration_motion" => "LEASH_ALLOW_CALIBRATION_MOTION",
         "deadman_ms" => "LEASH_DEADMAN_MS",
         "soft_odometry_limit_m" => "LEASH_SOFT_ODOMETRY_LIMIT_M",
         "serial_port" => "LEASH_SERIAL_PORT",
@@ -579,6 +592,7 @@ impl Default for ConfigBuilder {
             allow_untokened_drive: Resolved::defaulted(config.allow_untokened_drive),
             allow_physical_actuation: Resolved::defaulted(config.allow_physical_actuation),
             allow_physical_navigation: Resolved::defaulted(config.allow_physical_navigation),
+            allow_calibration_motion: Resolved::defaulted(config.allow_calibration_motion),
             deadman_ms: Resolved::defaulted(config.deadman_ms),
             soft_odometry_limit_m: Resolved::defaulted(config.soft_odometry_limit_m),
             serial_port: Resolved::defaulted(config.serial_port),
@@ -649,6 +663,10 @@ impl ConfigBuilder {
         if let Some(value) = partial.allow_physical_navigation {
             self.allow_physical_navigation
                 .set(value, source("allow_physical_navigation"));
+        }
+        if let Some(value) = partial.allow_calibration_motion {
+            self.allow_calibration_motion
+                .set(value, source("allow_calibration_motion"));
         }
         if let Some(value) = partial.deadman_ms {
             self.deadman_ms.set(value, source("deadman_ms"));
@@ -740,6 +758,7 @@ impl ConfigBuilder {
             allow_untokened_drive: self.allow_untokened_drive.value,
             allow_physical_actuation: self.allow_physical_actuation.value,
             allow_physical_navigation: self.allow_physical_navigation.value,
+            allow_calibration_motion: self.allow_calibration_motion.value,
             deadman_ms: self.deadman_ms.value,
             soft_odometry_limit_m: self.soft_odometry_limit_m.value,
             serial_port: self.serial_port.value,
@@ -816,6 +835,12 @@ impl ConfigBuilder {
                 json!(config.allow_physical_navigation),
                 self.allow_physical_navigation.source,
                 Some("physical-navigation"),
+            ),
+            field(
+                "allow_calibration_motion",
+                json!(config.allow_calibration_motion),
+                self.allow_calibration_motion.source,
+                Some("calibration-motion"),
             ),
             field(
                 "deadman_ms",
@@ -1101,6 +1126,36 @@ mod config_tests {
         assert!(!resolved.config.resource_sampling);
         assert_eq!(source_for(&resolved, "resource_sampling"), "cli");
         assert_eq!(attention_for(&resolved, "resource_sampling"), None);
+    }
+
+    #[test]
+    fn calibration_motion_gate_defaults_off_and_resolves_from_env() {
+        assert!(!HarnessConfig::default().allow_calibration_motion);
+        let env = BTreeMap::from([
+            ("LEASH_PROFILE".to_string(), "waveshare-ugv".to_string()),
+            (
+                "LEASH_ALLOW_PHYSICAL_ACTUATION".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "LEASH_ALLOW_CALIBRATION_MOTION".to_string(),
+                "true".to_string(),
+            ),
+        ]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        assert!(resolved.config.allow_calibration_motion);
+        assert_eq!(
+            source_for(&resolved, "allow_calibration_motion"),
+            "env:LEASH_ALLOW_CALIBRATION_MOTION"
+        );
     }
 
     #[test]

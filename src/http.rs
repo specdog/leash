@@ -48,6 +48,7 @@ use crate::types::{AgentMessageAck, AgentMessageList};
 #[cfg(feature = "webrtc")]
 use crate::webrtc_camera::{camera_webrtc_status, camera_webrtc_ws};
 use crate::{
+    calibration::{CalibrationEnterRequest, CalibrationEnterResult, CalibrationStatus},
     runtime::Harness,
     transport::StreamRecvError,
     types::{SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
@@ -211,6 +212,11 @@ struct VerifiedStopReq {
 }
 
 #[derive(Debug, Deserialize)]
+struct CalibrationExitReq {
+    token: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct AgentMessageReq {
     text: String,
     source: Option<String>,
@@ -276,6 +282,9 @@ pub fn router(harness: Harness) -> Router {
         .route("/agent/messages", get(agent_messages).post(agent_message))
         .route("/agent/send", post(agent_message))
         .route("/capture", post(capture))
+        .route("/calibration/enter", post(calibration_enter))
+        .route("/calibration/status", get(calibration_status))
+        .route("/calibration/exit", post(calibration_exit))
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
         .route("/waypoints", get(waypoints))
@@ -1495,6 +1504,30 @@ async fn capture(State(harness): State<Harness>) -> Result<Json<Value>, HttpErro
     ))
 }
 
+async fn calibration_status(State(harness): State<Harness>) -> Json<CalibrationStatus> {
+    Json(harness.calibration_status())
+}
+
+async fn calibration_enter(
+    State(harness): State<Harness>,
+    Json(request): Json<CalibrationEnterRequest>,
+) -> Result<Json<CalibrationEnterResult>, HttpError> {
+    let result = tokio::task::spawn_blocking(move || harness.enter_calibration(request))
+        .await
+        .map_err(|error| anyhow::anyhow!("calibration entry task failed: {error}"))??;
+    Ok(Json(result))
+}
+
+async fn calibration_exit(
+    State(harness): State<Harness>,
+    Json(request): Json<CalibrationExitReq>,
+) -> Result<Json<VerifiedZeroEvidence>, HttpError> {
+    let evidence = tokio::task::spawn_blocking(move || harness.exit_calibration(&request.token))
+        .await
+        .map_err(|error| anyhow::anyhow!("calibration exit task failed: {error}"))??;
+    Ok(Json(evidence))
+}
+
 async fn pilot_authorize(
     State(harness): State<Harness>,
     Json(req): Json<PilotTokenReq>,
@@ -1780,8 +1813,8 @@ mod tests {
     };
 
     use super::{
-        camera_activity, localization_authorized, localization_update, motors_stop_verified,
-        CameraRuntimeState, CAMERA_RUNTIME_STATE,
+        calibration_enter, calibration_status, camera_activity, localization_authorized,
+        localization_update, motors_stop_verified, CameraRuntimeState, CAMERA_RUNTIME_STATE,
     };
     use crate::{Harness, HarnessConfig, LocalizationProviderUpdate};
     use tokio::sync::Mutex;
@@ -1843,6 +1876,33 @@ mod tests {
             HeaderValue::from_static("Bearer bridge-secret"),
         );
         assert!(localization_authorized(&headers, "bridge-secret"));
+    }
+
+    #[tokio::test]
+    async fn calibration_routes_are_not_mcp_or_agent_capabilities() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        assert!(harness
+            .capability_registry()
+            .descriptors()
+            .iter()
+            .all(|descriptor| !descriptor.name.starts_with("calibration")));
+        assert!(!calibration_status(State(harness.clone())).await.0.active);
+
+        let error = calibration_enter(
+            State(harness),
+            Json(crate::calibration::CalibrationEnterRequest {
+                token: "fixture".to_string(),
+                approval: true,
+                calibration_sha256: "a".repeat(64),
+                phase: crate::calibration::CalibrationPhase::Stationary,
+                run_index: 1,
+            }),
+        )
+        .await
+        .unwrap_err()
+        .0
+        .to_string();
+        assert!(error.contains("calibration motion gate"));
     }
 
     #[tokio::test]
