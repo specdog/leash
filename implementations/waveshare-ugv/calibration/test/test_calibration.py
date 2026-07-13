@@ -10,6 +10,7 @@ import unittest
 from analyze import analyze_one
 from profile import canonical_bytes, env_lines, validate
 from replay import replay_events
+from support import square_samples
 
 
 def candidate_profile() -> dict:
@@ -76,6 +77,12 @@ def sample(
             "right_cmd": 0.0,
             "odometry_left": x_m if odometry_left is None else odometry_left,
             "odometry_right": x_m if odometry_right is None else odometry_right,
+            "resource": {
+                "sampled_at_ms": ts_ms,
+                "process_id": 4242,
+                "cpu_time_ticks": 100 + elapsed_ms,
+                "memory_rss_bytes": 64 * 1024 * 1024,
+            },
             "sensors": {
                 "range_scan": {
                     "status": "available",
@@ -280,15 +287,17 @@ class CalibrationTests(unittest.TestCase):
         self.assertTrue(result["accepted"])
         self.assertAlmostEqual(result["phase_metrics"]["wheel_turn_deg"], 360.0)
 
-    def test_square_capture_checks_final_closure(self):
+    def test_square_capture_rejects_bad_final_closure(self):
         profile = candidate_profile()
+        samples = square_samples()
+        samples[-1]["telemetry"]["localization"]["pose"]["pose"]["x_m"] = 0.30
         result = self.capture_result(
             profile,
             "square",
-            [sample(0), sample(20_000, x_m=0.2, yaw_rad=math.radians(10.0))],
+            samples,
             expected_side_m=1.0,
         )
-        self.assertTrue(result["accepted"])
+        self.assertFalse(result["accepted"])
 
 
 if __name__ == "__main__":
