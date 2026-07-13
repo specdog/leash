@@ -159,6 +159,202 @@ def capture_entry(
     }
 
 
+def saved_artifacts(
+    value: Any, map_name: str, label: str
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, list):
+        fail(f"map reload proof {label} saved artifacts must be a list")
+    expected = {
+        f"{map_name}.posegraph",
+        f"{map_name}.data",
+        f"{map_name}.yaml",
+        f"{map_name}.pgm",
+        f"{map_name}.lineage.json",
+    }
+    records: dict[str, dict[str, Any]] = {}
+    for artifact in value:
+        if not isinstance(artifact, dict):
+            fail(f"map reload proof {label} saved artifact is invalid")
+        name = basename(artifact.get("file"), "saved artifact file")
+        size_bytes = artifact.get("size_bytes")
+        if (
+            isinstance(size_bytes, bool)
+            or not isinstance(size_bytes, int)
+            or size_bytes <= 0
+            or not is_sha256(artifact.get("sha256"))
+        ):
+            fail(f"map reload proof {label} saved artifact metadata is invalid")
+        if name in records:
+            fail(f"map reload proof {label} contains duplicate saved artifacts")
+        records[name] = {
+            "file": name,
+            "size_bytes": size_bytes,
+            "sha256": artifact["sha256"],
+        }
+    lineage_name = f"{map_name}.lineage.json"
+    if lineage_name not in records:
+        fail("map reload proof is missing the saved lineage artifact")
+    if set(records) != expected:
+        fail("map reload proof saved artifact set is incomplete")
+    return records
+
+
+def proof_snapshot(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        fail(f"map reload proof {label} snapshot must be an object")
+    captured_at_ms = value.get("captured_at_ms")
+    if isinstance(captured_at_ms, bool) or not isinstance(captured_at_ms, int):
+        fail(f"map reload proof {label} snapshot timestamp is invalid")
+    map_metadata = value.get("map")
+    if not isinstance(map_metadata, dict) or any(
+        not isinstance(map_metadata.get(field), str)
+        or not map_metadata[field].strip()
+        for field in ("map_id", "map_revision", "grid_revision", "frame_id")
+    ):
+        fail(f"map reload proof {label} map identity is invalid")
+    provider = value.get("provider")
+    if not isinstance(provider, dict) or provider.get("state") != "tracking":
+        fail(f"map reload proof {label} provider is not tracking")
+    instance_id = provider.get("provider_instance_id")
+    generation = provider.get("generation")
+    last_received_ms = provider.get("last_received_ms")
+    stale_after_ms = provider.get("stale_after_ms")
+    if (
+        not isinstance(instance_id, str)
+        or not instance_id.strip()
+        or isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation <= 0
+        or isinstance(last_received_ms, bool)
+        or not isinstance(last_received_ms, int)
+        or isinstance(stale_after_ms, bool)
+        or not isinstance(stale_after_ms, int)
+        or stale_after_ms <= 0
+        or not 0 <= captured_at_ms - last_received_ms <= stale_after_ms
+    ):
+        fail(f"map reload proof {label} provider freshness is invalid")
+    localized_pose = value.get("pose")
+    if (
+        not isinstance(localized_pose, dict)
+        or not isinstance(localized_pose.get("covariance"), list)
+        or len(localized_pose["covariance"]) != 9
+        or not isinstance(localized_pose.get("pose"), dict)
+    ):
+        fail(f"map reload proof {label} localization covariance is invalid")
+    pose_ts_ms = localized_pose["pose"].get("ts_ms")
+    if (
+        isinstance(pose_ts_ms, bool)
+        or not isinstance(pose_ts_ms, int)
+        or not 0 <= captured_at_ms - pose_ts_ms <= stale_after_ms
+    ):
+        fail(f"map reload proof {label} localized pose is stale")
+    command = value.get("command")
+    if (
+        not isinstance(command, dict)
+        or command.get("left_cmd") != 0
+        or command.get("right_cmd") != 0
+    ):
+        fail(f"map reload proof {label} snapshot is not stopped")
+    return value
+
+
+def validate_map_reload_proof(
+    proof: Any, profile: dict[str, Any]
+) -> dict[str, Any]:
+    validate(profile, require_values=True)
+    calibration_sha256 = hashlib.sha256(canonical_bytes(profile)).hexdigest()
+    if (
+        not isinstance(proof, dict)
+        or proof.get("format") != MAP_PROOF_FORMAT
+        or proof.get("ok") is not True
+        or proof.get("profile") != profile["profile"]
+        or proof.get("calibration_sha256") != calibration_sha256
+    ):
+        fail("map reload proof identity or calibration digest is invalid")
+    map_name = proof.get("map_name")
+    if (
+        not isinstance(map_name, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", map_name)
+    ):
+        fail("map reload proof map name is invalid")
+
+    artifact_sets = proof.get("saved_artifacts")
+    if not isinstance(artifact_sets, dict):
+        fail("map reload proof saved artifacts are missing")
+    before_artifacts = saved_artifacts(
+        artifact_sets.get("before"), map_name, "before"
+    )
+    after_artifacts = saved_artifacts(artifact_sets.get("after"), map_name, "after")
+    if before_artifacts != after_artifacts:
+        fail("map reload proof saved artifact size or hash changed across reload")
+
+    lineage = proof.get("lineage")
+    if (
+        not isinstance(lineage, dict)
+        or set(lineage) != {"format", "map_id", "map_revision", "frame_id"}
+        or lineage.get("format") != "leash-map-lineage-v1"
+        or any(
+            not isinstance(lineage.get(field), str) or not lineage[field].strip()
+            for field in ("map_id", "map_revision", "frame_id")
+        )
+    ):
+        fail("map reload proof lineage is invalid")
+
+    before = proof_snapshot(proof.get("before"), "before")
+    after = proof_snapshot(proof.get("after"), "after")
+    lineage_identity = {
+        field: lineage[field] for field in ("map_id", "map_revision", "frame_id")
+    }
+    before_identity = {
+        field: before["map"][field]
+        for field in ("map_id", "map_revision", "frame_id")
+    }
+    after_identity = {
+        field: after["map"][field]
+        for field in ("map_id", "map_revision", "frame_id")
+    }
+    if before_identity != lineage_identity or after_identity != lineage_identity:
+        fail("map reload proof lineage changed across save and reload")
+    if before["map"]["grid_revision"] != after["map"]["grid_revision"]:
+        fail("map reload proof stopped grid revision changed across reload")
+    if (
+        before["provider"]["provider_instance_id"]
+        == after["provider"]["provider_instance_id"]
+    ):
+        fail("map reload proof provider instance did not change")
+    if after["provider"]["generation"] <= before["provider"]["generation"]:
+        fail("map reload proof provider generation did not advance")
+
+    leash = proof.get("leash")
+    if (
+        not isinstance(leash, dict)
+        or isinstance(leash.get("pid"), bool)
+        or not isinstance(leash.get("pid"), int)
+        or leash["pid"] <= 0
+        or leash.get("unchanged") is not True
+    ):
+        fail("map reload proof does not preserve the Leash process")
+    entry_zero = verified_zero(leash.get("entry_verified_zero"), "map reload entry")
+    exit_zero = verified_zero(leash.get("exit_verified_zero"), "map reload exit")
+    if (
+        exit_zero["command_sequence"] <= entry_zero["command_sequence"]
+        or exit_zero["adapter_sample_sequence"]
+        <= entry_zero["adapter_sample_sequence"]
+    ):
+        fail("map reload exit verified zero evidence must be newer than entry")
+
+    container = proof.get("container")
+    if (
+        not isinstance(container, dict)
+        or container.get("running") is not True
+        or container.get("oom_killed") is not False
+    ):
+        fail("map reload proof container is unhealthy")
+    if proof.get("recorder_issues_motion") is not False:
+        fail("map reload proof recorder must not issue motion")
+    return proof
+
+
 def build_manifest(
     profile: dict[str, Any],
     analyses: list[tuple[str, dict[str, Any]]],
@@ -188,15 +384,19 @@ def build_manifest(
 
     map_name, map_document = map_proof
     map_file = basename(map_name, "map reload proof file")
-    if not isinstance(map_document, dict):
-        fail("map reload proof must be an object")
+    validated_map = validate_map_reload_proof(map_document, profile)
     map_reload = {
         "file": map_file,
-        "sha256": hashlib.sha256(canonical_json_bytes(map_document)).hexdigest(),
-        "format": map_document.get("format"),
-        "profile": map_document.get("profile"),
-        "calibration_sha256": map_document.get("calibration_sha256"),
-        "accepted": map_document.get("ok") is True,
+        "sha256": hashlib.sha256(canonical_json_bytes(validated_map)).hexdigest(),
+        "format": validated_map["format"],
+        "profile": validated_map["profile"],
+        "calibration_sha256": validated_map["calibration_sha256"],
+        "map_id": validated_map["lineage"]["map_id"],
+        "map_revision": validated_map["lineage"]["map_revision"],
+        "grid_revision": validated_map["before"]["map"]["grid_revision"],
+        "provider_generation_before": validated_map["before"]["provider"]["generation"],
+        "provider_generation_after": validated_map["after"]["provider"]["generation"],
+        "accepted": True,
     }
 
     manifest = {

@@ -224,6 +224,10 @@ class CalibrationTests(unittest.TestCase):
 
         self.assertIn('verified_stop map-reload-entry', script)
         self.assertIn('verified_stop map-reload-exit', script)
+        self.assertIn('leash-waveshare-ugv-map-reload-proof-v2', script)
+        self.assertIn('f"{name}.lineage.json"', script)
+        self.assertIn('provider_instance_id', script)
+        self.assertIn('saved_artifacts:{before:$artifacts_before,after:$artifacts_after}', script)
         self.assertNotIn('final_motor_stop:true', script)
 
     def test_analysis_requires_calibration_status_on_every_sample(self):

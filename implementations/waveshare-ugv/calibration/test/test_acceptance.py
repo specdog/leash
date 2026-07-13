@@ -57,24 +57,95 @@ class AcceptanceTests(unittest.TestCase):
             "runs": runs,
         }
 
+    def map_reload_proof(self, profile: dict) -> dict:
+        digest = hashlib.sha256(canonical_bytes(profile)).hexdigest()
+        map_metadata = {
+            "map_id": "waveshare-ugv-map",
+            "map_revision": "lineage-a",
+            "grid_revision": "grid-a",
+            "frame_id": "map",
+        }
+        artifacts = [
+            {
+                "file": f"accepted-room.{suffix}",
+                "size_bytes": 100 + index,
+                "sha256": hashlib.sha256(suffix.encode()).hexdigest(),
+            }
+            for index, suffix in enumerate(
+                ("posegraph", "data", "yaml", "pgm", "lineage.json")
+            )
+        ]
+        return {
+            "ok": True,
+            "format": "leash-waveshare-ugv-map-reload-proof-v2",
+            "profile": profile["profile"],
+            "calibration_sha256": digest,
+            "map_name": "accepted-room",
+            "lineage": {
+                "format": "leash-map-lineage-v1",
+                "map_id": "waveshare-ugv-map",
+                "map_revision": "lineage-a",
+                "frame_id": "map",
+            },
+            "saved_artifacts": {
+                "before": artifacts,
+                "after": copy.deepcopy(artifacts),
+            },
+            "before": {
+                "captured_at_ms": 1_700_000_000_000,
+                "map": map_metadata,
+                "provider": {
+                    "state": "tracking",
+                    "provider_instance_id": "instance-a",
+                    "generation": 1,
+                    "last_received_ms": 1_700_000_000_000,
+                    "stale_after_ms": 1_000,
+                },
+                "pose": {
+                    "pose": {"ts_ms": 1_700_000_000_000},
+                    "covariance": [0.01] * 9,
+                },
+                "command": {"left_cmd": 0.0, "right_cmd": 0.0},
+            },
+            "after": {
+                "captured_at_ms": 1_700_000_001_000,
+                "map": copy.deepcopy(map_metadata),
+                "provider": {
+                    "state": "tracking",
+                    "provider_instance_id": "instance-b",
+                    "generation": 2,
+                    "last_received_ms": 1_700_000_001_000,
+                    "stale_after_ms": 1_000,
+                },
+                "pose": {
+                    "pose": {"ts_ms": 1_700_000_001_000},
+                    "covariance": [0.01] * 9,
+                },
+                "command": {"left_cmd": 0.0, "right_cmd": 0.0},
+            },
+            "leash": {
+                "pid": 4242,
+                "unchanged": True,
+                "entry_verified_zero": verified_zero(1, 10),
+                "exit_verified_zero": verified_zero(2, 11),
+            },
+            "container": {
+                "running": True,
+                "oom_killed": False,
+                "restart_count": 1,
+            },
+            "recorder_issues_motion": False,
+        }
+
     def evidence(self):
         profile = self.profile()
-        digest = hashlib.sha256(canonical_bytes(profile)).hexdigest()
         analyses = [
             ("stationary-analysis.json", self.analysis("stationary", (1,))),
             ("straight-analysis.json", self.analysis("straight", (1,))),
             ("turn-analysis.json", self.analysis("turn", (1,))),
             ("square-analysis.json", self.analysis("square", (1, 2, 3))),
         ]
-        map_proof = (
-            "map-reload.json",
-            {
-                "ok": True,
-                "format": "leash-waveshare-ugv-map-reload-proof-v2",
-                "profile": "pinkie-v1",
-                "calibration_sha256": digest,
-            },
-        )
+        map_proof = ("map-reload.json", self.map_reload_proof(profile))
         body_artifact = {
             "file": "body-artifact.png",
             "sha256": hashlib.sha256(b"scrubbed body artifact").hexdigest(),
@@ -94,6 +165,11 @@ class AcceptanceTests(unittest.TestCase):
             acceptance.default_watchdog_status(),
         )
         return acceptance, profile, manifest
+
+    def validate_map_proof(self, proof: dict, profile: dict) -> dict:
+        validator = getattr(self.acceptance(), "validate_map_reload_proof", None)
+        self.assertIsNotNone(validator, "map reload proof validator is missing")
+        return validator(proof, profile)
 
     def test_builds_stage_one_manifest_without_claiming_autonomous_readiness(self):
         acceptance, profile, manifest = self.build()
@@ -166,6 +242,69 @@ class AcceptanceTests(unittest.TestCase):
         wrong_body["body_artifact"]["sha256"] = "invalid"
         with self.assertRaisesRegex(ValueError, "body artifact"):
             acceptance.validate_manifest(wrong_body, profile)
+
+    def test_validates_exact_map_reload_proof(self):
+        profile = self.profile()
+
+        validated = self.validate_map_proof(self.map_reload_proof(profile), profile)
+
+        self.assertTrue(validated["ok"])
+
+    def test_map_proof_rejects_missing_lineage_artifact(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["saved_artifacts"]["before"] = [
+            artifact
+            for artifact in proof["saved_artifacts"]["before"]
+            if not artifact["file"].endswith(".lineage.json")
+        ]
+
+        with self.assertRaisesRegex(ValueError, "lineage artifact"):
+            self.validate_map_proof(proof, profile)
+
+    def test_map_proof_rejects_changed_posegraph_hash(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["saved_artifacts"]["after"][0]["sha256"] = "f" * 64
+
+        with self.assertRaisesRegex(ValueError, "saved artifact"):
+            self.validate_map_proof(proof, profile)
+
+    def test_map_proof_rejects_same_provider_instance(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["after"]["provider"]["provider_instance_id"] = proof["before"][
+            "provider"
+        ]["provider_instance_id"]
+
+        with self.assertRaisesRegex(ValueError, "provider instance"):
+            self.validate_map_proof(proof, profile)
+
+    def test_map_proof_rejects_unchanged_provider_generation(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["after"]["provider"]["generation"] = proof["before"]["provider"][
+            "generation"
+        ]
+
+        with self.assertRaisesRegex(ValueError, "generation"):
+            self.validate_map_proof(proof, profile)
+
+    def test_map_proof_rejects_changed_lineage(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["after"]["map"]["map_revision"] = "lineage-b"
+
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            self.validate_map_proof(proof, profile)
+
+    def test_map_proof_rejects_changed_stopped_grid_revision(self):
+        profile = self.profile()
+        proof = self.map_reload_proof(profile)
+        proof["after"]["map"]["grid_revision"] = "grid-b"
+
+        with self.assertRaisesRegex(ValueError, "grid revision"):
+            self.validate_map_proof(proof, profile)
 
     def test_autonomous_readiness_requires_all_watchdogs_at_250_ms(self):
         acceptance = self.acceptance()
