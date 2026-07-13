@@ -1548,6 +1548,29 @@ pub struct DriveOutcome {
     pub soft_odometry_limited: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ZeroCommandReason {
+    OperatorRequest,
+    CalibrationEntry,
+    CalibrationExit,
+    MapReloadEntry,
+    MapReloadExit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VerifiedZeroEvidence {
+    pub command_sequence: u64,
+    pub write_completed_at_ms: u128,
+    pub acknowledged: bool,
+    pub adapter_sample_sequence: u64,
+    pub confirmation_received_at_ms: u128,
+    pub source: String,
+    pub statement: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct DroneCommandStatus {

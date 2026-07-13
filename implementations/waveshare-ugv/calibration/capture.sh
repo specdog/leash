@@ -129,6 +129,14 @@ stop_leash() {
   curl -fsS -X POST "$leash_url/stop" >/dev/null
 }
 
+verified_stop() {
+  local reason="$1"
+  curl -fsS -X POST \
+    -H 'Content-Type: application/json' \
+    --data "{\"reason\":\"$reason\"}" \
+    "$leash_url/stop/verified"
+}
+
 mkdir -p "$(dirname "$output")"
 chmod 700 "$(dirname "$output")"
 mkdir -p "$(dirname "$replay_output")"
@@ -141,14 +149,22 @@ raw_stream=""
 
 finish() {
   local exit_code=$?
+  local final_zero="null"
   if [[ -n "$stream_pid" ]]; then
     kill "$stream_pid" 2>/dev/null || true
     wait "$stream_pid" 2>/dev/null || true
   fi
-  stop_leash || true
+  if [[ "$completed" != true ]]; then
+    final_zero="$(verified_stop calibration-exit 2>/dev/null)" || {
+      final_zero="null"
+      stop_leash || true
+    }
+  else
+    stop_leash || true
+  fi
   if [[ "$completed" != true && -e "$output" ]]; then
-    jq -nc --argjson exit_code "$exit_code" \
-      '{kind:"capture-end",ok:false,reason:"aborted",exit_code:$exit_code,final_motor_stop:true}' >> "$output" || true
+    jq -nc --argjson exit_code "$exit_code" --argjson verified_zero "$final_zero" \
+      '{kind:"capture-end",ok:false,reason:"aborted",exit_code:$exit_code,verified_zero:$verified_zero}' >> "$output" || true
   fi
   chmod 600 "$output" 2>/dev/null || true
   chmod 600 "$replay_output" 2>/dev/null || true
@@ -157,7 +173,7 @@ finish() {
 trap finish EXIT
 trap 'exit 130' INT TERM
 
-stop_leash
+entry_verified_zero="$(verified_stop calibration-entry)"
 container_id="$(compose ps -q slam)"
 [[ -n "$container_id" ]] || { echo "SLAM container is not running" >&2; exit 1; }
 leash_pid="$(systemctl --user show leash.service -p MainPID --value)"
@@ -177,7 +193,8 @@ jq -nc \
   --argjson expected_distance_m "$expected_distance_m" \
   --argjson expected_turn_deg "$expected_turn_deg" \
   --argjson expected_side_m "$expected_side_m" \
-  '{kind:"capture-start",format:"leash-waveshare-ugv-calibration-capture-v1",phase:$phase,profile:$profile,calibration_sha256:$calibration_sha256,clock:{proof:$clock_proof,initial_skew_secs:$clock_skew_secs},duration_secs:$duration_secs,interval_ms:$interval_ms,run_index:$run_index,expected_distance_m:$expected_distance_m,expected_turn_deg:$expected_turn_deg,expected_side_m:$expected_side_m,actuation_source:"external-supervised-operator",recorder_issues_motion:false,initial_motor_stop:true}' \
+  --argjson verified_zero "$entry_verified_zero" \
+  '{kind:"capture-start",format:"leash-waveshare-ugv-calibration-capture-v1",phase:$phase,profile:$profile,calibration_sha256:$calibration_sha256,clock:{proof:$clock_proof,initial_skew_secs:$clock_skew_secs},duration_secs:$duration_secs,interval_ms:$interval_ms,run_index:$run_index,expected_distance_m:$expected_distance_m,expected_turn_deg:$expected_turn_deg,expected_side_m:$expected_side_m,actuation_source:"external-supervised-operator",recorder_issues_motion:false,verified_zero:$verified_zero}' \
   > "$output"
 
 raw_stream="$(mktemp "${TMPDIR:-/tmp}/leash-calibration-stream.XXXXXX")"
@@ -230,7 +247,7 @@ while (( $(($(date +%s) * 1000)) < deadline_ms )); do
   sleep "$(awk -v milliseconds="$interval_ms" 'BEGIN {printf "%.3f", milliseconds / 1000}')"
 done
 
-stop_leash
+exit_verified_zero="$(verified_stop calibration-exit)"
 sleep 1
 final_telemetry="$(curl -fsS "$leash_url/telemetry")"
 jq -e '.left_cmd == 0 and .right_cmd == 0' <<<"$final_telemetry" >/dev/null || {
@@ -243,8 +260,8 @@ stream_pid=""
 python3 "$calibration_dir/replay.py" "$raw_stream" "$replay_output" >/dev/null
 replay_sha256="$(sha256sum "$replay_output" | awk '{print $1}')"
 replay_name="$(basename "$replay_output")"
-jq -nc --argjson polls "$polls" --argjson telemetry "$final_telemetry" --arg replay "$replay_name" --arg replay_sha256 "$replay_sha256" \
-  '{kind:"capture-end",ok:true,polls:$polls,final_motor_stop:true,final_command:{left_cmd:$telemetry.left_cmd,right_cmd:$telemetry.right_cmd,estop:$telemetry.estop},replay:{file:$replay,sha256:$replay_sha256,format:"leash-replay-v1"}}' \
+jq -nc --argjson polls "$polls" --argjson telemetry "$final_telemetry" --argjson verified_zero "$exit_verified_zero" --arg replay "$replay_name" --arg replay_sha256 "$replay_sha256" \
+  '{kind:"capture-end",ok:true,polls:$polls,verified_zero:$verified_zero,final_command:{left_cmd:$telemetry.left_cmd,right_cmd:$telemetry.right_cmd,estop:$telemetry.estop},replay:{file:$replay,sha256:$replay_sha256,format:"leash-replay-v1"}}' \
   >> "$output"
 completed=true
 chmod 600 "$output"

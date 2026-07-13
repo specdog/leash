@@ -102,7 +102,42 @@ def load_capture(path: pathlib.Path) -> tuple[dict[str, Any], list[dict[str, Any
     return header, samples, end
 
 
-def generic_metrics(samples: list[dict[str, Any]], end: dict[str, Any]) -> dict[str, Any]:
+def verified_zero_evidence(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} is missing typed verified zero evidence")
+    integer_fields = (
+        "command_sequence",
+        "write_completed_at_ms",
+        "adapter_sample_sequence",
+        "confirmation_received_at_ms",
+    )
+    if any(
+        isinstance(value.get(field), bool)
+        or not isinstance(value.get(field), int)
+        or int(value[field]) < 0
+        for field in integer_fields
+    ):
+        raise ValueError(f"{label} contains invalid verified zero counters")
+    if value.get("acknowledged") is not True:
+        raise ValueError(f"{label} does not acknowledge verified zero")
+    if value.get("statement") != "zero command confirmed":
+        raise ValueError(f"{label} has an invalid verified zero statement")
+    if not isinstance(value.get("source"), str) or not value["source"].strip():
+        raise ValueError(f"{label} has no verified zero source")
+    if value["confirmation_received_at_ms"] < value["write_completed_at_ms"]:
+        raise ValueError(f"{label} confirms verified zero before the write completed")
+    return value
+
+
+def generic_metrics(
+    header: dict[str, Any], samples: list[dict[str, Any]], end: dict[str, Any]
+) -> dict[str, Any]:
+    initial_zero = verified_zero_evidence(header.get("verified_zero"), "capture start")
+    final_zero = verified_zero_evidence(end.get("verified_zero"), "capture end")
+    if final_zero["command_sequence"] <= initial_zero["command_sequence"]:
+        raise ValueError("capture end verified zero command is not newer than capture start")
+    if final_zero["adapter_sample_sequence"] <= initial_zero["adapter_sample_sequence"]:
+        raise ValueError("capture end verified zero sample is not newer than capture start")
     health_ok = all(event["health"].get("ok") is True for event in samples)
     tracking = all(event["provider"].get("state") == "tracking" for event in samples)
     sensors_ok = all(
@@ -141,7 +176,8 @@ def generic_metrics(samples: list[dict[str, Any]], end: dict[str, Any]) -> dict[
             max(imu_ages) <= 1000,
             covariance_recorded,
             end.get("ok") is True,
-            end.get("final_motor_stop") is True,
+            initial_zero["acknowledged"] is True,
+            final_zero["acknowledged"] is True,
         )
     )
     return {
@@ -154,7 +190,7 @@ def generic_metrics(samples: list[dict[str, Any]], end: dict[str, Any]) -> dict[
         "max_lidar_age_ms": max(lidar_ages),
         "max_imu_age_ms": max(imu_ages),
         "covariance_recorded": covariance_recorded,
-        "stop_events": {"initial": True, "final": end.get("final_motor_stop") is True},
+        "stop_events": {"initial": initial_zero, "final": final_zero},
         "resource_samples": len(samples),
     }
 
@@ -207,7 +243,7 @@ def analyze_one(path: pathlib.Path, profile: dict[str, Any]) -> dict[str, Any]:
     if header.get("profile") != profile["profile"] or header.get("calibration_sha256") != profile_digest:
         raise ValueError(f"{path} was not captured with the supplied calibration profile")
     first_pose, last_pose = pose(samples[0]), pose(samples[-1])
-    generic = generic_metrics(samples, end)
+    generic = generic_metrics(header, samples, end)
     replay = replay_metrics(path, end)
     phase = header["phase"]
     wheels = profile["wheels"]

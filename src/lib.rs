@@ -99,10 +99,11 @@ pub use types::{
     Quaternion, RangeScanStatus, ResourceSample, RunLogEntry, SavedWaypoint, SavedWaypointList,
     SensorContractError, SensorDataStatus, SpatialMemoryEntry, SpatialMemoryKind,
     SpatialMemoryStatus, SpeedMode, TelemetryContractError, TelemetryFrame, TelemetryStreamFrame,
-    Twist2d, Vector3Si, VisionResult, VisualizationFrame, VisualizationPath, ZoneBoundaryPoint,
-    COST_FREE, COST_LETHAL, COST_UNKNOWN, LOCALIZATION_FRAME_VERSION,
-    MAX_IMU_ANGULAR_VELOCITY_RADPS, MAX_IMU_LINEAR_ACCELERATION_MPS2, OCCUPANCY_FREE,
-    OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+    Twist2d, Vector3Si, VerifiedZeroEvidence, VisionResult, VisualizationFrame, VisualizationPath,
+    ZeroCommandReason, ZoneBoundaryPoint, COST_FREE, COST_LETHAL, COST_UNKNOWN,
+    LOCALIZATION_FRAME_VERSION, MAX_IMU_ANGULAR_VELOCITY_RADPS, MAX_IMU_LINEAR_ACCELERATION_MPS2,
+    OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, OCCUPANCY_UNKNOWN, SENSOR_CONTRACT_VERSION,
+    VISUALIZATION_FRAME_VERSION,
 };
 pub use worker::{
     simulated_perception_worker_status, ExternalWorkerSpec, ExternalWorkerState,

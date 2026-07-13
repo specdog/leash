@@ -11391,6 +11391,51 @@
       "title": "Vector3Si",
       "type": "object"
     },
+    "VerifiedZeroEvidence": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "acknowledged": {
+          "type": "boolean"
+        },
+        "adapter_sample_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "command_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "confirmation_received_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "write_completed_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command_sequence",
+        "write_completed_at_ms",
+        "acknowledged",
+        "adapter_sample_sequence",
+        "confirmation_received_at_ms",
+        "source",
+        "statement"
+      ],
+      "title": "VerifiedZeroEvidence",
+      "type": "object"
+    },
     "VisionResult": {
       "$defs": {
         "DetectionFrame": {
@@ -13548,6 +13593,18 @@
         }
       ],
       "title": "WorkerOutputPayload"
+    },
+    "ZeroCommandReason": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "operator-request",
+        "calibration-entry",
+        "calibration-exit",
+        "map-reload-entry",
+        "map-reload-exit"
+      ],
+      "title": "ZeroCommandReason",
+      "type": "string"
     },
     "ZoneBoundaryPoint": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

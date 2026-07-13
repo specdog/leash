@@ -48,7 +48,10 @@ use crate::types::{AgentMessageAck, AgentMessageList};
 #[cfg(feature = "webrtc")]
 use crate::webrtc_camera::{camera_webrtc_status, camera_webrtc_ws};
 use crate::{
-    runtime::Harness, transport::StreamRecvError, types::SpeedMode, LocalizationProviderUpdate,
+    runtime::Harness,
+    transport::StreamRecvError,
+    types::{SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
+    LocalizationProviderUpdate,
 };
 
 static CAMERA_PROCESS_LOCK: LazyLock<Arc<TokioMutex<()>>> =
@@ -203,6 +206,11 @@ struct EstopResetReq {
 }
 
 #[derive(Debug, Deserialize)]
+struct VerifiedStopReq {
+    reason: ZeroCommandReason,
+}
+
+#[derive(Debug, Deserialize)]
 struct AgentMessageReq {
     text: String,
     source: Option<String>,
@@ -278,7 +286,9 @@ pub fn router(harness: Harness) -> Router {
         .route("/drive", post(drive))
         .route("/motors/drive", post(drive))
         .route("/motors/stop", post(motors_stop))
+        .route("/motors/stop/verified", post(motors_stop_verified))
         .route("/stop", post(motors_stop))
+        .route("/stop/verified", post(motors_stop_verified))
         .route("/estop", post(estop))
         .route("/estop/reset", post(estop_reset))
         .route("/stream", get(stream))
@@ -1567,6 +1577,19 @@ async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, Http
     ))
 }
 
+async fn motors_stop_verified(
+    State(harness): State<Harness>,
+    request: Option<Json<VerifiedStopReq>>,
+) -> Result<Json<VerifiedZeroEvidence>, HttpError> {
+    let reason = request
+        .map(|Json(request)| request.reason)
+        .unwrap_or(ZeroCommandReason::OperatorRequest);
+    let evidence = tokio::task::spawn_blocking(move || harness.stop_verified(reason))
+        .await
+        .map_err(|error| anyhow::anyhow!("verified zero task failed: {error}"))??;
+    Ok(Json(evidence))
+}
+
 async fn estop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
     Ok(Json(
         harness.capability_registry().invoke_value_with_origin(
@@ -1757,8 +1780,8 @@ mod tests {
     };
 
     use super::{
-        camera_activity, localization_authorized, localization_update, CameraRuntimeState,
-        CAMERA_RUNTIME_STATE,
+        camera_activity, localization_authorized, localization_update, motors_stop_verified,
+        CameraRuntimeState, CAMERA_RUNTIME_STATE,
     };
     use crate::{Harness, HarnessConfig, LocalizationProviderUpdate};
     use tokio::sync::Mutex;
@@ -1820,6 +1843,23 @@ mod tests {
             HeaderValue::from_static("Bearer bridge-secret"),
         );
         assert!(localization_authorized(&headers, "bridge-secret"));
+    }
+
+    #[tokio::test]
+    async fn verified_zero_stop_is_not_exposed_as_an_agent_capability() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        assert!(harness
+            .capability_registry()
+            .descriptors()
+            .iter()
+            .all(|descriptor| descriptor.name != "stop_verified"));
+
+        let error = motors_stop_verified(State(harness), None)
+            .await
+            .unwrap_err()
+            .0
+            .to_string();
+        assert!(error.contains("Waveshare UGV physical adapter"));
     }
 
     #[tokio::test]

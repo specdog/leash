@@ -42,6 +42,18 @@ def candidate_profile() -> dict:
     }
 
 
+def verified_zero(command_sequence: int, adapter_sample_sequence: int) -> dict:
+    return {
+        "command_sequence": command_sequence,
+        "write_completed_at_ms": 1_700_000_000_000 + command_sequence,
+        "acknowledged": True,
+        "adapter_sample_sequence": adapter_sample_sequence,
+        "confirmation_received_at_ms": 1_700_000_000_100 + command_sequence,
+        "source": "waveshare-ugv",
+        "statement": "zero command confirmed",
+    }
+
+
 def sample(
     elapsed_ms: int,
     x_m: float = 0.0,
@@ -106,6 +118,7 @@ class CalibrationTests(unittest.TestCase):
         expected_distance_m: float | None = None,
         expected_turn_deg: float = 360.0,
         expected_side_m: float | None = None,
+        legacy_zero: bool = False,
     ) -> dict:
         digest = __import__("hashlib").sha256(canonical_bytes(profile)).hexdigest()
         repository = pathlib.Path(__file__).resolve().parents[4]
@@ -129,12 +142,21 @@ class CalibrationTests(unittest.TestCase):
                 "expected_distance_m": expected_distance_m,
                 "expected_turn_deg": expected_turn_deg,
                 "expected_side_m": expected_side_m,
+                **(
+                    {"initial_motor_stop": True}
+                    if legacy_zero
+                    else {"verified_zero": verified_zero(1, 10)}
+                ),
             },
             *samples,
             {
                 "kind": "capture-end",
                 "ok": True,
-                "final_motor_stop": True,
+                **(
+                    {"final_motor_stop": True}
+                    if legacy_zero
+                    else {"verified_zero": verified_zero(2, 11)}
+                ),
                 "replay": {
                     "file": "capture-replay.jsonl",
                     "sha256": replay_digest,
@@ -164,6 +186,35 @@ class CalibrationTests(unittest.TestCase):
         accepted["measurement"]["evidence_sha256"] = ["a" * 64]
         validate(accepted, require_accepted=True)
         self.assertEqual(canonical_bytes(candidate), canonical_bytes(accepted))
+
+    def test_capture_tool_records_typed_verified_zero(self):
+        repository = pathlib.Path(__file__).resolve().parents[4]
+        script = (repository / "implementations/waveshare-ugv/calibration/capture.sh").read_text()
+
+        self.assertIn('verified_stop calibration-entry', script)
+        self.assertIn('verified_stop calibration-exit', script)
+        self.assertIn('verified_zero:$verified_zero', script)
+        self.assertNotIn('initial_motor_stop:true', script)
+        self.assertNotIn('final_motor_stop:true', script)
+
+    def test_map_reload_proof_records_typed_verified_zero(self):
+        repository = pathlib.Path(__file__).resolve().parents[4]
+        script = (
+            repository / "implementations/waveshare-ugv/calibration/map-reload-proof.sh"
+        ).read_text()
+
+        self.assertIn('verified_stop map-reload-entry', script)
+        self.assertIn('verified_stop map-reload-exit', script)
+        self.assertNotIn('final_motor_stop:true', script)
+
+    def test_analysis_rejects_legacy_boolean_only_stop_evidence(self):
+        with self.assertRaisesRegex(ValueError, "verified zero"):
+            self.capture_result(
+                candidate_profile(),
+                "stationary",
+                [sample(0), sample(60_000)],
+                legacy_zero=True,
+            )
 
     def test_stationary_capture_accepts_bounded_drift(self):
         profile = candidate_profile()

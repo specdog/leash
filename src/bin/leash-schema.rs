@@ -34,8 +34,8 @@ use leash_harness::{
         PoseWithCovariance2d, Quaternion, RangeScanStatus, RawFrameStatus, ResourceSample,
         RunLogEntry, SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorDataStatus,
         SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
-        TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si, VisionResult, VisualizationFrame,
-        VisualizationPath, ZoneBoundaryPoint,
+        TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si, VerifiedZeroEvidence,
+        VisionResult, VisualizationFrame, VisualizationPath, ZeroCommandReason, ZoneBoundaryPoint,
     },
     worker::{
         ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
@@ -159,6 +159,8 @@ fn schema_document() -> Result<Value> {
     insert::<InvocationOrigin>(&mut schemas, "InvocationOrigin")?;
     insert::<CaptureResult>(&mut schemas, "CaptureResult")?;
     insert::<DriveOutcome>(&mut schemas, "DriveOutcome")?;
+    insert::<ZeroCommandReason>(&mut schemas, "ZeroCommandReason")?;
+    insert::<VerifiedZeroEvidence>(&mut schemas, "VerifiedZeroEvidence")?;
     insert::<PlannerGoal>(&mut schemas, "PlannerGoal")?;
     insert::<PlannerStatus>(&mut schemas, "PlannerStatus")?;
     insert::<PatrolStrategy>(&mut schemas, "PatrolStrategy")?;

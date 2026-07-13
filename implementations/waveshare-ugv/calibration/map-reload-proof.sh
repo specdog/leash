@@ -63,6 +63,13 @@ compose() {
 stop_leash() {
   curl -fsS -X POST "$leash_url/stop" >/dev/null
 }
+verified_stop() {
+  local reason="$1"
+  curl -fsS -X POST \
+    -H 'Content-Type: application/json' \
+    --data "{\"reason\":\"$reason\"}" \
+    "$leash_url/stop/verified"
+}
 wait_for_tracking() {
   local deadline=$(( $(date +%s) + timeout_secs ))
   while (( $(date +%s) < deadline )); do
@@ -79,7 +86,7 @@ mkdir -p "$(dirname "$output")"
 chmod 700 "$(dirname "$output")"
 umask 077
 trap 'stop_leash || true' EXIT
-stop_leash
+entry_verified_zero="$(verified_stop map-reload-entry)"
 
 leash_pid="$(systemctl --user show leash.service -p MainPID --value)"
 [[ "$leash_pid" =~ ^[1-9][0-9]*$ ]] || { echo "Leash service has no main PID" >&2; exit 1; }
@@ -123,7 +130,7 @@ container_state="$(docker inspect "$container_id" | jq '.[0] | {running:.State.R
   echo "SLAM container is unhealthy after reload" >&2
   exit 1
 }
-stop_leash
+exit_verified_zero="$(verified_stop map-reload-exit)"
 
 jq -n \
   --arg profile "$profile_name" \
@@ -135,7 +142,9 @@ jq -n \
   --argjson before "$before" \
   --argjson after "$after" \
   --argjson container "$container_state" \
-  '{ok:true,format:"leash-waveshare-ugv-map-reload-proof-v1",profile:$profile,calibration_sha256:$calibration_sha256,map_name:$map_name,clock:{proof:$clock_proof,initial_skew_secs:$clock_skew_secs},leash:{pid:$leash_pid,unchanged:true,final_motor_stop:true},saved_files:["posegraph","data","yaml","pgm"],before:{map:$before.localization.map,pose:$before.localization.pose},after:{map:$after.localization.map,pose:$after.localization.pose},container:$container,recorder_issues_motion:false}' \
+  --argjson entry_verified_zero "$entry_verified_zero" \
+  --argjson exit_verified_zero "$exit_verified_zero" \
+  '{ok:true,format:"leash-waveshare-ugv-map-reload-proof-v1",profile:$profile,calibration_sha256:$calibration_sha256,map_name:$map_name,clock:{proof:$clock_proof,initial_skew_secs:$clock_skew_secs},leash:{pid:$leash_pid,unchanged:true,entry_verified_zero:$entry_verified_zero,exit_verified_zero:$exit_verified_zero},saved_files:["posegraph","data","yaml","pgm"],before:{map:$before.localization.map,pose:$before.localization.pose},after:{map:$after.localization.map,pose:$after.localization.pose},container:$container,recorder_issues_motion:false}' \
   > "$output"
 chmod 600 "$output"
 printf '{"ok":true,"map_name":"%s","output":"%s","recorder_issues_motion":false}\n' "$map_name" "$output"

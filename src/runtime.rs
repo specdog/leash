@@ -54,15 +54,17 @@ use crate::{
         PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
         PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
         SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-        VoxelCell, VoxelGridFrame, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
-        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
-        VOXEL_GRID_VERSION,
+        TelemetryStreamFrame, Twist2d, VerifiedZeroEvidence, VisionResult, VisualizationFrame,
+        VisualizationPath, VoxelCell, VoxelGridFrame, ZeroCommandReason, COST_FREE, COST_LETHAL,
+        LOCALIZATION_FRAME_VERSION, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION,
+        VISUALIZATION_FRAME_VERSION, VOXEL_GRID_VERSION,
     },
 };
 
 const AGENT_MESSAGE_LIMIT: usize = 128;
 const DASHBOARD_EVENT_LIMIT: usize = 64;
+const VERIFIED_ZERO_TIMEOUT_MS: u64 = 750;
+const VERIFIED_ZERO_POLL_MS: u64 = 5;
 const PLANNER_GRID_WIDTH: usize = 4;
 const PLANNER_GRID_HEIGHT: usize = 4;
 const PLANNER_GRID_CELLS: usize = PLANNER_GRID_WIDTH * PLANNER_GRID_HEIGHT;
@@ -122,7 +124,6 @@ pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
         Ok(())
     }
 
-    #[cfg(feature = "waveshare-ugv")]
     fn request_telemetry(&self) -> Result<()> {
         Ok(())
     }
@@ -244,6 +245,12 @@ struct CommandState {
     soft_odometry_limited: bool,
 }
 
+#[derive(Debug, Default)]
+struct CommandIoState {
+    sequence: u64,
+    verified_zero_in_progress: bool,
+}
+
 #[cfg(feature = "physical-navigation")]
 #[derive(Debug, Clone)]
 struct PhysicalNavigationLease {
@@ -274,6 +281,7 @@ struct RawTelemetry {
     odometry_left: Option<f64>,
     odometry_right: Option<f64>,
     source: String,
+    adapter_sample_sequence: u64,
     last_raw_frame_ms: Option<u128>,
     last_raw_payload: Option<Value>,
     range_scan: RangeScanStatus,
@@ -289,6 +297,7 @@ impl RawTelemetry {
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
             source: "sim".to_string(),
+            adapter_sample_sequence: 0,
             last_raw_frame_ms: Some(ts_ms),
             last_raw_payload: None,
             range_scan: simulated_range_scan(ts_ms),
@@ -303,6 +312,7 @@ impl RawTelemetry {
             odometry_left: None,
             odometry_right: None,
             source: source.to_string(),
+            adapter_sample_sequence: 0,
             last_raw_frame_ms: None,
             last_raw_payload: None,
             range_scan: RangeScanStatus {
@@ -323,6 +333,7 @@ impl RawTelemetry {
             odometry_left: None,
             odometry_right: None,
             source: "replay".to_string(),
+            adapter_sample_sequence: 0,
             last_raw_frame_ms: None,
             last_raw_payload: None,
             range_scan: RangeScanStatus {
@@ -342,6 +353,7 @@ pub struct Harness {
     config: HarnessConfig,
     started_at: Instant,
     driver: Arc<dyn RobotDriver>,
+    command_io: Arc<Mutex<CommandIoState>>,
     command: Arc<Mutex<CommandState>>,
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
@@ -473,6 +485,7 @@ impl Harness {
             config,
             started_at: Instant::now(),
             driver,
+            command_io: Arc::new(Mutex::new(CommandIoState::default())),
             command: Arc::new(Mutex::new(CommandState::default())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
@@ -1635,6 +1648,116 @@ impl Harness {
             && self.physical_actuation_enabled()
     }
 
+    fn write_drive_command(&self, left: f64, right: f64) -> Result<u64> {
+        let mut io = self.command_io.lock();
+        if io.verified_zero_in_progress && (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
+        {
+            return Err(anyhow!(
+                "drive blocked while verified zero confirmation is pending"
+            ));
+        }
+        self.driver.drive(left, right)?;
+        io.sequence = io.sequence.saturating_add(1);
+        Ok(io.sequence)
+    }
+
+    fn write_stop_command(&self) -> Result<u64> {
+        let mut io = self.command_io.lock();
+        self.driver.stop()?;
+        io.sequence = io.sequence.saturating_add(1);
+        Ok(io.sequence)
+    }
+
+    pub fn stop_verified(&self, reason: ZeroCommandReason) -> Result<VerifiedZeroEvidence> {
+        if self.config.profile != Profile::WaveshareUgv {
+            return Err(anyhow!(
+                "verified zero is available only for the Waveshare UGV physical adapter"
+            ));
+        }
+
+        self.clear_physical_navigation_lease();
+        self.cancel_patrol_state("verified-zero", "patrol movement stopped for verified zero");
+        self.cancel_planner_state(
+            "verified-zero",
+            "planner movement stopped for verified zero",
+        );
+        self.sessions.lock().clear();
+        self.command.lock().active_session_id = None;
+
+        let previous_adapter_sequence = self.raw.read().adapter_sample_sequence;
+        let write_result = {
+            let mut io = self.command_io.lock();
+            if io.verified_zero_in_progress {
+                Err(anyhow!("verified zero confirmation is already pending"))
+            } else {
+                io.verified_zero_in_progress = true;
+                match self.driver.stop() {
+                    Err(error) => {
+                        io.verified_zero_in_progress = false;
+                        Err(anyhow!(
+                            "verified zero write failed for {reason:?}: {error}; use the physical E-stop"
+                        ))
+                    }
+                    Ok(()) => {
+                        io.sequence = io.sequence.saturating_add(1);
+                        let command_sequence = io.sequence;
+                        let write_completed_at_ms = now_ms();
+                        match self.driver.request_telemetry() {
+                            Ok(()) => Ok((command_sequence, write_completed_at_ms)),
+                            Err(error) => {
+                                io.verified_zero_in_progress = false;
+                                Err(anyhow!(
+                                    "verified zero telemetry request failed for {reason:?}: {error}; use the physical E-stop"
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        let (command_sequence, write_completed_at_ms) = write_result?;
+        {
+            let mut command = self.command.lock();
+            command.left_cmd = 0.0;
+            command.right_cmd = 0.0;
+            command.last_cmd_at = Some(Instant::now());
+            command.stopped_by_deadman = false;
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(VERIFIED_ZERO_TIMEOUT_MS);
+        loop {
+            let (adapter_sample_sequence, sample_received_at_ms, source) = {
+                let raw = self.raw.read();
+                (
+                    raw.adapter_sample_sequence,
+                    raw.last_raw_frame_ms,
+                    raw.source.clone(),
+                )
+            };
+            if adapter_sample_sequence > previous_adapter_sequence
+                && sample_received_at_ms.is_some_and(|received| received >= write_completed_at_ms)
+            {
+                self.command_io.lock().verified_zero_in_progress = false;
+                return Ok(VerifiedZeroEvidence {
+                    command_sequence,
+                    write_completed_at_ms,
+                    acknowledged: true,
+                    adapter_sample_sequence,
+                    confirmation_received_at_ms: sample_received_at_ms.unwrap(),
+                    source,
+                    statement: "zero command confirmed".to_string(),
+                });
+            }
+            if Instant::now() >= deadline {
+                self.command_io.lock().verified_zero_in_progress = false;
+                return Err(anyhow!(
+                    "verified zero confirmation timed out after {VERIFIED_ZERO_TIMEOUT_MS} ms for {reason:?}; use the physical E-stop"
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(VERIFIED_ZERO_POLL_MS));
+        }
+    }
+
     pub fn authorize(&self, token: String, ttl_secs: u64, speed_mode: SpeedMode) -> Result<()> {
         let token = token.trim().to_string();
         if token.is_empty() {
@@ -1650,7 +1773,7 @@ impl Harness {
                 && (command.left_cmd != 0.0 || command.right_cmd != 0.0)
         };
         if should_stop_previous_owner {
-            self.driver.stop()?;
+            self.write_stop_command()?;
             let mut command = self.command.lock();
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
@@ -1736,7 +1859,7 @@ impl Harness {
             right = 0.0;
         }
 
-        self.driver.drive(left, right)?;
+        self.write_drive_command(left, right)?;
         command.left_cmd = left;
         command.right_cmd = right;
         command.last_cmd_at = Some(Instant::now());
@@ -1794,7 +1917,7 @@ impl Harness {
 
     #[cfg(feature = "waveshare-ugv")]
     fn stop_for_obstacle(&self) -> Result<()> {
-        self.driver.stop()?;
+        self.write_stop_command()?;
         {
             let mut command = self.command.lock();
             command.left_cmd = 0.0;
@@ -1853,7 +1976,7 @@ impl Harness {
     }
 
     fn stop_without_planner_cancel(&self) -> Result<DriveOutcome> {
-        self.driver.stop()?;
+        self.write_stop_command()?;
         let mut command = self.command.lock();
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
@@ -1874,7 +1997,7 @@ impl Harness {
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
-        self.driver.stop()?;
+        self.write_stop_command()?;
         let mut command = self.command.lock();
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
@@ -2067,7 +2190,7 @@ impl Harness {
     }
 
     fn fail_physical_navigation(&self, status: &str, message: &str) {
-        let _ = self.driver.stop();
+        let _ = self.write_stop_command();
         {
             let mut command = self.command.lock();
             command.left_cmd = 0.0;
@@ -2466,7 +2589,7 @@ impl Harness {
                     }
                 };
                 if should_stop {
-                    if let Err(err) = harness.driver.stop() {
+                    if let Err(err) = harness.write_stop_command() {
                         warn!(?err, "deadman stop failed");
                     }
                     let mut command = harness.command.lock();
@@ -2601,6 +2724,7 @@ fn apply_waveshare_update(raw: &Arc<RwLock<RawTelemetry>>, update: BaseTelemetry
     if let Some(imu) = update.imu {
         next.imu = imu;
     }
+    next.adapter_sample_sequence = next.adapter_sample_sequence.saturating_add(1);
     next.last_raw_frame_ms = Some(now_ms());
     next.last_raw_payload = Some(update.raw);
 }
@@ -3302,6 +3426,171 @@ mod tests {
 
     #[cfg(feature = "waveshare-ugv")]
     impl GimbalAdapter for RecordingUgvDriver {}
+
+    #[cfg(feature = "waveshare-ugv")]
+    struct VerifiedZeroTestDriver {
+        commands: RecordedCommands,
+        fail_zero: std::sync::atomic::AtomicBool,
+        telemetry_requests: AtomicU64,
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl RobotDriver for VerifiedZeroTestDriver {
+        fn request_telemetry(&self) -> Result<()> {
+            self.telemetry_requests.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl MobileBaseAdapter for VerifiedZeroTestDriver {
+        fn drive(&self, left: f64, right: f64) -> Result<()> {
+            if left == 0.0 && right == 0.0 && self.fail_zero.load(Ordering::Relaxed) {
+                return Err(anyhow!("synthetic zero write failure"));
+            }
+            self.commands.lock().push((left, right));
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    impl GimbalAdapter for VerifiedZeroTestDriver {}
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn verified_zero_harness(fail_zero: bool) -> (Harness, Arc<VerifiedZeroTestDriver>) {
+        let driver = Arc::new(VerifiedZeroTestDriver {
+            commands: Arc::new(Mutex::new(Vec::new())),
+            fail_zero: std::sync::atomic::AtomicBool::new(fail_zero),
+            telemetry_requests: AtomicU64::new(0),
+        });
+        let harness = Harness::new_inner_with_driver(
+            HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_physical_actuation: true,
+                deadman_ms: 5_000,
+                ..HarnessConfig::default()
+            },
+            None,
+            Some(driver.clone()),
+        )
+        .unwrap();
+        (harness, driver)
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn publish_adapter_sample_after_zero(
+        harness: &Harness,
+        commands: RecordedCommands,
+        sequence: u64,
+    ) {
+        let raw = harness.raw.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < deadline {
+                if commands.lock().last() == Some(&(0.0, 0.0)) {
+                    let mut raw = raw.write();
+                    raw.adapter_sample_sequence = sequence;
+                    raw.last_raw_frame_ms = Some(now_ms());
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn verified_zero_requires_a_newer_adapter_sample() {
+        let (harness, driver) = verified_zero_harness(false);
+        harness.raw.write().adapter_sample_sequence = 41;
+        publish_adapter_sample_after_zero(&harness, driver.commands.clone(), 42);
+
+        let evidence = harness
+            .stop_verified(crate::types::ZeroCommandReason::CalibrationExit)
+            .unwrap();
+
+        assert_eq!(evidence.command_sequence, 1);
+        assert!(evidence.acknowledged);
+        assert_eq!(evidence.adapter_sample_sequence, 42);
+        assert_eq!(evidence.statement, "zero command confirmed");
+        assert!(driver.telemetry_requests.load(Ordering::Relaxed) >= 1);
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn verified_zero_rejects_stale_adapter_samples_after_timeout() {
+        let (harness, _) = verified_zero_harness(false);
+        harness.raw.write().adapter_sample_sequence = 42;
+        let started = Instant::now();
+
+        let error = harness
+            .stop_verified(crate::types::ZeroCommandReason::CalibrationExit)
+            .unwrap_err()
+            .to_string();
+
+        assert!(started.elapsed() >= Duration::from_millis(700));
+        assert!(error.contains("physical E-stop"));
+        assert!(!error.contains("physically stopped"));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn verified_zero_reports_write_failure_without_claiming_confirmation() {
+        let (harness, _) = verified_zero_harness(true);
+
+        let error = harness
+            .stop_verified(crate::types::ZeroCommandReason::CalibrationExit)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("synthetic zero write failure"));
+        assert!(error.contains("physical E-stop"));
+        assert!(!error.contains("zero command confirmed"));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn verified_zero_revokes_motion_authority_before_confirmation() {
+        let (harness, driver) = verified_zero_harness(false);
+        harness
+            .authorize("calibration-token".to_string(), 30, SpeedMode::Low)
+            .unwrap();
+        harness
+            .drive(Some("calibration-token"), 0.1, 0.1, Some(SpeedMode::Low))
+            .unwrap();
+        harness.raw.write().adapter_sample_sequence = 10;
+        let authority_revoked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = authority_revoked.clone();
+        let probe = harness.clone();
+        let commands = driver.commands.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < deadline {
+                if commands.lock().last() == Some(&(0.0, 0.0)) {
+                    let command = probe.command.lock();
+                    observed.store(
+                        command.active_session_id.is_none()
+                            && command.left_cmd == 0.0
+                            && command.right_cmd == 0.0,
+                        Ordering::Relaxed,
+                    );
+                    drop(command);
+                    let mut raw = probe.raw.write();
+                    raw.adapter_sample_sequence = 11;
+                    raw.last_raw_frame_ms = Some(now_ms());
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        harness
+            .stop_verified(crate::types::ZeroCommandReason::CalibrationExit)
+            .unwrap();
+
+        assert!(authority_revoked.load(Ordering::Relaxed));
+        assert!(!harness.operator_token_status().active);
+    }
 
     #[cfg(feature = "waveshare-ugv")]
     fn waveshare_sensor_harness() -> (Harness, RecordedCommands) {
