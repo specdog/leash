@@ -141,10 +141,13 @@ orientation remains absent rather than publishing an unverified quaternion.
 Change scales or signed axes only from measured calibration proof for the
 mounted unit.
 
-The versioned Pinkie profile, measurement sequence, non-actuating capture and
-offline acceptance tools are in [`calibration/`](calibration/README.md). The
-checked-in profile stays explicitly unmeasured until the issue #166 field gates
-and evidence digests have passed.
+The versioned Pinkie profile, bounded calibration capture, exact map-lineage
+reload proof, and offline acceptance tools are in
+[`calibration/`](calibration/README.md). The checked-in profile stays explicitly
+unmeasured until the issue #166 field gates pass and its typed acceptance
+manifest digest is recorded. Calibration and mapping acceptance do not claim
+physical autonomous-exploration readiness; that remains gated on the independent
+process-termination, event-loop-stall, and serial-disconnect watchdog proofs.
 
 The LD06 parser accepts the vendor 47-byte `0x54 0x2c` packet, checks CRC-8,
 interpolates its 12 angles from packet start/end, applies the configured body
