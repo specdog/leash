@@ -13,7 +13,7 @@ use crate::types::{
     TelemetryFrame, VisualizationPath, VoxelGridFrame, VOXEL_GRID_VERSION,
 };
 
-pub const LOCALIZATION_PROVIDER_UPDATE_VERSION: &str = "leash-localization-provider-v1";
+pub const LOCALIZATION_PROVIDER_UPDATE_VERSION: &str = "leash-localization-provider-v2";
 pub const DEFAULT_LOCALIZATION_STALE_AFTER_MS: u64 = 1_000;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,6 +34,8 @@ pub enum LocalizationProviderState {
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct LocalizationProviderStatus {
     pub provider: String,
+    #[serde(default)]
+    pub provider_instance_id: Option<String>,
     pub state: LocalizationProviderState,
     #[serde(default)]
     pub sequence: Option<u64>,
@@ -52,6 +54,7 @@ impl Default for LocalizationProviderStatus {
     fn default() -> Self {
         Self {
             provider: "none".to_string(),
+            provider_instance_id: None,
             state: LocalizationProviderState::Unavailable,
             sequence: None,
             generation: 0,
@@ -69,6 +72,7 @@ impl Default for LocalizationProviderStatus {
 pub struct LocalizationProviderUpdate {
     #[serde(default = "default_update_version")]
     pub version: String,
+    pub provider_instance_id: String,
     pub sequence: u64,
     pub localization: LocalizationFrame,
     pub map: MapMetadata,
@@ -85,10 +89,19 @@ impl LocalizationProviderUpdate {
         if self.version != LOCALIZATION_PROVIDER_UPDATE_VERSION {
             return Err(LocalizationProviderError::UnsupportedVersion);
         }
+        if self.provider_instance_id.trim().is_empty()
+            || self.map.map_id.trim().is_empty()
+            || self.map.map_revision.trim().is_empty()
+            || self.map.grid_revision.trim().is_empty()
+            || self.map.frame_id.trim().is_empty()
+        {
+            return Err(LocalizationProviderError::EmptyIdentity);
+        }
         self.localization
             .validate()
             .map_err(|error| LocalizationProviderError::InvalidLocalization(error.to_string()))?;
         if self.localization.map.map_id != self.map.map_id
+            || self.localization.map.map_revision != self.map.map_revision
             || self.localization.map.frame_id != self.map.frame_id
         {
             return Err(LocalizationProviderError::MapIdentityMismatch);
@@ -127,13 +140,25 @@ impl LocalizationProviderUpdate {
     }
 
     pub fn from_telemetry(sequence: u64, telemetry: &TelemetryFrame) -> Self {
+        let mut map = telemetry.map.clone();
+        if map.map_revision.trim().is_empty() {
+            map.map_revision = telemetry.localization.map.map_revision.clone();
+        }
+        if map.grid_revision.trim().is_empty() {
+            map.grid_revision = map.map_revision.clone();
+        }
+        let mut occupancy_grid = telemetry.occupancy_grid.clone();
+        occupancy_grid.metadata = map.clone();
+        let mut costmap = telemetry.costmap.clone();
+        costmap.metadata = map.clone();
         Self {
             version: default_update_version(),
+            provider_instance_id: "leash-internal".to_string(),
             sequence,
             localization: telemetry.localization.clone(),
-            map: telemetry.map.clone(),
-            occupancy_grid: telemetry.occupancy_grid.clone(),
-            costmap: telemetry.costmap.clone(),
+            map,
+            occupancy_grid,
+            costmap,
             path: telemetry.path.clone(),
             voxel_grid: telemetry.voxel_grid.clone(),
         }
@@ -166,6 +191,7 @@ pub enum LocalizationApplyOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalizationProviderError {
     UnsupportedVersion,
+    EmptyIdentity,
     InvalidLocalization(String),
     MapIdentityMismatch,
     GridFrameMismatch,
@@ -183,6 +209,9 @@ impl std::fmt::Display for LocalizationProviderError {
             Self::UnsupportedVersion => {
                 formatter.write_str("unsupported localization provider update version")
             }
+            Self::EmptyIdentity => formatter.write_str(
+                "localization provider instance, map lineage, grid revision, and frame are required",
+            ),
             Self::InvalidLocalization(error) => {
                 write!(formatter, "invalid localization update: {error}")
             }
@@ -266,19 +295,26 @@ impl InProcessLocalizationProvider {
             return Err(error);
         }
         let mut state = self.state.write();
-        if let Some(current_sequence) = state.status.sequence {
-            if update.sequence <= current_sequence {
-                return Ok(LocalizationApplyOutcome::IgnoredOutOfOrder { current_sequence });
+        let provider_instance_changed = state
+            .update
+            .as_ref()
+            .is_some_and(|current| current.provider_instance_id != update.provider_instance_id);
+        if !provider_instance_changed {
+            if let Some(current_sequence) = state.status.sequence {
+                if update.sequence <= current_sequence {
+                    return Ok(LocalizationApplyOutcome::IgnoredOutOfOrder { current_sequence });
+                }
             }
         }
-        let map_changed = state
+        let lineage_changed = state
             .update
             .as_ref()
             .is_none_or(|current| current.localization.map != update.localization.map);
-        if map_changed {
+        if provider_instance_changed || lineage_changed {
             state.status.generation = state.status.generation.saturating_add(1);
         }
         state.status.state = provider_state(update.localization.health.status);
+        state.status.provider_instance_id = Some(update.provider_instance_id.clone());
         state.status.sequence = Some(update.sequence);
         state.status.last_update_ms = update.localization.health.last_update_ms;
         state.status.last_received_ms = Some(received_at_ms);
@@ -591,6 +627,8 @@ mod tests {
         telemetry.localization.pose.as_mut().unwrap().pose.ts_ms = ts_ms;
         telemetry.localization.health.last_update_ms = Some(ts_ms);
         telemetry.map.ts_ms = ts_ms;
+        telemetry.map.map_revision = revision.to_string();
+        telemetry.map.grid_revision = revision.to_string();
         telemetry.map.origin.ts_ms = ts_ms;
         telemetry.occupancy_grid.ts_ms = ts_ms;
         telemetry.occupancy_grid.origin.ts_ms = ts_ms;
@@ -599,6 +637,91 @@ mod tests {
         telemetry.costmap.origin.ts_ms = ts_ms;
         telemetry.costmap.metadata = telemetry.map.clone();
         LocalizationProviderUpdate::from_telemetry(sequence, &telemetry)
+    }
+
+    fn identity_update(
+        map_revision: &str,
+        grid_revision: &str,
+        provider_instance_id: &str,
+        sequence: u64,
+    ) -> LocalizationProviderUpdate {
+        let mut update = update(sequence, map_revision, 100 + sequence as u128);
+        update.provider_instance_id = provider_instance_id.to_string();
+        update.localization.map.map_revision = map_revision.to_string();
+        update.map.map_revision = map_revision.to_string();
+        update.map.grid_revision = grid_revision.to_string();
+        update.occupancy_grid.metadata = update.map.clone();
+        update.costmap.metadata = update.map.clone();
+        update
+    }
+
+    #[tokio::test]
+    async fn ordinary_grid_revision_does_not_increment_provider_generation() {
+        let provider = InProcessLocalizationProvider::new("fixture", 1_000);
+        let first = provider
+            .apply_at(
+                identity_update("lineage-a", "grid-1", "instance-a", 10),
+                1_000,
+            )
+            .unwrap();
+        let second = provider
+            .apply_at(
+                identity_update("lineage-a", "grid-2", "instance-a", 11),
+                1_100,
+            )
+            .unwrap();
+
+        assert_eq!(first, LocalizationApplyOutcome::Applied { generation: 1 });
+        assert_eq!(second, LocalizationApplyOutcome::Applied { generation: 1 });
+        assert_eq!(provider.snapshot(1_100).map.grid_revision, "grid-2");
+    }
+
+    #[tokio::test]
+    async fn provider_instance_rollover_accepts_sequence_reset_and_increments_generation() {
+        let provider = InProcessLocalizationProvider::new("fixture", 1_000);
+        provider
+            .apply_at(
+                identity_update("lineage-a", "grid-1", "instance-a", 40),
+                1_000,
+            )
+            .unwrap();
+
+        assert_eq!(
+            provider
+                .apply_at(
+                    identity_update("lineage-a", "grid-1", "instance-b", 1),
+                    2_000
+                )
+                .unwrap(),
+            LocalizationApplyOutcome::Applied { generation: 2 }
+        );
+        assert_eq!(
+            provider
+                .snapshot(2_000)
+                .status
+                .provider_instance_id
+                .as_deref(),
+            Some("instance-b")
+        );
+    }
+
+    #[tokio::test]
+    async fn lineage_replacement_increments_provider_generation() {
+        let provider = InProcessLocalizationProvider::new("fixture", 1_000);
+        provider
+            .apply_at(
+                identity_update("lineage-a", "grid-1", "instance-a", 1),
+                1_000,
+            )
+            .unwrap();
+        provider
+            .apply_at(
+                identity_update("lineage-b", "grid-1", "instance-a", 2),
+                1_100,
+            )
+            .unwrap();
+
+        assert_eq!(provider.snapshot(1_100).status.generation, 2);
     }
 
     #[tokio::test]

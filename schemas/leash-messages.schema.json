@@ -1158,12 +1158,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -1253,8 +1261,10 @@
           "default": {
             "cell_order": "",
             "frame_id": "",
+            "grid_revision": "",
             "height": 0,
             "map_id": "",
+            "map_revision": "",
             "origin": {
               "frame_id": "",
               "ts_ms": 0,
@@ -2394,8 +2404,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -2563,6 +2575,13 @@
             "provider": {
               "type": "string"
             },
+            "provider_instance_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "sequence": {
               "default": null,
               "format": "uint64",
@@ -2628,12 +2647,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -2690,8 +2717,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -3013,6 +3042,13 @@
         "provider": {
           "type": "string"
         },
+        "provider_instance_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "sequence": {
           "default": null,
           "format": "uint64",
@@ -3067,8 +3103,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -3224,12 +3262,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -3286,8 +3332,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -3528,13 +3576,16 @@
             "ts_ms": 0
           }
         },
+        "provider_instance_id": {
+          "type": "string"
+        },
         "sequence": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "version": {
-          "default": "leash-localization-provider-v1",
+          "default": "leash-localization-provider-v2",
           "type": "string"
         },
         "voxel_grid": {
@@ -3562,6 +3613,7 @@
         }
       },
       "required": [
+        "provider_instance_id",
         "sequence",
         "localization",
         "map",
@@ -3784,12 +3836,20 @@
         "frame_id": {
           "type": "string"
         },
+        "grid_revision": {
+          "default": "",
+          "type": "string"
+        },
         "height": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "map_id": {
+          "type": "string"
+        },
+        "map_revision": {
+          "default": "",
           "type": "string"
         },
         "origin": {
@@ -4673,12 +4733,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -4768,8 +4836,10 @@
           "default": {
             "cell_order": "",
             "frame_id": "",
+            "grid_revision": "",
             "height": 0,
             "map_id": "",
+            "map_revision": "",
             "origin": {
               "frame_id": "",
               "ts_ms": 0,
@@ -7222,8 +7292,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -7599,6 +7671,13 @@
             "provider": {
               "type": "string"
             },
+            "provider_instance_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "sequence": {
               "default": null,
               "format": "uint64",
@@ -7664,12 +7743,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -7782,8 +7869,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -8411,8 +8500,10 @@
             "metadata": {
               "cell_order": "",
               "frame_id": "",
+              "grid_revision": "",
               "height": 0,
               "map_id": "",
+              "map_revision": "",
               "origin": {
                 "frame_id": "",
                 "ts_ms": 0,
@@ -8474,6 +8565,7 @@
             "last_update_ms": null,
             "message": "localization provider unavailable",
             "provider": "none",
+            "provider_instance_id": null,
             "sequence": null,
             "stale_after_ms": 1000,
             "state": "unavailable"
@@ -8484,8 +8576,10 @@
           "default": {
             "cell_order": "",
             "frame_id": "",
+            "grid_revision": "",
             "height": 0,
             "map_id": "",
+            "map_revision": "",
             "origin": {
               "frame_id": "",
               "ts_ms": 0,
@@ -8518,8 +8612,10 @@
             "metadata": {
               "cell_order": "",
               "frame_id": "",
+              "grid_revision": "",
               "height": 0,
               "map_id": "",
+              "map_revision": "",
               "origin": {
                 "frame_id": "",
                 "ts_ms": 0,
@@ -8946,8 +9042,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -9392,6 +9490,13 @@
             "provider": {
               "type": "string"
             },
+            "provider_instance_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "sequence": {
               "default": null,
               "format": "uint64",
@@ -9457,12 +9562,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -9671,8 +9784,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -10269,8 +10384,10 @@
                 "metadata": {
                   "cell_order": "",
                   "frame_id": "",
+                  "grid_revision": "",
                   "height": 0,
                   "map_id": "",
+                  "map_revision": "",
                   "origin": {
                     "frame_id": "",
                     "ts_ms": 0,
@@ -10332,6 +10449,7 @@
                 "last_update_ms": null,
                 "message": "localization provider unavailable",
                 "provider": "none",
+                "provider_instance_id": null,
                 "sequence": null,
                 "stale_after_ms": 1000,
                 "state": "unavailable"
@@ -10342,8 +10460,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -10376,8 +10496,10 @@
                 "metadata": {
                   "cell_order": "",
                   "frame_id": "",
+                  "grid_revision": "",
                   "height": 0,
                   "map_id": "",
+                  "map_revision": "",
                   "origin": {
                     "frame_id": "",
                     "ts_ms": 0,
@@ -10658,8 +10780,10 @@
                 "metadata": {
                   "cell_order": "",
                   "frame_id": "",
+                  "grid_revision": "",
                   "height": 0,
                   "map_id": "",
+                  "map_revision": "",
                   "origin": {
                     "frame_id": "",
                     "ts_ms": 0,
@@ -10727,6 +10851,7 @@
                 "last_update_ms": null,
                 "message": "localization provider unavailable",
                 "provider": "none",
+                "provider_instance_id": null,
                 "sequence": null,
                 "stale_after_ms": 1000,
                 "state": "unavailable"
@@ -10737,8 +10862,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -11022,8 +11149,10 @@
               "metadata": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -11077,6 +11206,7 @@
               "last_update_ms": null,
               "message": "localization provider unavailable",
               "provider": "none",
+              "provider_instance_id": null,
               "sequence": null,
               "stale_after_ms": 1000,
               "state": "unavailable"
@@ -11084,8 +11214,10 @@
             "map": {
               "cell_order": "",
               "frame_id": "",
+              "grid_revision": "",
               "height": 0,
               "map_id": "",
+              "map_revision": "",
               "origin": {
                 "frame_id": "",
                 "ts_ms": 0,
@@ -11104,8 +11236,10 @@
               "metadata": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -11469,8 +11603,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -11771,6 +11907,13 @@
             "provider": {
               "type": "string"
             },
+            "provider_instance_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "sequence": {
               "default": null,
               "format": "uint64",
@@ -11836,12 +11979,20 @@
             "frame_id": {
               "type": "string"
             },
+            "grid_revision": {
+              "default": "",
+              "type": "string"
+            },
             "height": {
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
             },
             "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "default": "",
               "type": "string"
             },
             "origin": {
@@ -11898,8 +12049,10 @@
               "default": {
                 "cell_order": "",
                 "frame_id": "",
+                "grid_revision": "",
                 "height": 0,
                 "map_id": "",
+                "map_revision": "",
                 "origin": {
                   "frame_id": "",
                   "ts_ms": 0,
@@ -12439,8 +12592,10 @@
             "metadata": {
               "cell_order": "",
               "frame_id": "",
+              "grid_revision": "",
               "height": 0,
               "map_id": "",
+              "map_revision": "",
               "origin": {
                 "frame_id": "",
                 "ts_ms": 0,
@@ -12508,6 +12663,7 @@
             "last_update_ms": null,
             "message": "localization provider unavailable",
             "provider": "none",
+            "provider_instance_id": null,
             "sequence": null,
             "stale_after_ms": 1000,
             "state": "unavailable"
@@ -12518,8 +12674,10 @@
           "default": {
             "cell_order": "",
             "frame_id": "",
+            "grid_revision": "",
             "height": 0,
             "map_id": "",
+            "map_revision": "",
             "origin": {
               "frame_id": "",
               "ts_ms": 0,

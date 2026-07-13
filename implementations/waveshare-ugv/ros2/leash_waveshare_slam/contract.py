@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from dataclasses import dataclass
 from typing import Any
+
+from .lineage import grid_revision
 
 LOCALIZATION_HEARTBEAT_INTERVAL_S = 0.5
 
@@ -145,29 +145,24 @@ def imu_contract(status: dict[str, Any]) -> dict[str, Any] | None:
     return values
 
 
-def map_revision(map_sample: dict[str, Any]) -> str:
-    canonical = {
-        "frame_id": map_sample["frame_id"],
-        "width": int(map_sample["width"]),
-        "height": int(map_sample["height"]),
-        "resolution_m": float(map_sample["resolution_m"]),
-        "origin": map_sample["origin"],
-        "cells": [int(value) for value in map_sample["cells"]],
-    }
-    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def build_localization_update(
     sequence: int,
+    provider_instance_id: str,
     map_id: str,
+    map_revision: str,
     map_sample: dict[str, Any],
     pose_sample: dict[str, Any],
     path_sample: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    provider_instance_id = provider_instance_id.strip()
     map_id = map_id.strip()
+    map_revision = map_revision.strip()
+    if not provider_instance_id:
+        raise ValueError("provider instance id cannot be empty")
     if not map_id:
         raise ValueError("map id cannot be empty")
+    if not map_revision:
+        raise ValueError("map revision cannot be empty")
     width = int(map_sample["width"])
     height = int(map_sample["height"])
     cells = [int(value) for value in map_sample["cells"]]
@@ -188,9 +183,12 @@ def build_localization_update(
         "y_m": float(map_sample["origin"]["y_m"]),
         "yaw_rad": float(map_sample["origin"]["yaw_rad"]),
     }
+    current_grid_revision = grid_revision(map_sample)
     metadata = {
         "ts_ms": map_ts_ms,
         "map_id": map_id,
+        "map_revision": map_revision,
+        "grid_revision": current_grid_revision,
         "frame_id": frame_id,
         "width": width,
         "height": height,
@@ -198,7 +196,6 @@ def build_localization_update(
         "origin": origin,
         "cell_order": "row-major",
     }
-    revision = map_revision(map_sample)
     pose = {
         "ts_ms": ts_ms,
         "frame_id": frame_id,
@@ -255,14 +252,15 @@ def build_localization_update(
         "metadata": metadata,
     }
     return {
-        "version": "leash-localization-provider-v1",
+        "version": "leash-localization-provider-v2",
+        "provider_instance_id": provider_instance_id,
         "sequence": int(sequence),
         "localization": {
             "version": "leash-localization-v1",
             "ts_ms": ts_ms,
             "map": {
                 "map_id": map_id,
-                "map_revision": revision,
+                "map_revision": map_revision,
                 "frame_id": frame_id,
             },
             "pose": {

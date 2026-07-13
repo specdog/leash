@@ -2,14 +2,20 @@ import json
 import math
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from leash_waveshare_slam.contract import (
     DifferentialOdometry,
     build_localization_update,
     covariance_3x3,
+    grid_revision,
     imu_contract,
     laser_scan_contract,
     localization_update_due,
+)
+from leash_waveshare_slam.lineage import (
+    create_provider_instance_id,
+    load_active_lineage,
 )
 
 
@@ -83,9 +89,16 @@ class BridgeContractTests(unittest.TestCase):
             ],
         }
         update = build_localization_update(
-            7, "fixture-map", map_sample, pose_sample, path_sample
+            7,
+            "provider-instance-a",
+            "fixture-map",
+            "lineage-a",
+            map_sample,
+            pose_sample,
+            path_sample,
         )
-        self.assertEqual(update["version"], "leash-localization-provider-v1")
+        self.assertEqual(update["version"], "leash-localization-provider-v2")
+        self.assertEqual(update["provider_instance_id"], "provider-instance-a")
         self.assertEqual(update["sequence"], 7)
         self.assertEqual(update["localization"]["health"]["status"], "tracking")
         self.assertEqual(update["occupancy_grid"]["cells"], [-1, 0, 50, 100])
@@ -100,10 +113,113 @@ class BridgeContractTests(unittest.TestCase):
             update["localization"]["pose"]["covariance"],
             [0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03],
         )
-        self.assertEqual(
-            update["localization"]["map"]["map_revision"],
-            build_localization_update(8, "fixture-map", map_sample, pose_sample)["localization"]["map"]["map_revision"],
+        self.assertEqual(update["localization"]["map"]["map_revision"], "lineage-a")
+        self.assertEqual(update["map"]["map_revision"], "lineage-a")
+        self.assertEqual(update["map"]["grid_revision"], grid_revision(map_sample))
+
+    def test_grid_revision_changes_without_changing_map_revision(self):
+        covariance = [0.0] * 36
+        first_map = {
+            "ts_ms": 2_000,
+            "frame_id": "map",
+            "width": 2,
+            "height": 1,
+            "resolution_m": 0.05,
+            "origin": {"x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0},
+            "cells": [0, 100],
+        }
+        second_map = {**first_map, "ts_ms": 2_100, "cells": [0, 50]}
+        pose = {
+            "ts_ms": 2_100,
+            "frame_id": "map",
+            "x_m": 0.0,
+            "y_m": 0.0,
+            "yaw_rad": 0.0,
+            "covariance": covariance,
+        }
+
+        first = build_localization_update(
+            1, "provider-a", "fixture-map", "lineage-a", first_map, pose
         )
+        second = build_localization_update(
+            2, "provider-a", "fixture-map", "lineage-a", second_map, pose
+        )
+
+        self.assertEqual(first["map"]["map_revision"], second["map"]["map_revision"])
+        self.assertNotEqual(first["map"]["grid_revision"], second["map"]["grid_revision"])
+
+    def test_provider_instance_id_is_required(self):
+        covariance = [0.0] * 36
+        map_sample = {
+            "ts_ms": 2_000,
+            "frame_id": "map",
+            "width": 1,
+            "height": 1,
+            "resolution_m": 0.05,
+            "origin": {"x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0},
+            "cells": [0],
+        }
+        pose = {
+            "ts_ms": 2_000,
+            "frame_id": "map",
+            "x_m": 0.0,
+            "y_m": 0.0,
+            "yaw_rad": 0.0,
+            "covariance": covariance,
+        }
+
+        with self.assertRaisesRegex(ValueError, "provider instance"):
+            build_localization_update(1, " ", "fixture-map", "lineage-a", map_sample, pose)
+
+    def test_map_revision_is_not_derived_from_occupancy_cells(self):
+        map_sample = {
+            "ts_ms": 2_000,
+            "frame_id": "map",
+            "width": 1,
+            "height": 1,
+            "resolution_m": 0.05,
+            "origin": {"x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0},
+            "cells": [0],
+        }
+        changed = {**map_sample, "cells": [100]}
+
+        self.assertNotEqual(grid_revision(map_sample), grid_revision(changed))
+
+    def test_active_lineage_requires_exact_typed_manifest(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "active-lineage.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "format": "leash-map-lineage-v1",
+                        "map_id": "fixture-map",
+                        "map_revision": "lineage-a",
+                        "frame_id": "map",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                load_active_lineage(path),
+                {
+                    "format": "leash-map-lineage-v1",
+                    "map_id": "fixture-map",
+                    "map_revision": "lineage-a",
+                    "frame_id": "map",
+                },
+            )
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "lineage"):
+                load_active_lineage(path)
+
+    def test_provider_instance_ids_are_unique_hex_values(self):
+        first = create_provider_instance_id()
+        second = create_provider_instance_id()
+
+        self.assertEqual(len(first), 32)
+        self.assertTrue(all(character in "0123456789abcdef" for character in first))
+        self.assertNotEqual(first, second)
 
     def test_covariance_rejects_wrong_shape(self):
         with self.assertRaisesRegex(ValueError, "36"):

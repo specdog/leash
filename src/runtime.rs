@@ -442,6 +442,7 @@ impl Harness {
             localization_provider.apply_at(
                 LocalizationProviderUpdate {
                     version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    provider_instance_id: "leash-runtime".to_string(),
                     sequence: 1,
                     localization,
                     map,
@@ -1362,6 +1363,7 @@ impl Harness {
             let _ = self.localization_provider.apply_at(
                 LocalizationProviderUpdate {
                     version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    provider_instance_id: "leash-runtime".to_string(),
                     sequence,
                     localization,
                     map,
@@ -2767,6 +2769,8 @@ fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, Costma
     let map = MapMetadata {
         ts_ms,
         map_id: "sim-local".to_string(),
+        map_revision: "sim-grid-v1".to_string(),
+        grid_revision: "sim-grid-v1".to_string(),
         frame_id: "map".to_string(),
         width: 4,
         height: 4,
@@ -3433,6 +3437,7 @@ mod tests {
             .apply_at(
                 LocalizationProviderUpdate {
                     version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    provider_instance_id: "leash-runtime".to_string(),
                     sequence: 1,
                     localization,
                     map,
@@ -3710,6 +3715,10 @@ mod tests {
         let telemetry = harness.telemetry();
         let mut replacement = LocalizationProviderUpdate::from_telemetry(2, &telemetry);
         replacement.localization.map.map_revision = "replacement-map".to_string();
+        replacement.map.map_revision = "replacement-map".to_string();
+        replacement.map.grid_revision = "replacement-grid".to_string();
+        replacement.occupancy_grid.metadata = replacement.map.clone();
+        replacement.costmap.metadata = replacement.map.clone();
         harness
             .localization_provider
             .apply_at(replacement, now_ms())

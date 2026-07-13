@@ -26,6 +26,7 @@ from .contract import (
     laser_scan_contract,
     localization_update_due,
 )
+from .lineage import create_provider_instance_id
 
 
 def env_float(name: str) -> float:
@@ -59,7 +60,11 @@ class LeashRosBridge(Node):
         self._token = token_file.read_text(encoding="utf-8").strip()
         if not self._token:
             raise RuntimeError("localization token file is empty")
-        self._map_id = os.environ.get("LEASH_ROS_MAP_ID", "waveshare-ugv-map")
+        self._map_id = os.environ.get("LEASH_ROS_MAP_ID", "waveshare-ugv-map").strip()
+        self._map_revision = os.environ.get("LEASH_ROS_MAP_REVISION", "").strip()
+        if not self._map_id or not self._map_revision:
+            raise RuntimeError("LEASH_ROS_MAP_ID and LEASH_ROS_MAP_REVISION are required")
+        self._provider_instance_id = create_provider_instance_id()
         self._odometry = DifferentialOdometry(
             env_float("LEASH_ROS_WHEEL_TRACK_M"),
             env_float("LEASH_ROS_WHEEL_SCALE"),
@@ -322,7 +327,9 @@ class LeashRosBridge(Node):
             self._sequence += 1
             update = build_localization_update(
                 self._sequence,
+                self._provider_instance_id,
                 self._map_id,
+                self._map_revision,
                 self._map_sample,
                 self._pose_sample,
                 self._path_sample,

@@ -20,6 +20,7 @@ services:
       LEASH_LOCALIZATION_TOKEN_FILE: /run/secrets/localization_token
       LEASH_ROS_READ_ONLY: "1"
       LEASH_ROS_MAP_ID: ${LEASH_ROS_MAP_ID:-waveshare-ugv-map}
+      LEASH_ROS_MAP_REVISION: ${LEASH_ROS_MAP_REVISION:?set active map lineage revision}
       LEASH_ROS_WHEEL_TRACK_M: ${LEASH_ROS_WHEEL_TRACK_M:?set measured wheel track}
       LEASH_ROS_WHEEL_SCALE: ${LEASH_ROS_WHEEL_SCALE:-1.0}
       LEASH_ROS_SCAN_X_M: ${LEASH_ROS_SCAN_X_M:?set measured lidar x}

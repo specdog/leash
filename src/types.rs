@@ -434,6 +434,10 @@ pub struct MapMetadata {
     #[serde(default)]
     pub ts_ms: u128,
     pub map_id: String,
+    #[serde(default)]
+    pub map_revision: String,
+    #[serde(default)]
+    pub grid_revision: String,
     pub frame_id: String,
     pub width: u32,
     pub height: u32,
@@ -1601,6 +1605,8 @@ mod tests {
         let map = MapMetadata {
             ts_ms: 42,
             map_id: "sim-local".to_string(),
+            map_revision: "sim-map-v1".to_string(),
+            grid_revision: "sim-grid-v1".to_string(),
             frame_id: "map".to_string(),
             width: 2,
             height: 2,
