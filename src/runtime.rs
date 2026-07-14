@@ -17,7 +17,7 @@ use tracing::{debug, warn};
 
 #[cfg(feature = "waveshare-ugv")]
 use crate::waveshare_ugv::{
-    imu_with_freshness, read_base_telemetry_loop, scan_blocks_motion, spawn_ld06_reader,
+    imu_with_freshness, read_base_telemetry_loop, scan_blocks_drive, spawn_ld06_reader,
     with_freshness, BaseTelemetryUpdate, WaveshareSensorConfig, WaveshareUgvDriver,
 };
 
@@ -1712,7 +1712,7 @@ impl Harness {
 
         #[cfg(feature = "waveshare-ugv")]
         if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
-            && self.obstacle_blocks_motion()
+            && self.obstacle_blocks_drive(left, right)
         {
             self.stop_for_obstacle()?;
             return Err(anyhow!(
@@ -1757,7 +1757,7 @@ impl Harness {
     }
 
     #[cfg(feature = "waveshare-ugv")]
-    fn obstacle_blocks_motion(&self) -> bool {
+    fn obstacle_blocks_drive(&self, left: f64, right: f64) -> bool {
         if self.config.profile != Profile::WaveshareUgv {
             return false;
         }
@@ -1771,22 +1771,22 @@ impl Harness {
             return false;
         };
         let status = with_freshness(self.raw.read().range_scan.clone(), now_ms(), stale_after_ms);
-        scan_blocks_motion(&status, threshold_m)
+        scan_blocks_drive(&status, threshold_m, left, right)
     }
 
     #[cfg(feature = "waveshare-ugv")]
     fn enforce_obstacle_stop(&self) {
-        if !self.obstacle_blocks_motion() {
+        let (left, right) = {
+            let command = self.command.lock();
+            (command.left_cmd, command.right_cmd)
+        };
+        if (left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON)
+            || !self.obstacle_blocks_drive(left, right)
+        {
             return;
         }
-        let moving = {
-            let command = self.command.lock();
-            command.left_cmd.abs() > f64::EPSILON || command.right_cmd.abs() > f64::EPSILON
-        };
-        if moving {
-            if let Err(error) = self.stop_for_obstacle() {
-                warn!(?error, "lidar collision stop failed");
-            }
+        if let Err(error) = self.stop_for_obstacle() {
+            warn!(?error, "lidar collision stop failed");
         }
     }
 
@@ -3335,7 +3335,7 @@ mod tests {
         harness.drive(None, 0.1, 0.1, Some(SpeedMode::Low)).unwrap();
 
         let mut blocked = simulated_range_scan(now_ms());
-        blocked.sample.as_mut().unwrap().ranges_m[0] = Some(0.2);
+        blocked.sample.as_mut().unwrap().ranges_m[2] = Some(0.2);
         harness.update_range_scan_status(blocked).unwrap();
         harness.enforce_obstacle_stop();
 
@@ -3347,6 +3347,39 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("lidar collision threshold"));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_collision_gate_allows_escape_away_from_a_rear_obstacle() {
+        let (harness, commands) = waveshare_sensor_harness();
+        let mut rear_blocked = simulated_range_scan(now_ms());
+        let scan = rear_blocked.sample.as_mut().unwrap();
+        scan.angle_min_rad = -std::f64::consts::PI;
+        scan.angle_max_rad = std::f64::consts::PI;
+        scan.angle_increment_rad = std::f64::consts::FRAC_PI_2;
+        scan.ranges_m = vec![Some(0.2), Some(1.0), Some(1.0), Some(1.0), Some(0.2)];
+        scan.intensities = vec![Some(1.0); 5];
+        harness.update_range_scan_status(rear_blocked).unwrap();
+
+        let outcome = harness
+            .drive(None, 0.1, 0.1, Some(SpeedMode::Low))
+            .expect("forward escape should remain available");
+        assert_eq!((outcome.left, outcome.right), (0.1, 0.1));
+
+        let reverse_error = harness
+            .drive(None, -0.1, -0.1, Some(SpeedMode::Low))
+            .unwrap_err()
+            .to_string();
+        assert!(reverse_error.contains("lidar collision threshold"));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+
+        let rotation_error = harness
+            .drive(None, -0.1, 0.1, Some(SpeedMode::Low))
+            .unwrap_err()
+            .to_string();
+        assert!(rotation_error.contains("lidar collision threshold"));
         assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
     }
 
