@@ -944,14 +944,61 @@ pub(crate) fn imu_with_freshness(
     status
 }
 
-pub(crate) fn scan_blocks_motion(status: &RangeScanStatus, threshold_m: f64) -> bool {
-    status.status == SensorDataStatus::Available
-        && status.sample.as_ref().is_some_and(|scan| {
-            scan.ranges_m
-                .iter()
-                .flatten()
-                .any(|range| *range <= threshold_m)
+pub(crate) fn scan_blocks_drive(
+    status: &RangeScanStatus,
+    threshold_m: f64,
+    left: f64,
+    right: f64,
+) -> bool {
+    if status.status != SensorDataStatus::Available
+        || left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON
+    {
+        return false;
+    }
+    let Some(scan) = status.sample.as_ref() else {
+        return false;
+    };
+    let close_at_any_bearing = || {
+        scan.ranges_m
+            .iter()
+            .flatten()
+            .any(|range| *range <= threshold_m)
+    };
+    let linear = (left + right) * 0.5;
+    if linear.abs() <= f64::EPSILON {
+        return close_at_any_bearing();
+    }
+    if !scan.angle_min_rad.is_finite() || !scan.angle_increment_rad.is_finite() {
+        return close_at_any_bearing();
+    }
+    let travel_bearing = if linear > 0.0 {
+        0.0
+    } else {
+        std::f64::consts::PI
+    };
+    let half_sector = std::f64::consts::FRAC_PI_3;
+    scan.ranges_m.iter().enumerate().any(|(index, range)| {
+        range.is_some_and(|range| {
+            range <= threshold_m
+                && wrapped_angle_delta(
+                    scan.angle_min_rad + index as f64 * scan.angle_increment_rad,
+                    travel_bearing,
+                )
+                .abs()
+                    <= half_sector
         })
+    })
+}
+
+fn wrapped_angle_delta(left: f64, right: f64) -> f64 {
+    let mut delta = left - right;
+    while delta > std::f64::consts::PI {
+        delta -= std::f64::consts::TAU;
+    }
+    while delta < -std::f64::consts::PI {
+        delta += std::f64::consts::TAU;
+    }
+    delta
 }
 
 fn sensor_error_status<T>(status: SensorDataStatus, source: &str, error: impl Into<String>) -> T
@@ -1247,10 +1294,46 @@ mod tests {
             }),
             error: None,
         };
-        assert!(scan_blocks_motion(&scan, 0.25));
+        assert!(scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
         scan = with_freshness(scan, 601, 500);
         assert_eq!(scan.status, SensorDataStatus::Stale);
-        assert!(!scan_blocks_motion(&scan, 0.25));
+        assert!(!scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
+    }
+
+    #[test]
+    fn collision_gate_checks_the_travel_sector_and_keeps_rotation_conservative() {
+        let scan = RangeScanStatus {
+            status: SensorDataStatus::Available,
+            source: LD06_SOURCE.to_string(),
+            last_ms: Some(100),
+            sample: Some(PlanarRangeScan {
+                ts_ms: 100,
+                frame_id: "base_scan".to_string(),
+                angle_min_rad: -std::f64::consts::PI,
+                angle_max_rad: std::f64::consts::PI,
+                angle_increment_rad: std::f64::consts::FRAC_PI_4,
+                range_min_m: 0.02,
+                range_max_m: 12.0,
+                ranges_m: vec![
+                    Some(0.2),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(1.0),
+                    Some(0.2),
+                ],
+                intensities: vec![Some(1.0); 9],
+                scan_rate_hz: Some(10.0),
+            }),
+            error: None,
+        };
+        assert!(!scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
+        assert!(scan_blocks_drive(&scan, 0.25, -0.1, -0.1));
+        assert!(scan_blocks_drive(&scan, 0.25, -0.1, 0.1));
+        assert!(!scan_blocks_drive(&scan, 0.25, 0.0, 0.0));
     }
 
     #[test]
