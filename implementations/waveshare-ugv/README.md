@@ -125,7 +125,7 @@ on the already-owned base serial stream.
 | `LEASH_UGV_LIDAR_CLOCKWISE` | `false` | Reverse the raw positive-angle direction. |
 | `LEASH_UGV_LIDAR_BODY_MASKS_DEG` | empty | Comma-separated output-frame sectors such as `170:-170`. |
 | `LEASH_UGV_LIDAR_STALE_MS` | `500` | Maximum scan age before health becomes stale. |
-| `LEASH_UGV_COLLISION_THRESHOLD_M` | `0.25` | Clear, valid return at/below this distance forces stop. |
+| `LEASH_UGV_COLLISION_THRESHOLD_M` | `0.25` | Clear, valid return at/below this distance in the current travel sector forces stop. Forward and reverse use separate 120-degree sectors; in-place rotation remains all-around. |
 | `LEASH_UGV_IMU_FRAME_ID` | `base_link` | Right-handed output body frame. |
 | `LEASH_UGV_IMU_ACCEL_LSB_PER_G` | `8192` | Base-controller acceleration scale. |
 | `LEASH_UGV_IMU_GYRO_DPS_PER_LSB` | `0.0164` | Base-controller gyro scale before conversion to rad/s. |
