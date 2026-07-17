@@ -90,7 +90,8 @@ not give the agent an unrestricted shell or a second path to the motors.
 
 ```mermaid
 flowchart LR
-  prompt["Prompt"] --> agentRuntime["Native agent runtime"]
+  prompt["Prompt"] --> surface["Headful console · headless CLI"]
+  surface --> agentRuntime["Native agent runtime"]
   agentRuntime --> model["Configured model provider"]
   agentRuntime <--> sessions["Durable session store"]
   model --> output["Plain · JSON · streaming JSON"]
@@ -103,6 +104,20 @@ flowchart LR
   safety -- allowed --> adapter["Simulation or gated robot adapter"]
   adapter --> taskLog["Task state + JSONL log"]
 ```
+
+Start headful mode when you want to watch the runtime instead of reading JSON
+in another terminal. This launches the same native HTTP process and opens the
+embedded console—there is no separate frontend service or second agent state:
+
+```bash
+leash agent headful --listen 127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:8000/agent` if the browser does not open automatically.
+Add `--no-open` when starting it on a remote machine. The console shows durable
+sessions, live model turns, supervised tasks and their latest JSONL events,
+the active safety state, and an observe-only capability probe. It reads and
+writes the same `LEASH_STATE_DIR/agent` records as every command below.
 
 Run a named session from a script, then resume it later:
 
@@ -150,6 +165,7 @@ token, runtime, sensor-freshness, deadman, and e-stop check.
 
 | Coding-agent behavior | Leash implementation |
 | --- | --- |
+| Headful operation | Embedded `/agent` console with live sessions, tasks, safety state, and read-only probes |
 | Headless automation | `plain`, `json`, and line-delimited `streaming-json` output |
 | Resume a conversation | Named sessions plus `--continue` for the latest session |
 | Tool permissions | Deny-wins capability allow/deny patterns |

@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::{
     capability::{InvocationOrigin, SafetyClass},
-    daemon::{default_state_dir, is_process_alive, now_ms},
+    daemon::{default_state_dir, is_process_alive, now_ms, stop_process, tail_file, StopOutcome},
     types::AgentModelResponse,
     Harness,
 };
@@ -71,6 +71,69 @@ pub struct AgentRunOutput {
     pub ok: bool,
     pub session: AgentSessionSummary,
     pub turn: AgentTurn,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentConsoleHealth {
+    pub ok: bool,
+    pub role: String,
+    pub profile: String,
+    pub mode: String,
+    pub uptime_ms: u128,
+    pub estop: bool,
+    pub deadman_ok: bool,
+    pub physical_actuation_enabled: bool,
+    pub physical_navigation_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentConsoleCapability {
+    pub name: String,
+    pub module: String,
+    pub safety: SafetyClass,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentTaskSnapshot {
+    pub name: String,
+    pub pid: u32,
+    pub running: bool,
+    pub state: AgentTaskState,
+    pub capability: String,
+    pub args: Value,
+    pub interval_ms: u64,
+    pub max_runs: u64,
+    pub runs: u64,
+    pub permissions: CapabilityPermissions,
+    pub profile: String,
+    pub created_at_ms: u128,
+    pub updated_at_ms: u128,
+    pub last_error: Option<String>,
+    pub recent_events: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AgentRuntimeSnapshot {
+    pub ok: bool,
+    pub ts_ms: u128,
+    pub state_dir: String,
+    pub health: AgentConsoleHealth,
+    pub permissions: CapabilityPermissions,
+    pub sessions: Vec<AgentSessionSummary>,
+    pub selected_session: Option<AgentSession>,
+    pub tasks: Vec<AgentTaskSnapshot>,
+    pub capabilities: Vec<AgentConsoleCapability>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentTaskStopOutput {
+    pub ok: bool,
+    pub outcome: StopOutcome,
+    pub task: AgentTaskRecord,
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +366,53 @@ impl AgentRuntime {
         )
     }
 
+    pub fn snapshot(
+        &self,
+        selected_session_id: Option<&str>,
+        task_log_lines: usize,
+    ) -> Result<AgentRuntimeSnapshot> {
+        let health = self.harness.health();
+        let selected_session = match selected_session_id {
+            Some(id) => self.sessions.read(id)?,
+            None => self.sessions.latest()?,
+        };
+        let task_store = AgentTaskStore::new(self.sessions.root());
+        let tasks = task_store.snapshots(task_log_lines)?;
+        let capabilities = self
+            .harness
+            .capability_registry()
+            .descriptors()
+            .iter()
+            .map(|descriptor| AgentConsoleCapability {
+                name: descriptor.name.clone(),
+                module: descriptor.module.clone(),
+                safety: descriptor.safety,
+            })
+            .collect();
+
+        Ok(AgentRuntimeSnapshot {
+            ok: true,
+            ts_ms: now_ms(),
+            state_dir: self.sessions.root().display().to_string(),
+            health: AgentConsoleHealth {
+                ok: health.ok,
+                role: health.role,
+                profile: health.profile,
+                mode: health.mode,
+                uptime_ms: health.uptime_ms,
+                estop: health.estop,
+                deadman_ok: health.deadman_ok,
+                physical_actuation_enabled: health.physical_actuation_enabled,
+                physical_navigation_enabled: health.physical_navigation_enabled,
+            },
+            permissions: self.permissions.clone(),
+            sessions: self.sessions.list()?,
+            selected_session,
+            tasks,
+            capabilities,
+        })
+    }
+
     pub async fn supervise_task(
         &self,
         store: &AgentTaskStore,
@@ -492,6 +602,55 @@ impl AgentTaskStore {
         Ok(record)
     }
 
+    pub fn snapshots(&self, log_lines: usize) -> Result<Vec<AgentTaskSnapshot>> {
+        self.list()?
+            .into_iter()
+            .map(|record| {
+                let record = self.refresh(record)?;
+                let recent_events = recent_task_events(&record.log_path, log_lines)?;
+                let running = record.running();
+                Ok(AgentTaskSnapshot {
+                    name: record.name,
+                    pid: record.pid,
+                    running,
+                    state: record.state,
+                    capability: record.capability,
+                    args: record.args,
+                    interval_ms: record.interval_ms,
+                    max_runs: record.max_runs,
+                    runs: record.runs,
+                    permissions: record.permissions,
+                    profile: record.profile,
+                    created_at_ms: record.created_at_ms,
+                    updated_at_ms: record.updated_at_ms,
+                    last_error: record.last_error,
+                    recent_events,
+                })
+            })
+            .collect()
+    }
+
+    pub fn stop(&self, name: &str, graceful_timeout: Duration) -> Result<AgentTaskStopOutput> {
+        let mut record = self
+            .read(name)?
+            .ok_or_else(|| anyhow!("agent task '{name}' was not found"))?;
+        let outcome = if record.state.is_active() {
+            stop_process(record.pid, graceful_timeout)?
+        } else {
+            StopOutcome::NotRunning
+        };
+        if record.state.is_active() {
+            record.state = AgentTaskState::Cancelled;
+            record.updated_at_ms = now_ms();
+            self.write(&record)?;
+        }
+        Ok(AgentTaskStopOutput {
+            ok: true,
+            outcome,
+            task: record,
+        })
+    }
+
     fn task_dir(&self) -> PathBuf {
         self.root.join("tasks")
     }
@@ -500,6 +659,16 @@ impl AgentTaskStore {
         validate_name(name, "agent task")?;
         Ok(self.task_dir().join(format!("{name}.json")))
     }
+}
+
+fn recent_task_events(path: &Path, lines: usize) -> Result<Vec<Value>> {
+    let text = tail_file(path, lines)?;
+    Ok(text
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|_| json!({ "type": "log", "text": line }))
+        })
+        .collect())
 }
 
 fn contextual_prompt(session: &AgentSession, prompt: &str) -> String {
@@ -672,6 +841,96 @@ mod tests {
 
         assert!(runtime.invoke_capability("health", json!({})).is_ok());
         assert!(runtime.invoke_capability("observe", json!({})).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn console_snapshot_joins_sessions_tasks_health_and_capabilities() {
+        let root = test_root("console-snapshot");
+        let permissions =
+            CapabilityPermissions::new(vec!["planner_*".to_string()], Vec::new()).unwrap();
+        let runtime = AgentRuntime::new(
+            Harness::new(crate::HarnessConfig::default()).unwrap(),
+            AgentSessionStore::new(&root),
+            permissions.clone(),
+        );
+        runtime
+            .run_prompt("report planner state", Some("operator-watch"), false)
+            .unwrap();
+
+        let store = AgentTaskStore::new(&root);
+        let timestamp = now_ms();
+        let log_path = store.log_path("planner-watch").unwrap();
+        store
+            .write(&AgentTaskRecord {
+                format: AGENT_TASK_FORMAT.to_string(),
+                name: "planner-watch".to_string(),
+                pid: process::id(),
+                capability: "planner_status".to_string(),
+                args: json!({}),
+                interval_ms: 2_000,
+                max_runs: 1,
+                runs: 1,
+                state: AgentTaskState::Completed,
+                permissions,
+                profile: "sim".to_string(),
+                log_path: log_path.clone(),
+                created_at_ms: timestamp,
+                updated_at_ms: timestamp,
+                last_result: Some(json!({ "ok": true })),
+                last_error: None,
+            })
+            .unwrap();
+        fs::write(
+            &log_path,
+            serde_json::to_vec(&json!({ "type": "agent.task.run", "run": 1 })).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = runtime.snapshot(Some("operator-watch"), 4).unwrap();
+
+        assert!(snapshot.ok);
+        assert_eq!(snapshot.selected_session.unwrap().id, "operator-watch");
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.tasks.len(), 1);
+        assert_eq!(snapshot.tasks[0].recent_events[0]["run"], 1);
+        assert!(snapshot
+            .capabilities
+            .iter()
+            .any(|capability| capability.name == "health"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stopping_a_completed_task_never_signals_its_stale_pid() {
+        let root = test_root("completed-stop");
+        let store = AgentTaskStore::new(&root);
+        let timestamp = now_ms();
+        store
+            .write(&AgentTaskRecord {
+                format: AGENT_TASK_FORMAT.to_string(),
+                name: "finished".to_string(),
+                pid: process::id(),
+                capability: "health".to_string(),
+                args: json!({}),
+                interval_ms: 1_000,
+                max_runs: 1,
+                runs: 1,
+                state: AgentTaskState::Completed,
+                permissions: CapabilityPermissions::default(),
+                profile: "sim".to_string(),
+                log_path: store.log_path("finished").unwrap(),
+                created_at_ms: timestamp,
+                updated_at_ms: timestamp,
+                last_result: Some(json!({ "ok": true })),
+                last_error: None,
+            })
+            .unwrap();
+
+        let stopped = store.stop("finished", Duration::from_millis(1)).unwrap();
+
+        assert_eq!(stopped.outcome, StopOutcome::NotRunning);
+        assert_eq!(stopped.task.state, AgentTaskState::Completed);
         let _ = fs::remove_dir_all(root);
     }
 

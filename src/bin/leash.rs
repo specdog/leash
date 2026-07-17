@@ -347,6 +347,9 @@ struct AgentArgs {
 
 #[derive(Debug, Subcommand)]
 enum AgentCommand {
+    #[cfg(feature = "http")]
+    /// Start the live browser console for sessions, tasks, and safe capability probes.
+    Headful(AgentHeadfulArgs),
     /// Run one model turn and persist it in a resumable session.
     Run(AgentRunArgs),
     /// List or inspect persisted agent sessions.
@@ -355,6 +358,21 @@ enum AgentCommand {
     Capability(AgentCapabilityArgs),
     /// Start, inspect, log, or stop supervised capability schedules.
     Task(AgentTaskArgs),
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Args)]
+struct AgentHeadfulArgs {
+    /// Address for the embedded Leash HTTP server.
+    #[arg(long, default_value = "127.0.0.1:8000")]
+    listen: SocketAddr,
+
+    /// Print the console URL without opening the system browser.
+    #[arg(long, action = ArgAction::SetTrue)]
+    no_open: bool,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
 }
 
 #[derive(Debug, Args)]
@@ -818,11 +836,54 @@ async fn run_worker(args: WorkerRunArgs) -> Result<()> {
 
 async fn run_agent_command(args: AgentArgs, config_path: Option<PathBuf>) -> Result<()> {
     match args.command {
+        #[cfg(feature = "http")]
+        AgentCommand::Headful(args) => run_agent_headful(args, config_path).await?,
         AgentCommand::Run(args) => run_agent_headless(args, config_path)?,
         AgentCommand::Sessions(args) => run_agent_sessions(args)?,
         AgentCommand::Capability(args) => run_agent_capability(args, config_path)?,
         AgentCommand::Task(args) => run_agent_task(args, config_path).await?,
     }
+    Ok(())
+}
+
+#[cfg(feature = "http")]
+async fn run_agent_headful(args: AgentHeadfulArgs, config_path: Option<PathBuf>) -> Result<()> {
+    let config = config_from_args(args.runtime, Some(args.listen), config_path, None)?;
+    let listen = config.listen;
+    let harness = Harness::new(config)?;
+    let url = format!("http://{listen}/agent");
+    println!("headful agent console: {url}");
+    io::stdout().flush()?;
+
+    if !args.no_open {
+        let browser_url = url.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if let Err(error) = open_system_browser(&browser_url) {
+                eprintln!("could not open the browser automatically: {error}");
+            }
+        });
+    }
+
+    leash_harness::http::serve_http(harness, listen).await
+}
+
+#[cfg(feature = "http")]
+fn open_system_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    anyhow::bail!("automatic browser opening is unsupported on this platform");
+
+    command.arg(url).spawn()?;
     Ok(())
 }
 
@@ -1047,21 +1108,13 @@ fn agent_task_log(args: AgentTaskLogArgs) -> Result<()> {
 
 fn agent_task_stop(args: AgentTaskStopArgs) -> Result<()> {
     let store = AgentTaskStore::from_env()?;
-    let mut record = store
-        .read(&args.name)?
-        .ok_or_else(|| anyhow::anyhow!("agent task '{}' was not found", args.name))?;
-    let outcome = stop_process(record.pid, Duration::from_millis(args.graceful_timeout_ms))?;
-    if record.state.is_active() {
-        record.state = AgentTaskState::Cancelled;
-        record.updated_at_ms = leash_harness::daemon::now_ms();
-        store.write(&record)?;
-    }
+    let stopped = store.stop(&args.name, Duration::from_millis(args.graceful_timeout_ms))?;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
             "ok": true,
-            "outcome": outcome,
-            "task": agent_task_view(record),
+            "outcome": stopped.outcome,
+            "task": agent_task_view(stopped.task),
         }))?
     );
     Ok(())
