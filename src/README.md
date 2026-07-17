@@ -21,6 +21,7 @@ flowchart TB
   lib --> adapter["adapter.rs\nmobile-base, camera, range-scan, and IMU traits"]
   lib --> accelerator["accelerator.rs\nCPU/CUDA probe model"]
   lib --> agent["agent.rs\nagent model provider glue"]
+  lib --> agentruntime["agent_runtime.rs\nsessions, permissions, scheduled tasks"]
   lib --> processing["stream_processing.rs\nbackpressure and filtering helpers"]
   cli["bin/leash.rs\nCLI binary"] --> lib
 ```
@@ -29,6 +30,7 @@ flowchart TB
 
 - `accelerator.rs`: accelerator probe and selection status.
 - `agent.rs`: deterministic/local/OpenAI-compatible agent completion adapter.
+- `agent_runtime.rs`: persistent agent sessions, headless run results, scoped capability permissions, and durable scheduled-task state.
 - `capability.rs`: capability descriptors, safety classes, policy decisions, and invocation.
 - `config.rs`: defaults, env/config/CLI precedence, profiles, and redaction.
 - `daemon.rs`: daemon registry, process lifecycle, and structured log tailing.
