@@ -48,8 +48,9 @@ pub use adapter::{
 };
 pub use agent::complete as complete_agent_prompt;
 pub use agent_runtime::{
-    AgentRunOutput, AgentRuntime, AgentSession, AgentSessionStore, AgentSessionSummary,
-    AgentTaskRecord, AgentTaskState, AgentTaskStore, AgentTurn, CapabilityPermissions,
+    AgentConsoleCapability, AgentConsoleHealth, AgentRunOutput, AgentRuntime, AgentRuntimeSnapshot,
+    AgentSession, AgentSessionStore, AgentSessionSummary, AgentTaskRecord, AgentTaskSnapshot,
+    AgentTaskState, AgentTaskStopOutput, AgentTaskStore, AgentTurn, CapabilityPermissions,
     AGENT_SESSION_FORMAT, AGENT_TASK_FORMAT,
 };
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};

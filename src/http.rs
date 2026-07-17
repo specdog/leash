@@ -14,7 +14,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket},
-        Form, Path as AxumPath, State, WebSocketUpgrade,
+        Form, Path as AxumPath, Query, State, WebSocketUpgrade,
     },
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -40,7 +40,11 @@ use tower_http::cors::CorsLayer;
 use crate::adapter::{
     CameraAdapter, CameraInputConfig, CameraStreamCodec, FfmpegV4l2CameraAdapter,
 };
-use crate::capability::InvocationOrigin;
+use crate::agent_runtime::{
+    AgentRunOutput, AgentRuntime, AgentRuntimeSnapshot, AgentTaskStopOutput, AgentTaskStore,
+    CapabilityPermissions,
+};
+use crate::capability::{InvocationOrigin, SafetyClass};
 use crate::runtime::{
     CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
 };
@@ -209,6 +213,25 @@ struct AgentMessageReq {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct AgentConsoleQuery {
+    session: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentRunReq {
+    prompt: String,
+    session: Option<String>,
+    #[serde(default)]
+    continue_last: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentCapabilityReq {
+    capability: String,
+    args: Option<Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct PatrolZoneStartReq {
     speed_mode: Option<SpeedMode>,
 }
@@ -265,6 +288,10 @@ pub fn router(harness: Harness) -> Router {
         .route("/camera/aim", get(camera_aim_status).post(camera_aim))
         .route("/gimbal/aim", get(camera_aim_status).post(camera_aim))
         .route("/agent", get(agent_page))
+        .route("/agent/state", get(agent_console_state))
+        .route("/agent/run", post(agent_console_run))
+        .route("/agent/capability", post(agent_console_capability))
+        .route("/agent/tasks/:name/stop", post(agent_console_task_stop))
         .route("/agent/messages", get(agent_messages).post(agent_message))
         .route("/agent/send", post(agent_message))
         .route("/capture", post(capture))
@@ -1418,47 +1445,800 @@ async fn agent_message(
     }))
 }
 
+async fn agent_console_state(
+    State(harness): State<Harness>,
+    Query(query): Query<AgentConsoleQuery>,
+) -> Result<Json<AgentRuntimeSnapshot>, HttpError> {
+    let runtime = AgentRuntime::from_env(harness, CapabilityPermissions::from_env()?)?;
+    Ok(Json(runtime.snapshot(query.session.as_deref(), 6)?))
+}
+
+async fn agent_console_run(
+    State(harness): State<Harness>,
+    Json(req): Json<AgentRunReq>,
+) -> Result<Json<AgentRunOutput>, HttpError> {
+    let runtime = AgentRuntime::from_env(harness, CapabilityPermissions::from_env()?)?;
+    Ok(Json(runtime.run_prompt(
+        &req.prompt,
+        req.session.as_deref(),
+        req.continue_last,
+    )?))
+}
+
+async fn agent_console_capability(
+    State(harness): State<Harness>,
+    Json(req): Json<AgentCapabilityReq>,
+) -> Result<Json<Value>, HttpError> {
+    let capability = req.capability.trim();
+    let registry = harness.capability_registry();
+    let descriptor = registry
+        .descriptors()
+        .iter()
+        .find(|descriptor| descriptor.name == capability)
+        .ok_or_else(|| anyhow::anyhow!("unknown capability '{capability}'"))?;
+    if descriptor.safety != SafetyClass::ObserveOnly {
+        return Err(anyhow::anyhow!(
+            "the headful console only probes observe-only capabilities; '{capability}' is {}",
+            descriptor.safety.as_str()
+        )
+        .into());
+    }
+    let args = req.args.unwrap_or_else(|| json!({}));
+    if !args.is_object() {
+        return Err(anyhow::anyhow!("capability args must be a JSON object").into());
+    }
+
+    let runtime = AgentRuntime::from_env(harness, CapabilityPermissions::from_env()?)?;
+    let result = runtime.invoke_capability(capability, args)?;
+    Ok(Json(json!({
+        "ok": true,
+        "capability": capability,
+        "result": result,
+    })))
+}
+
+async fn agent_console_task_stop(
+    AxumPath(name): AxumPath<String>,
+) -> Result<Json<AgentTaskStopOutput>, HttpError> {
+    Ok(Json(
+        AgentTaskStore::from_env()?.stop(&name, Duration::from_secs(2))?,
+    ))
+}
+
 async fn agent_page() -> Response {
     let body = r##"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Leash Agent Input</title>
+  <meta name="color-scheme" content="dark">
+  <title>Leash Agent Console</title>
   <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
-    main { width: min(560px, calc(100vw - 32px)); display: grid; gap: 12px; }
-    h1 { margin: 0; font-size: 20px; font-weight: 650; }
-    textarea { width: 100%; min-height: 120px; box-sizing: border-box; padding: 12px; font: inherit; }
-    button { justify-self: start; padding: 8px 12px; font: inherit; }
-    pre { margin: 0; min-height: 24px; white-space: pre-wrap; }
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      --bg: #080c10;
+      --panel: #0e141a;
+      --panel-raised: #141b22;
+      --panel-hover: #19222b;
+      --border: #26323d;
+      --border-strong: #3a4754;
+      --text: #f4f7fa;
+      --muted: #94a3b2;
+      --quiet: #667585;
+      --accent: #f97316;
+      --accent-strong: #fb923c;
+      --green: #45d483;
+      --red: #ff6868;
+      --amber: #f8bf4f;
+      --blue: #67b6ff;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
+    button, input, select, textarea { font: inherit; }
+    button, select, input { min-height: 44px; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    a { color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+    .topbar {
+      min-height: 64px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8, 12, 16, .96);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: max-content; }
+    .brand-mark {
+      width: 10px;
+      height: 28px;
+      border-radius: 2px;
+      background: var(--accent);
+      box-shadow: 0 0 24px rgba(249, 115, 22, .28);
+    }
+    .brand strong { display: block; font-size: 14px; letter-spacing: .14em; }
+    .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+    .topbar-status { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+    .topbar-status::-webkit-scrollbar { display: none; }
+    .chip {
+      min-height: 28px;
+      padding: 5px 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--panel);
+      font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+    }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--quiet); }
+    .live-dot.ok { background: var(--green); box-shadow: 0 0 0 3px rgba(69, 212, 131, .12); }
+    .live-dot.bad { background: var(--red); }
+    .dashboard-link {
+      min-height: 44px;
+      padding: 0 13px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .dashboard-link:hover { color: var(--text); border-color: var(--border-strong); background: var(--panel); }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(210px, 260px) minmax(420px, 1fr) minmax(290px, 350px);
+    }
+    .rail, .main-console { min-width: 0; min-height: 0; }
+    .rail { background: var(--panel); }
+    .rail-left { border-right: 1px solid var(--border); }
+    .rail-right { border-left: 1px solid var(--border); }
+    .rail-scroll { height: calc(100vh - 65px); overflow-y: auto; padding: 14px; }
+    .section-heading { margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .eyebrow { margin: 0; color: var(--quiet); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h2 { margin-bottom: 0; font-size: 14px; font-weight: 700; }
+    h3 { margin-bottom: 0; font-size: 13px; }
+    .count { color: var(--quiet); font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .button {
+      min-height: 44px;
+      padding: 0 13px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      color: var(--text);
+      background: var(--panel-raised);
+      font-size: 13px;
+      font-weight: 680;
+    }
+    .button:hover:not(:disabled) { background: var(--panel-hover); border-color: #52606d; }
+    .button-primary { border-color: #c9570c; background: var(--accent); color: #160a02; }
+    .button-primary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+    .button-danger { border-color: rgba(255, 104, 104, .45); color: #ffaaaa; background: rgba(255, 104, 104, .06); }
+    .button-small { min-height: 36px; padding: 0 10px; font-size: 12px; }
+    .button-wide { width: 100%; }
+
+    .session-list { display: grid; gap: 6px; margin-top: 10px; }
+    .session-item {
+      width: 100%;
+      min-height: 64px;
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+      text-align: left;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      color: var(--muted);
+      background: transparent;
+    }
+    .session-item:hover { border-color: var(--border); background: var(--panel-hover); color: var(--text); }
+    .session-item.active { border-color: rgba(249, 115, 22, .52); background: rgba(249, 115, 22, .08); color: var(--text); }
+    .session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .session-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 11px; }
+    .empty { padding: 18px 12px; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--quiet); font-size: 12px; line-height: 1.55; }
+    .storage-note { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--quiet); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+
+    .main-console { height: calc(100vh - 65px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: #0a0f14; }
+    .console-header { min-height: 67px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border); }
+    .console-title { min-width: 0; }
+    .console-title h1 { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; }
+    .model-meta { flex: 0 0 auto; color: var(--quiet); font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; white-space: pre-line; }
+    .transcript { min-height: 0; padding: 22px clamp(16px, 4vw, 54px); overflow-y: auto; scroll-behavior: smooth; }
+    .transcript-inner { width: min(820px, 100%); margin: 0 auto; display: grid; gap: 24px; }
+    .turn { display: grid; gap: 12px; }
+    .message-label { margin-bottom: 6px; color: var(--quiet); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .message {
+      max-width: 92%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    .message-operator { justify-self: end; border-color: rgba(249, 115, 22, .35); background: rgba(249, 115, 22, .08); }
+    .operator-wrap { display: grid; justify-items: end; }
+    .message-agent { background: var(--panel); }
+    .turn-time { color: var(--quiet); font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .transcript-empty { min-height: 100%; display: grid; place-items: center; }
+    .transcript-empty-card { width: min(480px, 100%); padding: 22px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); text-align: center; }
+    .transcript-empty-card strong { display: block; margin-bottom: 7px; color: var(--text); font-size: 15px; }
+    .transcript-empty-card span { font-size: 13px; line-height: 1.5; }
+
+    .composer { padding: 12px 18px 16px; border-top: 1px solid var(--border); background: var(--panel); }
+    .composer-inner { width: min(900px, 100%); margin: 0 auto; display: grid; gap: 8px; }
+    .composer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 650; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      color: var(--text);
+      background: #0a0f14;
+    }
+    input, select { padding: 0 11px; }
+    textarea { padding: 11px; resize: vertical; line-height: 1.45; }
+    input::placeholder, textarea::placeholder { color: #596878; }
+    .session-field { max-width: 320px; }
+    .prompt-field { min-height: 78px; max-height: 220px; }
+    .composer-help { display: flex; justify-content: space-between; gap: 12px; color: var(--quiet); font-size: 10px; }
+
+    .ops-section + .ops-section { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+    .health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .metric { min-height: 57px; padding: 9px; border: 1px solid var(--border); border-radius: var(--radius); background: #0a0f14; }
+    .metric span { display: block; color: var(--quiet); font: 650 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-size: 12px; white-space: nowrap; }
+    .metric strong.ok { color: var(--green); }
+    .metric strong.warn { color: var(--amber); }
+    .metric strong.bad { color: var(--red); }
+    .permission-note { margin: 10px 0 0; color: var(--quiet); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+
+    .task-list { display: grid; gap: 8px; }
+    .task-card { padding: 11px; border: 1px solid var(--border); border-radius: var(--radius); background: #0a0f14; }
+    .task-head { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+    .task-name { font: 700 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .state-badge { padding: 4px 6px; border-radius: 4px; background: var(--panel-hover); color: var(--muted); font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+    .state-badge.running { color: var(--green); background: rgba(69, 212, 131, .09); }
+    .state-badge.failed { color: var(--red); background: rgba(255, 104, 104, .09); }
+    .task-stats { margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px; color: var(--quiet); font-size: 10px; }
+    .task-stats strong { color: var(--muted); font-weight: 650; }
+    .task-log { max-height: 100px; margin: 0 0 9px; padding: 8px; overflow: auto; border-left: 2px solid var(--border-strong); color: #a9b6c2; background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; font: 500 9px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .task-error { color: var(--red); }
+
+    .probe-form { display: grid; gap: 9px; }
+    .args-field { min-height: 82px; font: 500 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .probe-output { max-height: 220px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); color: #b9d7ef; background: #080c10; white-space: pre-wrap; overflow-wrap: anywhere; font: 500 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .probe-note { margin: 0; color: var(--quiet); font-size: 10px; line-height: 1.5; }
+    .status-line { min-height: 18px; margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+    .status-line.error { color: var(--red); }
+
+    @media (max-width: 1120px) {
+      .workspace { grid-template-columns: 220px minmax(400px, 1fr) 300px; }
+      .rail-scroll { padding: 11px; }
+    }
+    @media (max-width: 940px) {
+      .workspace { grid-template-columns: 210px minmax(0, 1fr); }
+      .rail-right { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
+      .rail-right .rail-scroll { height: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+      .ops-section + .ops-section { margin-top: 0; padding-top: 0; border-top: 0; }
+    }
+    @media (max-width: 700px) {
+      .topbar { align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; }
+      .brand { flex: 1; }
+      .topbar-status { order: 3; flex-basis: 100%; }
+      .dashboard-link { min-height: 40px; }
+      .workspace { display: block; }
+      .rail-left { border-right: 0; border-bottom: 1px solid var(--border); }
+      .rail-scroll { height: auto; }
+      .session-list { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+      .storage-note { display: none; }
+      .main-console { height: auto; min-height: 72vh; }
+      .transcript { min-height: 44vh; max-height: 62vh; padding: 18px 14px; }
+      .console-header { padding: 10px 14px; }
+      .composer { padding: 11px 14px 14px; }
+      .composer-row { grid-template-columns: 1fr; }
+      .composer-row .button { width: 100%; }
+      .session-field { max-width: none; }
+      .rail-right .rail-scroll { display: grid; grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Leash Agent Input</h1>
-    <form id="agent-form">
-      <textarea id="agent-text" name="text" autofocus required></textarea>
-      <button type="submit">Send</button>
-    </form>
-    <pre id="agent-output"></pre>
-  </main>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand" aria-label="Leash agent console">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span><strong>LEASH</strong><small>AGENT CONSOLE</small></span>
+      </div>
+      <div class="topbar-status" aria-label="Runtime status">
+        <span class="chip"><span id="live-dot" class="live-dot"></span><span id="connection-label">CONNECTING</span></span>
+        <span id="profile-chip" class="chip">PROFILE —</span>
+        <span id="mode-chip" class="chip">MODE —</span>
+        <span id="motion-chip" class="chip">MOTION —</span>
+      </div>
+      <a class="dashboard-link" href="/dashboard">Robot dashboard</a>
+    </header>
+
+    <div class="workspace">
+      <aside class="rail rail-left" aria-label="Agent sessions">
+        <div class="rail-scroll">
+          <div class="section-heading">
+            <div><p class="eyebrow">Persistent state</p><h2>Sessions</h2></div>
+            <span id="session-count" class="count">0</span>
+          </div>
+          <button id="new-session" class="button button-wide" type="button">New session</button>
+          <div id="session-list" class="session-list"></div>
+          <p id="state-path" class="storage-note">Waiting for state directory…</p>
+        </div>
+      </aside>
+
+      <main class="main-console">
+        <header class="console-header">
+          <div class="console-title">
+            <p class="eyebrow">Conversation</p>
+            <h1 id="session-title">New session</h1>
+          </div>
+          <div id="model-meta" class="model-meta">provider —<br>model —</div>
+        </header>
+
+        <section id="transcript" class="transcript" aria-label="Session transcript" aria-live="polite">
+          <div id="transcript-inner" class="transcript-inner"></div>
+        </section>
+
+        <form id="prompt-form" class="composer">
+          <div class="composer-inner">
+            <label class="session-field" for="session-id">Session ID
+              <input id="session-id" name="session" autocomplete="off" maxlength="80" pattern="[A-Za-z0-9_-]+" placeholder="generated when blank">
+            </label>
+            <div class="composer-row">
+              <label for="agent-prompt">Instruction
+                <textarea id="agent-prompt" class="prompt-field" name="prompt" required autofocus placeholder="Ask the configured agent to inspect, reason, or summarize…"></textarea>
+              </label>
+              <button id="run-button" class="button button-primary" type="submit">Run agent</button>
+            </div>
+            <div class="composer-help"><span>Shift + Enter for a new line</span><span id="run-state" role="status" aria-live="polite">Ready</span></div>
+          </div>
+        </form>
+      </main>
+
+      <aside class="rail rail-right" aria-label="Runtime operations">
+        <div class="rail-scroll">
+          <section class="ops-section">
+            <div class="section-heading">
+              <div><p class="eyebrow">Safety boundary</p><h2>Runtime</h2></div>
+            </div>
+            <div class="health-grid">
+              <div class="metric"><span>Harness</span><strong id="health-value">—</strong></div>
+              <div class="metric"><span>Deadman</span><strong id="deadman-value">—</strong></div>
+              <div class="metric"><span>E-stop</span><strong id="estop-value">—</strong></div>
+              <div class="metric"><span>Navigation</span><strong id="navigation-value">—</strong></div>
+            </div>
+            <p id="permissions" class="permission-note">Loading agent permissions…</p>
+          </section>
+
+          <section class="ops-section">
+            <div class="section-heading">
+              <div><p class="eyebrow">Supervised work</p><h2>Tasks</h2></div>
+              <span id="task-count" class="count">0</span>
+            </div>
+            <div id="task-list" class="task-list"></div>
+          </section>
+
+          <section class="ops-section">
+            <div class="section-heading">
+              <div><p class="eyebrow">Read-only tool call</p><h2>Capability probe</h2></div>
+            </div>
+            <form id="probe-form" class="probe-form">
+              <label for="capability-select">Capability
+                <select id="capability-select" required></select>
+              </label>
+              <label for="capability-args">JSON arguments
+                <textarea id="capability-args" class="args-field" spellcheck="false">{}</textarea>
+              </label>
+              <button id="probe-button" class="button" type="submit">Invoke probe</button>
+              <p class="probe-note">This panel accepts observe-only capabilities. Motion is never exposed here.</p>
+              <pre id="probe-output" class="probe-output" aria-live="polite">No probe run yet.</pre>
+            </form>
+          </section>
+          <p id="console-status" class="status-line" role="status" aria-live="polite"></p>
+        </div>
+      </aside>
+    </div>
+  </div>
   <script>
-    const form = document.querySelector("#agent-form");
-    const text = document.querySelector("#agent-text");
-    const output = document.querySelector("#agent-output");
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const response = await fetch("/agent/messages", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: "web", text: text.value })
+    const elements = {
+      liveDot: document.querySelector("#live-dot"),
+      connectionLabel: document.querySelector("#connection-label"),
+      profileChip: document.querySelector("#profile-chip"),
+      modeChip: document.querySelector("#mode-chip"),
+      motionChip: document.querySelector("#motion-chip"),
+      sessionCount: document.querySelector("#session-count"),
+      sessionList: document.querySelector("#session-list"),
+      newSession: document.querySelector("#new-session"),
+      statePath: document.querySelector("#state-path"),
+      sessionTitle: document.querySelector("#session-title"),
+      modelMeta: document.querySelector("#model-meta"),
+      transcript: document.querySelector("#transcript"),
+      transcriptInner: document.querySelector("#transcript-inner"),
+      promptForm: document.querySelector("#prompt-form"),
+      sessionId: document.querySelector("#session-id"),
+      prompt: document.querySelector("#agent-prompt"),
+      runButton: document.querySelector("#run-button"),
+      runState: document.querySelector("#run-state"),
+      health: document.querySelector("#health-value"),
+      deadman: document.querySelector("#deadman-value"),
+      estop: document.querySelector("#estop-value"),
+      navigation: document.querySelector("#navigation-value"),
+      permissions: document.querySelector("#permissions"),
+      taskCount: document.querySelector("#task-count"),
+      taskList: document.querySelector("#task-list"),
+      probeForm: document.querySelector("#probe-form"),
+      capabilitySelect: document.querySelector("#capability-select"),
+      capabilityArgs: document.querySelector("#capability-args"),
+      probeButton: document.querySelector("#probe-button"),
+      probeOutput: document.querySelector("#probe-output"),
+      consoleStatus: document.querySelector("#console-status")
+    };
+
+    let selectedSessionId = new URLSearchParams(window.location.search).get("session");
+    let latestState = null;
+    let refreshing = false;
+    let promptRunning = false;
+    let newSessionDraft = false;
+
+    function textElement(tag, className, text) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      element.textContent = text;
+      return element;
+    }
+
+    function setMetric(element, text, tone) {
+      element.textContent = text;
+      element.className = tone || "";
+    }
+
+    function formatAge(timestamp) {
+      const age = Math.max(0, Date.now() - Number(timestamp));
+      if (age < 1000) return "now";
+      if (age < 60000) return Math.floor(age / 1000) + "s ago";
+      if (age < 3600000) return Math.floor(age / 60000) + "m ago";
+      return Math.floor(age / 3600000) + "h ago";
+    }
+
+    function formatDuration(milliseconds) {
+      const value = Number(milliseconds);
+      if (value < 1000) return value + "ms";
+      if (value < 60000) return (value / 1000).toFixed(value % 1000 === 0 ? 0 : 1) + "s";
+      return (value / 60000).toFixed(1) + "m";
+    }
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      let payload;
+      try {
+        payload = await response.json();
+      } catch (_) {
+        throw new Error("Leash returned an unreadable response (HTTP " + response.status + ")");
+      }
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Request failed (HTTP " + response.status + ")");
+      }
+      return payload;
+    }
+
+    function setConnection(ok, message) {
+      elements.liveDot.className = "live-dot " + (ok ? "ok" : "bad");
+      elements.connectionLabel.textContent = ok ? "LIVE" : "OFFLINE";
+      elements.consoleStatus.textContent = message || (ok ? "State synchronized" : "Connection lost");
+      elements.consoleStatus.className = "status-line" + (ok ? "" : " error");
+    }
+
+    function renderSessions(state) {
+      elements.sessionList.replaceChildren();
+      elements.sessionCount.textContent = String(state.sessions.length);
+      if (state.sessions.length === 0) {
+        elements.sessionList.append(textElement("div", "empty", "No saved sessions yet. Run an instruction to create one."));
+        return;
+      }
+      state.sessions.forEach((session) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "session-item" + (session.id === selectedSessionId ? " active" : "");
+        button.setAttribute("aria-pressed", session.id === selectedSessionId ? "true" : "false");
+        button.append(textElement("span", "session-name", session.id));
+        const meta = document.createElement("span");
+        meta.className = "session-meta";
+        meta.append(textElement("span", "", session.turns + (session.turns === 1 ? " turn" : " turns")));
+        meta.append(textElement("span", "", formatAge(session.updated_at_ms)));
+        button.append(meta);
+        button.addEventListener("click", () => selectSession(session.id));
+        elements.sessionList.append(button);
       });
-      const payload = await response.json();
-      output.textContent = JSON.stringify(payload, null, 2);
-      if (payload.ok) text.value = "";
+    }
+
+    function renderTranscript(session) {
+      elements.transcriptInner.replaceChildren();
+      if (!session || session.turns.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "transcript-empty";
+        const card = document.createElement("div");
+        card.className = "transcript-empty-card";
+        card.append(textElement("strong", "", session ? "Session ready" : "Start a visible agent run"));
+        card.append(textElement("span", "", "Instructions and model responses will appear here while the persisted runtime state updates around them."));
+        empty.append(card);
+        elements.transcriptInner.append(empty);
+        return;
+      }
+      session.turns.forEach((turn) => {
+        const article = document.createElement("article");
+        article.className = "turn";
+
+        const operator = document.createElement("div");
+        operator.className = "operator-wrap";
+        operator.append(textElement("div", "message-label", "Operator · turn " + turn.sequence));
+        operator.append(textElement("div", "message message-operator", turn.prompt));
+        article.append(operator);
+
+        const agent = document.createElement("div");
+        agent.append(textElement("div", "message-label", "Agent"));
+        agent.append(textElement("div", "message message-agent", turn.response.text));
+        agent.append(textElement("div", "turn-time", new Date(Number(turn.started_at_ms)).toLocaleString()));
+        article.append(agent);
+        elements.transcriptInner.append(article);
+      });
+    }
+
+    function taskEventText(task) {
+      if (task.last_error) return task.last_error;
+      if (!task.recent_events || task.recent_events.length === 0) return "No log events yet.";
+      const event = task.recent_events[task.recent_events.length - 1];
+      return JSON.stringify(event, null, 2);
+    }
+
+    function renderTasks(state) {
+      elements.taskList.replaceChildren();
+      elements.taskCount.textContent = String(state.tasks.length);
+      if (state.tasks.length === 0) {
+        elements.taskList.append(textElement("div", "empty", "No supervised tasks in this state directory."));
+        return;
+      }
+      state.tasks.forEach((task) => {
+        const card = document.createElement("article");
+        card.className = "task-card";
+        const head = document.createElement("div");
+        head.className = "task-head";
+        head.append(textElement("span", "task-name", task.name));
+        const badge = textElement("span", "state-badge " + (task.running ? "running" : String(task.state).toLowerCase()), task.state);
+        head.append(badge);
+        card.append(head);
+
+        const stats = document.createElement("div");
+        stats.className = "task-stats";
+        stats.append(textElement("span", "", "CAP  "));
+        stats.lastChild.append(textElement("strong", "", task.capability));
+        stats.append(textElement("span", "", "RUNS  "));
+        stats.lastChild.append(textElement("strong", "", String(task.runs) + (task.max_runs ? " / " + task.max_runs : "")));
+        stats.append(textElement("span", "", "EVERY  "));
+        stats.lastChild.append(textElement("strong", "", formatDuration(task.interval_ms)));
+        stats.append(textElement("span", "", "PID  "));
+        stats.lastChild.append(textElement("strong", "", String(task.pid)));
+        card.append(stats);
+
+        const log = textElement("pre", "task-log" + (task.last_error ? " task-error" : ""), taskEventText(task));
+        card.append(log);
+        if (task.running) {
+          const stop = textElement("button", "button button-danger button-small", "Stop task");
+          stop.type = "button";
+          stop.addEventListener("click", () => stopTask(task.name, stop));
+          card.append(stop);
+        }
+        elements.taskList.append(card);
+      });
+    }
+
+    function renderCapabilities(state) {
+      const previous = elements.capabilitySelect.value;
+      const capabilities = state.capabilities.filter((item) => item.safety === "observe-only");
+      elements.capabilitySelect.replaceChildren();
+      capabilities.forEach((capability) => {
+        const option = document.createElement("option");
+        option.value = capability.name;
+        option.textContent = capability.name + " · " + capability.module;
+        elements.capabilitySelect.append(option);
+      });
+      if (capabilities.some((item) => item.name === previous)) {
+        elements.capabilitySelect.value = previous;
+      } else if (capabilities.some((item) => item.name === "health")) {
+        elements.capabilitySelect.value = "health";
+      }
+      elements.probeButton.disabled = capabilities.length === 0;
+    }
+
+    function renderRuntime(state) {
+      const health = state.health;
+      elements.profileChip.textContent = "PROFILE " + health.profile.toUpperCase();
+      elements.modeChip.textContent = "MODE " + health.mode.toUpperCase();
+      elements.motionChip.textContent = health.physical_actuation_enabled ? "MOTION ARMED" : "MOTION LOCKED";
+      setMetric(elements.health, health.ok ? "healthy" : "degraded", health.ok ? "ok" : "bad");
+      setMetric(elements.deadman, health.deadman_ok ? "ready" : "not ready", health.deadman_ok ? "ok" : "warn");
+      setMetric(elements.estop, health.estop ? "engaged" : "clear", health.estop ? "bad" : "ok");
+      setMetric(elements.navigation, health.physical_navigation_enabled ? "enabled" : "locked", health.physical_navigation_enabled ? "warn" : "ok");
+      const allow = state.permissions.allow.length ? state.permissions.allow.join(", ") : "all registered capabilities";
+      const deny = state.permissions.deny.length ? state.permissions.deny.join(", ") : "none";
+      elements.permissions.textContent = "Agent scope — allow: " + allow + "; deny: " + deny + ". Probe remains observe-only.";
+      elements.statePath.textContent = "State: " + state.state_dir;
+    }
+
+    function render(state) {
+      latestState = state;
+      if (!selectedSessionId && !newSessionDraft && state.selected_session) selectedSessionId = state.selected_session.id;
+      const selected = state.selected_session && state.selected_session.id === selectedSessionId
+        ? state.selected_session
+        : null;
+      renderRuntime(state);
+      renderSessions(state);
+      renderTranscript(selected);
+      renderTasks(state);
+      renderCapabilities(state);
+      elements.sessionTitle.textContent = selected ? selected.id : "New session";
+      elements.modelMeta.textContent = selected
+        ? "provider " + selected.provider + "\nmodel " + selected.model
+        : "provider —\nmodel —";
+      if (document.activeElement !== elements.sessionId) {
+        elements.sessionId.value = selected ? selected.id : "";
+      }
+    }
+
+    async function loadState(options) {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const params = new URLSearchParams();
+        if (selectedSessionId) params.set("session", selectedSessionId);
+        const suffix = params.toString() ? "?" + params.toString() : "";
+        const state = await fetchJson("/agent/state" + suffix);
+        render(state);
+        setConnection(true, "Updated " + new Date().toLocaleTimeString());
+        if (options && options.scroll) elements.transcript.scrollTop = elements.transcript.scrollHeight;
+      } catch (error) {
+        setConnection(false, error.message);
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    async function selectSession(id) {
+      selectedSessionId = id;
+      newSessionDraft = false;
+      const url = new URL(window.location.href);
+      url.searchParams.set("session", id);
+      window.history.replaceState({}, "", url);
+      await loadState({ scroll: true });
+    }
+
+    elements.newSession.addEventListener("click", () => {
+      selectedSessionId = null;
+      newSessionDraft = true;
+      const url = new URL(window.location.href);
+      url.searchParams.delete("session");
+      window.history.replaceState({}, "", url);
+      elements.sessionId.value = "";
+      elements.sessionTitle.textContent = "New session";
+      elements.modelMeta.textContent = "provider —\nmodel —";
+      renderTranscript(null);
+      if (latestState) renderSessions(latestState);
+      elements.prompt.focus();
     });
+
+    elements.prompt.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        elements.promptForm.requestSubmit();
+      }
+    });
+
+    elements.promptForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (promptRunning) return;
+      promptRunning = true;
+      elements.runButton.disabled = true;
+      elements.runState.textContent = "Agent running…";
+      try {
+        const session = elements.sessionId.value.trim() || null;
+        const payload = await fetchJson("/agent/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt: elements.prompt.value, session, continue_last: false })
+        });
+        selectedSessionId = payload.session.id;
+        newSessionDraft = false;
+        const url = new URL(window.location.href);
+        url.searchParams.set("session", selectedSessionId);
+        window.history.replaceState({}, "", url);
+        elements.prompt.value = "";
+        elements.runState.textContent = "Turn " + payload.turn.sequence + " complete";
+        await loadState({ scroll: true });
+      } catch (error) {
+        elements.runState.textContent = error.message;
+        elements.consoleStatus.textContent = error.message;
+        elements.consoleStatus.className = "status-line error";
+      } finally {
+        promptRunning = false;
+        elements.runButton.disabled = false;
+      }
+    });
+
+    async function stopTask(name, button) {
+      button.disabled = true;
+      button.textContent = "Stopping…";
+      try {
+        await fetchJson("/agent/tasks/" + encodeURIComponent(name) + "/stop", { method: "POST" });
+        await loadState();
+      } catch (error) {
+        elements.consoleStatus.textContent = error.message;
+        elements.consoleStatus.className = "status-line error";
+        button.disabled = false;
+        button.textContent = "Stop task";
+      }
+    }
+
+    elements.probeForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      elements.probeButton.disabled = true;
+      elements.probeOutput.textContent = "Invoking…";
+      try {
+        let args;
+        try {
+          args = JSON.parse(elements.capabilityArgs.value);
+        } catch (_) {
+          throw new Error("Arguments are not valid JSON");
+        }
+        if (!args || Array.isArray(args) || typeof args !== "object") {
+          throw new Error("Arguments must be a JSON object");
+        }
+        const payload = await fetchJson("/agent/capability", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ capability: elements.capabilitySelect.value, args })
+        });
+        elements.probeOutput.textContent = JSON.stringify(payload, null, 2);
+      } catch (error) {
+        elements.probeOutput.textContent = error.message;
+      } finally {
+        elements.probeButton.disabled = false;
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) loadState();
+    });
+    loadState({ scroll: true });
+    window.setInterval(() => {
+      if (!document.hidden && !promptRunning) loadState();
+    }, 1500);
   </script>
 </body>
 </html>
@@ -1751,19 +2531,22 @@ mod tests {
     use std::fs;
 
     use axum::{
-        extract::State,
+        extract::{Query, State},
         http::{header::AUTHORIZATION, HeaderMap, HeaderValue, StatusCode},
         Json,
     };
+    use serde_json::json;
 
     use super::{
-        camera_activity, localization_authorized, localization_update, CameraRuntimeState,
-        CAMERA_RUNTIME_STATE,
+        agent_console_capability, agent_console_run, agent_console_state, camera_activity,
+        localization_authorized, localization_update, AgentCapabilityReq, AgentConsoleQuery,
+        AgentRunReq, CameraRuntimeState, CAMERA_RUNTIME_STATE,
     };
     use crate::{Harness, HarnessConfig, LocalizationProviderUpdate};
     use tokio::sync::Mutex;
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+    static AGENT_ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[test]
     fn camera_runtime_state_tracks_owner_recovery_and_bounded_failures() {
@@ -1805,6 +2588,67 @@ mod tests {
         );
         drop(mjpeg);
         *CAMERA_RUNTIME_STATE.lock() = CameraRuntimeState::default();
+    }
+
+    #[tokio::test]
+    async fn agent_console_runs_persisted_turns_and_only_probes_observe_capabilities() {
+        let _guard = AGENT_ENV_LOCK.lock().await;
+        let state_root =
+            std::env::temp_dir().join(format!("leash-http-agent-console-{}", std::process::id()));
+        let previous_state_dir = std::env::var_os("LEASH_STATE_DIR");
+        std::env::set_var("LEASH_STATE_DIR", &state_root);
+
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let Json(run) = agent_console_run(
+            State(harness.clone()),
+            Json(AgentRunReq {
+                prompt: "show current state".to_string(),
+                session: Some("headful-test".to_string()),
+                continue_last: false,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.session.id, "headful-test");
+
+        let Json(snapshot) = agent_console_state(
+            State(harness.clone()),
+            Query(AgentConsoleQuery {
+                session: Some("headful-test".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(snapshot.selected_session.unwrap().turns.len(), 1);
+
+        let Json(probe) = agent_console_capability(
+            State(harness.clone()),
+            Json(AgentCapabilityReq {
+                capability: "health".to_string(),
+                args: Some(json!({})),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(probe["ok"], true);
+
+        let denied = agent_console_capability(
+            State(harness),
+            Json(AgentCapabilityReq {
+                capability: "drive".to_string(),
+                args: Some(json!({ "left": 0.0, "right": 0.0 })),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(denied.0.to_string().contains("observe-only"));
+
+        if let Some(value) = previous_state_dir {
+            std::env::set_var("LEASH_STATE_DIR", value);
+        } else {
+            std::env::remove_var("LEASH_STATE_DIR");
+        }
+        let _ = fs::remove_dir_all(state_root);
     }
 
     #[test]
