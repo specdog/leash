@@ -81,6 +81,81 @@ leash list
 leash show-config sim-http
 ```
 
+## Durable Agent Workflows
+
+Leash includes the useful runtime pieces of a modern coding-agent harness, but
+keeps them inside the robot safety boundary: resumable sessions, machine-readable
+headless output, scoped permissions, and supervised background tasks. It does
+not give the agent an unrestricted shell or a second path to the motors.
+
+```mermaid
+flowchart LR
+  prompt["Prompt"] --> agentRuntime["Native agent runtime"]
+  agentRuntime --> model["Configured model provider"]
+  agentRuntime <--> sessions["Durable session store"]
+  model --> output["Plain · JSON · streaming JSON"]
+
+  schedule["Scheduled task"] --> permissions{"Agent allow / deny scope"}
+  permissions -- denied --> refusal["Typed refusal"]
+  permissions -- allowed --> registry["Capability registry"]
+  registry --> safety{"Normal Leash safety policy"}
+  safety -- denied --> refusal
+  safety -- allowed --> adapter["Simulation or gated robot adapter"]
+  adapter --> taskLog["Task state + JSONL log"]
+```
+
+Run a named session from a script, then resume it later:
+
+```bash
+leash agent run "inspect the battery" \
+  --session rover-check \
+  --output streaming-json
+
+leash agent run "summarize the last result" \
+  --session rover-check \
+  --output json
+
+leash agent sessions list
+leash agent sessions show rover-check
+```
+
+Call one typed capability with a narrow agent scope. Deny rules win over allow
+rules, and `*` is supported only as a whole rule or a trailing prefix wildcard:
+
+```bash
+leash agent capability call observe --allow observe
+leash agent capability call planner_status --allow 'planner_*' --deny planner_cancel
+```
+
+Start a capability in a supervised background process. The record and JSONL
+log live under `LEASH_STATE_DIR` (or the normal platform state directory), so a
+different terminal can inspect or stop it:
+
+```bash
+leash agent task start \
+  --name planner-watch \
+  planner_status \
+  --interval-ms 2000 \
+  --allow 'planner_*'
+
+leash agent task status planner-watch
+leash agent task log planner-watch --lines 10
+leash agent task stop planner-watch
+```
+
+`--max-runs N` makes a task stop successfully after `N` invocations; zero means
+run until stopped. Agent tasks can invoke only registered Leash capabilities.
+An agent-origin physical action still needs explicit approval plus every normal
+token, runtime, sensor-freshness, deadman, and e-stop check.
+
+| Coding-agent behavior | Leash implementation |
+| --- | --- |
+| Headless automation | `plain`, `json`, and line-delimited `streaming-json` output |
+| Resume a conversation | Named sessions plus `--continue` for the latest session |
+| Tool permissions | Deny-wins capability allow/deny patterns |
+| Background work | Daemon-backed capability schedules with status, logs, and stop |
+| Shell/file/worktree tools | Intentionally excluded from the robot-control runtime |
+
 ## What Happens Inside
 
 Every surface—web dashboard, REST endpoint, CLI command, or MCP tool—converges
