@@ -5,6 +5,7 @@ port="${LEASH_SMOKE_PORT:-18080}"
 base="http://127.0.0.1:$port"
 log_file="$(mktemp -t leash-http-smoke.XXXXXX.log)"
 policy_response="$(mktemp -t leash-http-policy.XXXXXX.json)"
+agent_policy_response="$(mktemp -t leash-http-agent-policy.XXXXXX.json)"
 timeout_secs="${LEASH_SMOKE_TIMEOUT_SECS:-60}"
 
 cleanup() {
@@ -12,7 +13,7 @@ cleanup() {
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
-  rm -f "$log_file" "$policy_response"
+  rm -f "$log_file" "$policy_response" "$agent_policy_response"
 }
 trap cleanup EXIT
 
@@ -55,7 +56,7 @@ for (const endpoint of ["GET /", "GET /dashboard"]) {
 for (const endpoint of ["POST /dashboard/authorize", "POST /dashboard/stop", "POST /dashboard/estop", "POST /dashboard/estop-reset", "POST /dashboard/capture"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing dashboard action endpoint: ${endpoint}`);
 }
-for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages", "GET /camera/stream/health", "POST /camera/stream/recover"]) {
+for (const endpoint of ["GET /agent", "GET /agent/state", "POST /agent/run", "POST /agent/capability", "POST /agent/tasks/:name/stop", "GET /agent/messages", "POST /agent/messages", "GET /camera/stream/health", "POST /camera/stream/recover"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
 }
 for (const endpoint of ["GET /waypoints", "GET /patrol/zones", "POST /patrol/zones/:zone_id/start", "GET /patrol/status", "POST /patrol/stop"]) {
@@ -220,6 +221,38 @@ if (!payload.messages.some((message) => message.text === process.env.EXPECT_TEXT
 }'
 }
 
+assert_agent_console_run() {
+  local expected_session="$1"
+  EXPECT_SESSION="$expected_session" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("headful run ok was not true");
+if (payload.session?.id !== process.env.EXPECT_SESSION) throw new Error(`unexpected session: ${payload.session?.id}`);
+if (!Number.isInteger(payload.turn?.sequence) || payload.turn.sequence < 1) throw new Error("headful turn sequence was missing");
+if (!String(payload.turn?.response?.text || "").includes("headful smoke prompt")) throw new Error("headful response was missing");'
+}
+
+assert_agent_console_state() {
+  local expected_session="$1"
+  EXPECT_SESSION="$expected_session" node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true) throw new Error("headful state ok was not true");
+if (payload.selected_session?.id !== process.env.EXPECT_SESSION) throw new Error(`unexpected selected session: ${payload.selected_session?.id}`);
+if (!Array.isArray(payload.selected_session?.turns) || payload.selected_session.turns.length < 1) throw new Error("persisted headful turns were missing");
+if (!Array.isArray(payload.tasks) || !Array.isArray(payload.capabilities)) throw new Error("headful runtime collections were missing");
+if (payload.health?.physical_actuation_enabled !== false) throw new Error("headful sim state unexpectedly enabled physical actuation");'
+}
+
+assert_agent_console_probe() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || payload.capability !== "health") throw new Error("headful health probe failed");
+if (payload.result?.ok !== true) throw new Error("headful health probe result was unhealthy");'
+}
+
+assert_agent_console_denial() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== false) throw new Error("headful motion probe was not denied");
+const error = String(payload.error || "");
+if (!error.includes("observe-only") || !error.includes("physical-motion")) throw new Error(`unexpected headful denial: ${error}`);'
+}
+
 assert_dashboard_page() {
   local html
   html="$(cat)"
@@ -355,7 +388,25 @@ post_dashboard_action stop
 post_dashboard_action estop
 post_dashboard_action estop-reset
 post_dashboard_action capture
-curl -fsS "$base/agent" | grep -q "Leash Agent Input"
+curl -fsS "$base/agent" | grep -q "Leash Agent Console"
+agent_session="http-smoke-$server_pid"
+curl -fsS -X POST "$base/agent/run" \
+  -H "content-type: application/json" \
+  --data "{\"prompt\":\"headful smoke prompt\",\"session\":\"$agent_session\",\"continue_last\":false}" | assert_agent_console_run "$agent_session"
+curl -fsS "$base/agent/state?session=$agent_session" | assert_agent_console_state "$agent_session"
+curl -fsS -X POST "$base/agent/capability" \
+  -H "content-type: application/json" \
+  --data '{"capability":"health","args":{}}' | assert_agent_console_probe
+agent_policy_status="$(curl -sS -o "$agent_policy_response" -w "%{http_code}" \
+  -X POST "$base/agent/capability" \
+  -H "content-type: application/json" \
+  --data '{"capability":"drive","args":{"left":0.1,"right":0.1}}')"
+if [[ "$agent_policy_status" != "400" ]]; then
+  echo "expected headful drive probe to return HTTP 400, got $agent_policy_status" >&2
+  cat "$agent_policy_response" >&2
+  exit 1
+fi
+assert_agent_console_denial <"$agent_policy_response"
 curl -fsS -X POST "$base/agent/messages" \
   -H "content-type: application/json" \
   --data '{"source":"web","text":"web smoke message"}' | assert_agent_message web "web smoke message"
