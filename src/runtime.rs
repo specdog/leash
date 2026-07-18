@@ -2765,6 +2765,9 @@ fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
         pose.x_m += delta_linear * half_yaw.cos();
         pose.y_m += delta_linear * half_yaw.sin();
         pose.yaw_rad += delta_yaw;
+        // Keep yaw in [-π, π] so it stays human-readable and avoids drift.
+        let two_pi = 2.0 * std::f64::consts::PI;
+        pose.yaw_rad = (pose.yaw_rad + std::f64::consts::PI).rem_euclid(two_pi) - std::f64::consts::PI;
         pose.ts_ms = ts_ms;
     }
     raw.odometry_prev_left = Some(left_m);
@@ -3641,6 +3644,34 @@ mod tests {
             (pose2.yaw_rad - 0.5).abs() < 1e-6,
             "yaw after pivot: {}",
             pose2.yaw_rad
+        );
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[test]
+    fn waveshare_odometry_yaw_wraps_to_pi_range() {
+        let mut raw = RawTelemetry::physical("test");
+        // Initialize.
+        integrate_odometry_pose(&mut raw, 0.0, 0.0);
+        // Spin clockwise enough to cross -PI.
+        // With track 0.20, each (0, +0.4 m) update adds delta_yaw = 0.4 / 0.20 = 2.0 rad.
+        // Pass cumulative odometry, so each right reading grows.
+        integrate_odometry_pose(&mut raw, 0.0, 0.4);   // yaw =  2.0
+        integrate_odometry_pose(&mut raw, 0.0, 0.8);   // yaw =  4.0 -> wraps to -2.283...
+        integrate_odometry_pose(&mut raw, 0.0, 1.2);   // yaw = -0.283...
+        let pose = raw.odometry_pose.clone().unwrap();
+        assert!(
+            pose.yaw_rad <= std::f64::consts::PI && pose.yaw_rad >= -std::f64::consts::PI,
+            "yaw should be wrapped to [-PI, PI]: {}",
+            pose.yaw_rad
+        );
+        // Expected: 3 updates of +2.0 rad = +6.0 rad -> wrapped to 6.0 - 2*π.
+        let expected = 6.0 - 2.0 * std::f64::consts::PI;
+        assert!(
+            (pose.yaw_rad - expected).abs() < 1e-5,
+            "yaw mismatch: got {} expected {}",
+            pose.yaw_rad,
+            expected
         );
     }
 
