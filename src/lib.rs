@@ -9,7 +9,10 @@ pub mod adapter;
 pub mod agent;
 pub mod agent_runtime;
 pub mod capability;
+pub mod cognition;
 pub mod config;
+#[cfg(feature = "cuda")]
+mod cuda_cognition;
 #[cfg(feature = "cuda")]
 mod cuda_voxel;
 pub mod daemon;
@@ -54,6 +57,12 @@ pub use agent_runtime::{
     AGENT_SESSION_FORMAT, AGENT_TASK_FORMAT,
 };
 pub use capability::{CapabilityDescriptor, CapabilityRegistry, SafetyClass};
+pub use cognition::{
+    CognitionBoundaryFrameV1, CognitionCapabilitiesV1, CognitionCheckpointV1,
+    CognitionLayerSnapshotV1, CognitionRuntime, CognitionStatusV1, SemanticPriorV1,
+    COGNITION_BOUNDARY_TIMEOUT_MS, COGNITION_CHECKPOINT_INTERVAL_MS, COGNITION_CONTRACT_VERSION,
+    COGNITION_STATE_DIM,
+};
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
 pub use localization::{

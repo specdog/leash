@@ -207,6 +207,37 @@ impl LeashMcp {
             .map(Json)
             .map_err(|err| err.to_string())
     }
+
+    #[tool(
+        name = "cognition_status",
+        description = "Read Leash L0-L2 cognition health, cadence, precision, and zero-motion state"
+    )]
+    pub async fn cognition_status(&self) -> Json<crate::cognition::CognitionStatusV1> {
+        Json(self.harness.cognition_status())
+    }
+
+    #[tool(
+        name = "cognition_snapshot",
+        description = "Read compact Leash L0-L2 predictive-coding layer snapshots"
+    )]
+    pub async fn cognition_snapshot(
+        &self,
+    ) -> Json<Vec<crate::cognition::CognitionLayerSnapshotV1>> {
+        Json(self.harness.cognition_snapshots())
+    }
+
+    #[tool(
+        name = "cognition_checkpoint",
+        description = "Persist a cognition checkpoint without copying weights into telemetry"
+    )]
+    pub async fn cognition_checkpoint(
+        &self,
+    ) -> Result<Json<crate::cognition::CognitionCheckpointV1>, String> {
+        self.harness
+            .cognition_checkpoint()
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -358,6 +389,30 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
             empty_object_schema(),
             "CaptureResult",
         ),
+        tool_descriptor(
+            "cognition_status",
+            "Read Leash L0-L2 cognition health, cadence, precision, and zero-motion state",
+            "telemetry",
+            SafetyClass::ObserveOnly,
+            empty_object_schema(),
+            "CognitionStatusV1",
+        ),
+        tool_descriptor(
+            "cognition_snapshot",
+            "Read compact Leash L0-L2 predictive-coding layer snapshots",
+            "telemetry",
+            SafetyClass::ObserveOnly,
+            empty_object_schema(),
+            "CognitionLayerSnapshotV1[]",
+        ),
+        tool_descriptor(
+            "cognition_checkpoint",
+            "Persist a cognition checkpoint without copying weights into telemetry",
+            "telemetry",
+            SafetyClass::ObserveOnly,
+            empty_object_schema(),
+            "CognitionCheckpointV1",
+        ),
     ]
 }
 
@@ -502,6 +557,18 @@ pub fn call_tool_value_with_origin(
             harness
                 .capability_registry()
                 .invoke_value_with_origin("capture", json!({}), origin)
+        }
+        "cognition_status" => {
+            ensure_no_args(args)?;
+            serde_json::to_value(harness.cognition_status()).map_err(Into::into)
+        }
+        "cognition_snapshot" => {
+            ensure_no_args(args)?;
+            serde_json::to_value(harness.cognition_snapshots()).map_err(Into::into)
+        }
+        "cognition_checkpoint" => {
+            ensure_no_args(args)?;
+            serde_json::to_value(harness.cognition_checkpoint()?).map_err(Into::into)
         }
         other => Err(anyhow!("unknown MCP tool '{other}'")),
     }

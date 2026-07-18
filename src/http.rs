@@ -275,6 +275,11 @@ pub fn router(harness: Harness) -> Router {
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
         .route("/telemetry/compact", get(compact_telemetry))
+        .route("/cognition/status", get(cognition_status))
+        .route("/cognition/snapshot", get(cognition_snapshot))
+        .route("/cognition/checkpoint", post(cognition_checkpoint))
+        .route("/cognition/boundary", post(cognition_boundary_update))
+        .route("/events/cognition", get(sse_cognition))
         .route("/localization", get(localization_status))
         .route("/localization/update", post(localization_update))
         .route("/events/telemetry", get(sse_telemetry))
@@ -583,8 +588,70 @@ fn compact_telemetry_value(harness: &Harness) -> Value {
         "localization": telemetry.get("localization").cloned().unwrap_or_else(|| json!({})),
         "localization_provider": telemetry.get("localization_provider").cloned().unwrap_or_else(|| json!({})),
         "voxel_grid": voxel_grid,
-        "path": telemetry.get("path").cloned().unwrap_or_else(|| json!({}))
+        "path": telemetry.get("path").cloned().unwrap_or_else(|| json!({})),
+        "cognition": harness.cognition_boundary()
     })
+}
+
+async fn cognition_status(
+    State(harness): State<Harness>,
+) -> Json<crate::cognition::CognitionStatusV1> {
+    Json(harness.cognition_status())
+}
+
+async fn cognition_snapshot(
+    State(harness): State<Harness>,
+) -> Json<Vec<crate::cognition::CognitionLayerSnapshotV1>> {
+    Json(harness.cognition_snapshots())
+}
+
+async fn cognition_checkpoint(
+    State(harness): State<Harness>,
+) -> Result<Json<crate::cognition::CognitionCheckpointV1>, HttpError> {
+    Ok(Json(harness.cognition_checkpoint()?))
+}
+
+async fn cognition_boundary_update(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    Json(frame): Json<crate::cognition::CognitionBoundaryFrameV1>,
+) -> Response {
+    let expected = match cognition_ingress_token() {
+        Ok(token) => token,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"ok": false, "error": error.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    if !bearer_authorized(&headers, &expected) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"ok": false, "error": "cognition ingress authorization failed"})),
+        )
+            .into_response();
+    }
+    match harness.submit_cognition_boundary(frame) {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(json!({"ok": true, "cognition": harness.cognition_status()})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+fn cognition_ingress_token() -> Result<String> {
+    let path = env::var("LEASH_COGNITION_INGRESS_TOKEN_FILE").map_err(|_| {
+        anyhow::anyhow!("cognition ingress is disabled; set LEASH_COGNITION_INGRESS_TOKEN_FILE")
+    })?;
+    read_ingress_token(&path, "cognition")
 }
 
 async fn localization_status(
@@ -638,16 +705,24 @@ fn localization_ingress_token() -> Result<String> {
             "localization ingress is disabled; set LEASH_LOCALIZATION_INGRESS_TOKEN_FILE"
         )
     })?;
-    let token = std::fs::read_to_string(&path)
-        .map_err(|error| anyhow::anyhow!("cannot read localization ingress token file: {error}"))?;
+    read_ingress_token(&path, "localization")
+}
+
+fn read_ingress_token(path: &str, name: &str) -> Result<String> {
+    let token = std::fs::read_to_string(path)
+        .map_err(|error| anyhow::anyhow!("cannot read {name} ingress token file: {error}"))?;
     let token = token.trim().to_string();
     if token.is_empty() {
-        anyhow::bail!("localization ingress token file is empty");
+        anyhow::bail!("{name} ingress token file is empty");
     }
     Ok(token)
 }
 
 fn localization_authorized(headers: &HeaderMap, expected: &str) -> bool {
+    bearer_authorized(headers, expected)
+}
+
+fn bearer_authorized(headers: &HeaderMap, expected: &str) -> bool {
     let provided = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -2453,6 +2528,29 @@ async fn sse_telemetry(
             .interval(Duration::from_secs(5))
             .text("keepalive"),
     ))
+}
+
+async fn sse_cognition(
+    State(harness): State<Harness>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let receiver = harness.subscribe_cognition();
+    let stream = stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(frame) => {
+                    let data = serde_json::to_string(&frame).unwrap_or_else(|_| "{}".to_string());
+                    return Some((Ok(Event::default().event("cognition").data(data)), receiver));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(5))
+            .text("keepalive"),
+    )
 }
 
 async fn handle_telemetry_socket(socket: WebSocket, harness: Harness) {

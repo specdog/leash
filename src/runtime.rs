@@ -31,6 +31,10 @@ use crate::{
     accelerator::{resolve_accelerator, AcceleratorStatus},
     adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
+    cognition::{
+        CognitionBoundaryFrameV1, CognitionCheckpointV1, CognitionLayerSnapshotV1,
+        CognitionRuntime, CognitionStatusV1,
+    },
     config::{AcceleratorBackend, HarnessConfig, Profile},
     localization::{
         ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationProvider,
@@ -397,6 +401,7 @@ pub struct Harness {
     physical_navigation_lease: Arc<Mutex<Option<PhysicalNavigationLease>>>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
+    cognition: CognitionRuntime,
 }
 
 impl Harness {
@@ -500,6 +505,7 @@ impl Harness {
 
         let (telemetry_tx, _) = broadcast::channel(128);
         let stream_transport = new_stream_transport(config.stream_transport);
+        let cognition = CognitionRuntime::new(&accelerator);
         let harness = Self {
             config,
             started_at: Instant::now(),
@@ -527,6 +533,7 @@ impl Harness {
             physical_navigation_lease: Arc::new(Mutex::new(None)),
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
+            cognition,
         };
         harness.spawn_deadman();
         harness.spawn_planner_loop();
@@ -534,6 +541,7 @@ impl Harness {
         #[cfg(feature = "waveshare-ugv")]
         harness.spawn_waveshare_telemetry();
         harness.spawn_telemetry_loop();
+        harness.spawn_cognition_loop();
         Ok(harness)
     }
 
@@ -557,6 +565,34 @@ impl Harness {
 
     pub fn localization_provider_status(&self) -> LocalizationProviderStatus {
         self.localization_provider.snapshot(now_ms()).status
+    }
+
+    pub fn cognition_status(&self) -> CognitionStatusV1 {
+        let command = self.command.lock();
+        let zero_motion = command.left_cmd.abs() <= f64::EPSILON
+            && command.right_cmd.abs() <= f64::EPSILON
+            && command.active_session_id.is_none();
+        self.cognition.status(now_ms(), zero_motion)
+    }
+
+    pub fn cognition_snapshots(&self) -> Vec<CognitionLayerSnapshotV1> {
+        self.cognition.snapshots(now_ms())
+    }
+
+    pub fn cognition_boundary(&self) -> CognitionBoundaryFrameV1 {
+        self.cognition.boundary(now_ms())
+    }
+
+    pub fn cognition_checkpoint(&self) -> Result<CognitionCheckpointV1> {
+        self.cognition.checkpoint()
+    }
+
+    pub fn submit_cognition_boundary(&self, frame: CognitionBoundaryFrameV1) -> Result<()> {
+        self.cognition.submit_boundary(frame, now_ms())
+    }
+
+    pub fn subscribe_cognition(&self) -> broadcast::Receiver<CognitionBoundaryFrameV1> {
+        self.cognition.subscribe()
     }
 
     pub fn update_range_scan_status(&self, status: RangeScanStatus) -> Result<()> {
@@ -1324,6 +1360,11 @@ impl Harness {
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
                 "GET /telemetry/compact".to_string(),
+                "GET /cognition/status".to_string(),
+                "GET /cognition/snapshot".to_string(),
+                "GET /events/cognition".to_string(),
+                "POST /cognition/boundary".to_string(),
+                "POST /cognition/checkpoint".to_string(),
                 "GET /localization".to_string(),
                 "POST /localization/update".to_string(),
                 "GET /events/telemetry".to_string(),
@@ -1362,6 +1403,9 @@ impl Harness {
                 "estop".to_string(),
                 "capture".to_string(),
                 "modules".to_string(),
+                "cognition_status".to_string(),
+                "cognition_snapshot".to_string(),
+                "cognition_checkpoint".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
             accelerator: self.accelerator.clone(),
@@ -1541,6 +1585,7 @@ impl Harness {
                 });
             }
         }
+        self.cognition.ingest_telemetry(&telemetry);
         telemetry
     }
 
@@ -2628,6 +2673,33 @@ impl Harness {
                 let _ = harness.telemetry_tx.send(telemetry.clone());
                 if let Ok(payload) = serde_json::to_value(harness.telemetry_stream_frame()) {
                     let _ = harness.stream_transport.publish("telemetry", payload);
+                }
+            }
+        });
+    }
+
+    fn spawn_cognition_loop(&self) {
+        let cognition = self.cognition.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(5));
+            loop {
+                interval.tick().await;
+                cognition.tick(now_ms());
+            }
+        });
+
+        let mut boundary_rx = self.cognition.subscribe();
+        let transport = self.stream_transport.clone();
+        tokio::spawn(async move {
+            loop {
+                match boundary_rx.recv().await {
+                    Ok(frame) => {
+                        if let Ok(payload) = serde_json::to_value(frame) {
+                            let _ = transport.publish("cognition", payload);
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
