@@ -1293,6 +1293,7 @@ impl Harness {
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
+                "GET /telemetry/compact".to_string(),
                 "GET /localization".to_string(),
                 "POST /localization/update".to_string(),
                 "GET /events/telemetry".to_string(),
