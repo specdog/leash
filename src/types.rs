@@ -1521,6 +1521,17 @@ pub struct CameraAimOutcome {
     pub accel: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraAimState {
+    pub pan_deg: f64,
+    pub tilt_deg: f64,
+    pub speed: u32,
+    pub accel: u32,
+    pub updated_at_ms: u128,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct CaptureResult {

@@ -656,7 +656,7 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "camera": camera,
         "stream_health": camera_stream_health_snapshot(),
-        "gimbal": camera_aim_descriptor()
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
     }))
 }
 
@@ -672,19 +672,22 @@ fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
     CAMERA_RUNTIME_STATE.lock().health(camera_device_path())
 }
 
-async fn camera_aim_status() -> Json<Value> {
+async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
     Json(json!({
         "ok": true,
-        "gimbal": camera_aim_descriptor()
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
     }))
 }
 
-fn camera_aim_descriptor() -> Value {
+fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>) -> Value {
     json!({
         "status": "available",
         "capability": "camera_aim",
         "endpoint": "/camera/aim",
         "aliases": ["/gimbal/aim"],
+        "known": pose.is_some(),
+        "source": pose.as_ref().map(|state| state.source.as_str()).unwrap_or("unavailable"),
+        "pose": pose,
         "range": {
             "pan_deg": [CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG],
             "tilt_deg": [CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG]

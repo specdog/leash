@@ -46,12 +46,12 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
-        Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, ImuStatus, LocalizationFrame, LocalizationHealth,
-        LocalizationStatus, MapIdentity, MapMetadata, MotionEvent, MotionEventKind,
-        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
-        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
+        AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraAimState,
+        CameraStatus, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
+        CostmapFrame, DriveOutcome, Health, ImageObservation, ImuStatus, LocalizationFrame,
+        LocalizationHealth, LocalizationStatus, MapIdentity, MapMetadata, MotionEvent,
+        MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus,
+        PatrolStrategy, PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
         PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
         SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
         TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
@@ -242,6 +242,7 @@ struct CommandState {
     estop: bool,
     stopped_by_deadman: bool,
     soft_odometry_limited: bool,
+    camera_aim: Option<CameraAimState>,
 }
 
 #[cfg(feature = "physical-navigation")]
@@ -263,6 +264,7 @@ impl Default for CommandState {
             estop: false,
             stopped_by_deadman: false,
             soft_odometry_limited: false,
+            camera_aim: None,
         }
     }
 }
@@ -1838,6 +1840,14 @@ impl Harness {
         let speed = speed.unwrap_or(0);
         let accel = accel.unwrap_or(0);
         self.driver.aim_camera(pan_deg, tilt_deg, speed, accel)?;
+        self.command.lock().camera_aim = Some(CameraAimState {
+            pan_deg,
+            tilt_deg,
+            speed,
+            accel,
+            updated_at_ms: now_ms(),
+            source: "last-commanded".to_string(),
+        });
         Ok(CameraAimOutcome {
             ok: true,
             pan_deg,
@@ -1845,6 +1855,10 @@ impl Harness {
             speed,
             accel,
         })
+    }
+
+    pub fn camera_aim_state(&self) -> Option<CameraAimState> {
+        self.command.lock().camera_aim.clone()
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
@@ -3765,6 +3779,24 @@ mod tests {
     async fn capture_is_deterministic_for_role() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         assert_eq!(harness.capture().sha256, harness.capture().sha256);
+    }
+
+    #[tokio::test]
+    async fn camera_aim_state_is_unknown_until_a_successful_command() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        assert_eq!(harness.camera_aim_state(), None);
+
+        harness
+            .camera_aim(None, 37.5, -12.0, Some(8), Some(4))
+            .unwrap();
+
+        let state = harness.camera_aim_state().expect("last commanded aim");
+        assert_eq!(state.pan_deg, 37.5);
+        assert_eq!(state.tilt_deg, -12.0);
+        assert_eq!(state.speed, 8);
+        assert_eq!(state.accel, 4);
+        assert_eq!(state.source, "last-commanded");
+        assert!(state.updated_at_ms > 0);
     }
 
     #[tokio::test]
