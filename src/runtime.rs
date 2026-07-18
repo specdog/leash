@@ -275,6 +275,12 @@ struct RawTelemetry {
     battery_pct: Option<f64>,
     odometry_left: Option<f64>,
     odometry_right: Option<f64>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_pose: Option<Pose2d>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_prev_left: Option<f64>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_prev_right: Option<f64>,
     source: String,
     last_raw_frame_ms: Option<u128>,
     last_raw_payload: Option<Value>,
@@ -290,6 +296,18 @@ impl RawTelemetry {
             battery_pct: battery_percent_from_voltage(12.3),
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: Some(Pose2d {
+                ts_ms,
+                frame_id: "map".to_string(),
+                x_m: 0.0,
+                y_m: 0.0,
+                yaw_rad: 0.0,
+            }),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: Some(0.0),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: Some(0.0),
             source: "sim".to_string(),
             last_raw_frame_ms: Some(ts_ms),
             last_raw_payload: None,
@@ -304,6 +322,12 @@ impl RawTelemetry {
             battery_pct: None,
             odometry_left: None,
             odometry_right: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: None,
             source: source.to_string(),
             last_raw_frame_ms: None,
             last_raw_payload: None,
@@ -324,6 +348,12 @@ impl RawTelemetry {
             battery_pct: None,
             odometry_left: None,
             odometry_right: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: None,
             source: "replay".to_string(),
             last_raw_frame_ms: None,
             last_raw_payload: None,
@@ -1379,6 +1409,57 @@ impl Harness {
                 },
                 now,
             );
+        }
+        #[cfg(feature = "waveshare-ugv")]
+        if self.config.profile == Profile::WaveshareUgv {
+            if let Some(pose) = raw.odometry_pose.clone() {
+                let snapshot = self.localization_provider.snapshot(now);
+                let current_pose_stale = snapshot
+                    .status
+                    .last_update_ms
+                    .map_or(true, |ts| now.saturating_sub(ts) > 500);
+                let current_pose_missing = snapshot.localization.pose.is_none();
+                if current_pose_stale || current_pose_missing {
+                    let sequence = snapshot.status.sequence.unwrap_or(0).saturating_add(1);
+                    let localization_ts_ms = pose.ts_ms;
+                    let (map, occupancy_grid, costmap) = waveshare_map_frames(localization_ts_ms);
+                    let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
+                    let _ = self.localization_provider.apply_at(
+                        LocalizationProviderUpdate {
+                            version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION
+                                .to_string(),
+                            sequence,
+                            localization: LocalizationFrame {
+                                version: LOCALIZATION_FRAME_VERSION.to_string(),
+                                ts_ms: localization_ts_ms,
+                                map: MapIdentity {
+                                    map_id: "waveshare-odom".to_string(),
+                                    map_revision: "odom-v1".to_string(),
+                                    frame_id: "map".to_string(),
+                                },
+                                pose: Some(PoseWithCovariance2d {
+                                    pose,
+                                    covariance: vec![
+                                        0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02,
+                                    ],
+                                }),
+                                health: LocalizationHealth {
+                                    status: LocalizationStatus::Tracking,
+                                    last_update_ms: Some(localization_ts_ms),
+                                    message: "waveshare wheel odometry pose".to_string(),
+                                    error: None,
+                                },
+                            },
+                            map,
+                            occupancy_grid,
+                            costmap,
+                            path: VisualizationPath::default(),
+                            voxel_grid,
+                        },
+                        now,
+                    );
+                }
+            }
         }
         let localization_snapshot = self.localization_provider.snapshot(now);
         let voxel_grid = self.voxel_grid_for(&localization_snapshot.occupancy_grid);
@@ -2615,11 +2696,51 @@ fn apply_waveshare_update(raw: &Arc<RwLock<RawTelemetry>>, update: BaseTelemetry
     if let Some(right_m) = update.odometry_right_m {
         next.odometry_right = Some(round3(right_m));
     }
+    if let (Some(left_m), Some(right_m)) = (update.odometry_left_m, update.odometry_right_m) {
+        integrate_odometry_pose(&mut next, left_m, right_m);
+    }
     if let Some(imu) = update.imu {
         next.imu = imu;
     }
     next.last_raw_frame_ms = Some(now_ms());
     next.last_raw_payload = Some(update.raw);
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
+    let track_width_m: f64 = std::env::var("LEASH_UGV_WHEEL_TRACK_M")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.20_f64)
+        .max(0.01_f64);
+    let ts_ms = now_ms();
+    if raw.odometry_prev_left.is_none() || raw.odometry_prev_right.is_none() {
+        raw.odometry_prev_left = Some(left_m);
+        raw.odometry_prev_right = Some(right_m);
+        raw.odometry_pose = Some(Pose2d {
+            ts_ms,
+            frame_id: "map".to_string(),
+            x_m: 0.0,
+            y_m: 0.0,
+            yaw_rad: 0.0,
+        });
+        return;
+    }
+    let prev_left = raw.odometry_prev_left.unwrap();
+    let prev_right = raw.odometry_prev_right.unwrap();
+    let delta_left = left_m - prev_left;
+    let delta_right = right_m - prev_right;
+    let delta_linear = (delta_left + delta_right) / 2.0;
+    let delta_yaw = (delta_right - delta_left) / track_width_m;
+    if let Some(pose) = raw.odometry_pose.as_mut() {
+        let half_yaw = pose.yaw_rad + delta_yaw / 2.0;
+        pose.x_m += delta_linear * half_yaw.cos();
+        pose.y_m += delta_linear * half_yaw.sin();
+        pose.yaw_rad += delta_yaw;
+        pose.ts_ms = ts_ms;
+    }
+    raw.odometry_prev_left = Some(left_m);
+    raw.odometry_prev_right = Some(right_m);
 }
 
 fn battery_percent_from_voltage(voltage: f64) -> Option<f64> {
@@ -2786,6 +2907,48 @@ fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, Costma
     let map = MapMetadata {
         ts_ms,
         map_id: "sim-local".to_string(),
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        cell_order: "row-major".to_string(),
+    };
+    let occupancy_grid = OccupancyGridFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin: origin.clone(),
+        metadata: map.clone(),
+        cells: planner_occupancy_cells(),
+    };
+    let costmap = CostmapFrame {
+        ts_ms,
+        frame_id: "map".to_string(),
+        width: 4,
+        height: 4,
+        resolution_m: 0.25,
+        origin,
+        metadata: map.clone(),
+        costs: planner_costs(),
+    };
+    (map, occupancy_grid, costmap)
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn waveshare_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, CostmapFrame) {
+    let origin = Pose2d {
+        ts_ms,
+        frame_id: "map".to_string(),
+        x_m: -0.5,
+        y_m: -0.5,
+        yaw_rad: 0.0,
+    };
+    let map = MapMetadata {
+        ts_ms,
+        map_id: "waveshare-odom".to_string(),
         frame_id: "map".to_string(),
         width: 4,
         height: 4,
@@ -3430,6 +3593,117 @@ mod tests {
         assert_eq!(
             harness.telemetry().sensors.imu.status,
             crate::types::SensorDataStatus::Stale
+        );
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[test]
+    fn waveshare_odometry_integrates_differential_drive_pose() {
+        let mut raw = RawTelemetry::physical("test");
+        integrate_odometry_pose(&mut raw, 0.0, 0.0);
+        let pose0 = raw.odometry_pose.clone().unwrap();
+        assert_eq!(pose0.x_m, 0.0);
+        assert_eq!(pose0.y_m, 0.0);
+        assert_eq!(pose0.yaw_rad, 0.0);
+
+        // Drive straight 0.1 m.
+        integrate_odometry_pose(&mut raw, 0.1, 0.1);
+        let pose1 = raw.odometry_pose.clone().unwrap();
+        assert!(
+            (pose1.x_m - 0.1).abs() < 1e-6,
+            "x after straight drive: {}",
+            pose1.x_m
+        );
+        assert!(pose1.y_m.abs() < 1e-6);
+        assert!(pose1.yaw_rad.abs() < 1e-6);
+
+        // Pivot in place: left -0.05 m, right +0.05 m with 0.20 m track -> yaw += 0.5 rad.
+        integrate_odometry_pose(&mut raw, 0.05, 0.15);
+        let pose2 = raw.odometry_pose.clone().unwrap();
+        assert!(
+            (pose2.yaw_rad - 0.5).abs() < 1e-6,
+            "yaw after pivot: {}",
+            pose2.yaw_rad
+        );
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_telemetry_falls_back_to_odometry_when_localization_stale() {
+        let (harness, _) = waveshare_sensor_harness();
+        let stale_ts = now_ms().saturating_sub(10_000);
+        let received_ts = now_ms();
+
+        // Seed provider with a stale SLAM pose.
+        let stale_localization = LocalizationFrame {
+            version: LOCALIZATION_FRAME_VERSION.to_string(),
+            ts_ms: stale_ts,
+            map: MapIdentity {
+                map_id: "waveshare-odom".to_string(),
+                map_revision: "rev".to_string(),
+                frame_id: "map".to_string(),
+            },
+            pose: Some(PoseWithCovariance2d {
+                pose: Pose2d {
+                    ts_ms: stale_ts,
+                    frame_id: "map".to_string(),
+                    x_m: 1.0,
+                    y_m: 2.0,
+                    yaw_rad: 3.0,
+                },
+                covariance: vec![0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02],
+            }),
+            health: LocalizationHealth {
+                status: LocalizationStatus::Tracking,
+                last_update_ms: Some(stale_ts),
+                message: "stale slam".to_string(),
+                error: None,
+            },
+        };
+        let (map, occupancy_grid, costmap) = waveshare_map_frames(stale_ts);
+        let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
+        harness
+            .localization_provider
+            .apply_at(
+                LocalizationProviderUpdate {
+                    version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    sequence: 100,
+                    localization: stale_localization,
+                    map,
+                    occupancy_grid,
+                    costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
+                },
+                received_ts,
+            )
+            .unwrap();
+
+        // Inject fresh odometry: pivot left (left wheel 0.05 m, right wheel 0.15 m).
+        {
+            let mut raw = harness.raw.write();
+            raw.odometry_left = Some(0.0);
+            raw.odometry_right = Some(0.0);
+            integrate_odometry_pose(&mut raw, 0.0, 0.0);
+            integrate_odometry_pose(&mut raw, 0.05, 0.15);
+        }
+
+        let telemetry = harness.telemetry();
+        let pose = telemetry
+            .localization
+            .pose
+            .as_ref()
+            .expect("telemetry should publish a pose")
+            .pose
+            .clone();
+        assert!(
+            pose.ts_ms > stale_ts,
+            "telemetry pose timestamp should advance past stale SLAM"
+        );
+        assert!(
+            (pose.yaw_rad - 0.5).abs() < 1e-6,
+            "yaw should reflect wheel odometry pivot: {}",
+            pose.yaw_rad
         );
     }
 
