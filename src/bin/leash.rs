@@ -4,6 +4,10 @@ use std::{collections::BTreeMap, fmt, net::SocketAddr, path::PathBuf, time::Dura
 use anyhow::{bail, Result};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use leash_harness::{
+    agent_runtime::{
+        AgentRuntime, AgentSessionStore, AgentTaskRecord, AgentTaskState, AgentTaskStore,
+        CapabilityPermissions, AGENT_TASK_FORMAT,
+    },
     capability::default_capability_descriptors,
     config::{
         resolve_config, AcceleratorBackend, AgentProvider, ConfigRequest, PartialHarnessConfig,
@@ -26,7 +30,8 @@ use leash_harness::{
 };
 use serde::Serialize;
 #[cfg(feature = "mcp")]
-use serde_json::{json, Map, Value};
+use serde_json::Map;
+use serde_json::{json, Value};
 use tracing::{
     field::{Field, Visit},
     Event, Subscriber,
@@ -59,6 +64,8 @@ enum Command {
     Replay(ReplayArgs),
     #[cfg(any(feature = "http", feature = "mcp"))]
     Run(RunArgs),
+    /// Run durable, permission-scoped agent workflows.
+    Agent(AgentArgs),
     #[cfg(feature = "http")]
     AgentSend(AgentSendArgs),
     #[cfg(feature = "http")]
@@ -333,6 +340,193 @@ struct AgentInteractiveArgs {
 }
 
 #[derive(Debug, Args)]
+struct AgentArgs {
+    #[command(subcommand)]
+    command: AgentCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentCommand {
+    #[cfg(feature = "http")]
+    /// Start the live browser console for sessions, tasks, and safe capability probes.
+    Headful(AgentHeadfulArgs),
+    /// Run one model turn and persist it in a resumable session.
+    Run(AgentRunArgs),
+    /// List or inspect persisted agent sessions.
+    Sessions(AgentSessionsArgs),
+    /// Invoke a typed Leash capability through agent permission and safety gates.
+    Capability(AgentCapabilityArgs),
+    /// Start, inspect, log, or stop supervised capability schedules.
+    Task(AgentTaskArgs),
+}
+
+#[cfg(feature = "http")]
+#[derive(Debug, Args)]
+struct AgentHeadfulArgs {
+    /// Address for the embedded Leash HTTP server.
+    #[arg(long, default_value = "127.0.0.1:8000")]
+    listen: SocketAddr,
+
+    /// Print the console URL without opening the system browser.
+    #[arg(long, action = ArgAction::SetTrue)]
+    no_open: bool,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Args)]
+struct AgentRunArgs {
+    /// Prompt sent to the configured agent provider.
+    prompt: String,
+
+    /// Create or resume this named session.
+    #[arg(long)]
+    session: Option<String>,
+
+    /// Resume the most recently updated session.
+    #[arg(long = "continue", action = ArgAction::SetTrue)]
+    continue_last: bool,
+
+    /// Render text, one JSON result, or line-delimited JSON events.
+    #[arg(long, value_enum, default_value_t = AgentOutputFormat::Plain)]
+    output: AgentOutputFormat,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AgentOutputFormat {
+    Plain,
+    Json,
+    StreamingJson,
+}
+
+#[derive(Debug, Args)]
+struct AgentSessionsArgs {
+    #[command(subcommand)]
+    command: AgentSessionsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentSessionsCommand {
+    /// List sessions, newest first.
+    List,
+    /// Print a session and all of its turns.
+    Show { id: String },
+}
+
+#[derive(Debug, Args)]
+struct AgentCapabilityArgs {
+    #[command(subcommand)]
+    command: AgentCapabilityCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentCapabilityCommand {
+    /// Call one registered capability as an agent-origin request.
+    Call(AgentCapabilityCallArgs),
+}
+
+#[derive(Debug, Args)]
+struct AgentCapabilityCallArgs {
+    capability: String,
+
+    #[arg(long, value_name = "JSON", default_value = "{}")]
+    json: String,
+
+    #[command(flatten)]
+    permissions: AgentPermissionArgs,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+struct AgentPermissionArgs {
+    #[arg(long, env = "LEASH_AGENT_ALLOW_CAPABILITIES", value_delimiter = ',')]
+    allow: Vec<String>,
+
+    #[arg(long, env = "LEASH_AGENT_DENY_CAPABILITIES", value_delimiter = ',')]
+    deny: Vec<String>,
+}
+
+impl AgentPermissionArgs {
+    fn into_permissions(self) -> Result<CapabilityPermissions> {
+        CapabilityPermissions::new(self.allow, self.deny)
+    }
+}
+
+#[derive(Debug, Args)]
+struct AgentTaskArgs {
+    #[command(subcommand)]
+    command: AgentTaskCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentTaskCommand {
+    /// Start a detached capability schedule.
+    Start(AgentTaskStartArgs),
+    /// Show one task or every persisted task.
+    Status { name: Option<String> },
+    /// Tail a task's JSONL results.
+    Log(AgentTaskLogArgs),
+    /// Stop a running task and retain its state and log.
+    Stop(AgentTaskStopArgs),
+    #[command(hide = true)]
+    Supervise(AgentTaskSuperviseArgs),
+}
+
+#[derive(Debug, Args)]
+struct AgentTaskStartArgs {
+    #[arg(long)]
+    name: String,
+
+    capability: String,
+
+    #[arg(long, value_name = "JSON", default_value = "{}")]
+    json: String,
+
+    #[arg(long, default_value_t = 5_000)]
+    interval_ms: u64,
+
+    #[arg(long, default_value_t = 0)]
+    max_runs: u64,
+
+    #[command(flatten)]
+    permissions: AgentPermissionArgs,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Args)]
+struct AgentTaskSuperviseArgs {
+    #[arg(long)]
+    name: String,
+
+    #[command(flatten)]
+    runtime: RuntimeArgs,
+}
+
+#[derive(Debug, Args)]
+struct AgentTaskLogArgs {
+    name: String,
+
+    #[arg(long, default_value_t = 40)]
+    lines: usize,
+}
+
+#[derive(Debug, Args)]
+struct AgentTaskStopArgs {
+    name: String,
+
+    #[arg(long, default_value_t = 2_000)]
+    graceful_timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
 struct StatusArgs {
     name: Option<String>,
 }
@@ -500,6 +694,9 @@ async fn main() -> Result<()> {
         Command::Run(args) => {
             run_stack(args, cli.config.clone()).await?;
         }
+        Command::Agent(args) => {
+            run_agent_command(args, cli.config.clone()).await?;
+        }
         #[cfg(feature = "http")]
         Command::AgentSend(args) => {
             let output = send_agent_message_http(&args.url, &args.source, &args.text).await?;
@@ -635,6 +832,387 @@ async fn run_worker(args: WorkerRunArgs) -> Result<()> {
     io::stdout().flush()?;
     supervisor.stop_all()?;
     Ok(())
+}
+
+async fn run_agent_command(args: AgentArgs, config_path: Option<PathBuf>) -> Result<()> {
+    match args.command {
+        #[cfg(feature = "http")]
+        AgentCommand::Headful(args) => run_agent_headful(args, config_path).await?,
+        AgentCommand::Run(args) => run_agent_headless(args, config_path)?,
+        AgentCommand::Sessions(args) => run_agent_sessions(args)?,
+        AgentCommand::Capability(args) => run_agent_capability(args, config_path)?,
+        AgentCommand::Task(args) => run_agent_task(args, config_path).await?,
+    }
+    Ok(())
+}
+
+#[cfg(feature = "http")]
+async fn run_agent_headful(args: AgentHeadfulArgs, config_path: Option<PathBuf>) -> Result<()> {
+    let config = config_from_args(args.runtime, Some(args.listen), config_path, None)?;
+    let listen = config.listen;
+    let harness = Harness::new(config)?;
+    let url = format!("http://{listen}/agent");
+    println!("headful agent console: {url}");
+    io::stdout().flush()?;
+
+    if !args.no_open {
+        let browser_url = url.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if let Err(error) = open_system_browser(&browser_url) {
+                eprintln!("could not open the browser automatically: {error}");
+            }
+        });
+    }
+
+    leash_harness::http::serve_http(harness, listen).await
+}
+
+#[cfg(feature = "http")]
+fn open_system_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    anyhow::bail!("automatic browser opening is unsupported on this platform");
+
+    command.arg(url).spawn()?;
+    Ok(())
+}
+
+fn run_agent_headless(args: AgentRunArgs, config_path: Option<PathBuf>) -> Result<()> {
+    let config = config_from_args(args.runtime, None, config_path, None)?;
+    let runtime =
+        AgentRuntime::from_env(Harness::new(config)?, CapabilityPermissions::from_env()?)?;
+    let output = runtime.run_prompt(&args.prompt, args.session.as_deref(), args.continue_last)?;
+
+    match args.output {
+        AgentOutputFormat::Plain => println!("{}", output.turn.response.text),
+        AgentOutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
+        AgentOutputFormat::StreamingJson => {
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "type": "agent.session.started",
+                    "session_id": output.session.id,
+                    "turn": output.turn.sequence,
+                }))?
+            );
+            io::stdout().flush()?;
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "type": "agent.response.delta",
+                    "session_id": output.session.id,
+                    "text": output.turn.response.text,
+                }))?
+            );
+            io::stdout().flush()?;
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "type": "agent.session.completed",
+                    "session": output.session,
+                    "response": output.turn.response,
+                }))?
+            );
+        }
+    }
+    Ok(())
+}
+
+fn run_agent_sessions(args: AgentSessionsArgs) -> Result<()> {
+    let store = AgentSessionStore::from_env()?;
+    match args.command {
+        AgentSessionsCommand::List => {
+            println!("{}", serde_json::to_string_pretty(&store.list()?)?);
+        }
+        AgentSessionsCommand::Show { id } => {
+            let session = store
+                .read(&id)?
+                .ok_or_else(|| anyhow::anyhow!("agent session '{id}' was not found"))?;
+            println!("{}", serde_json::to_string_pretty(&session)?);
+        }
+    }
+    Ok(())
+}
+
+fn run_agent_capability(args: AgentCapabilityArgs, config_path: Option<PathBuf>) -> Result<()> {
+    match args.command {
+        AgentCapabilityCommand::Call(args) => {
+            let permissions = args.permissions.into_permissions()?;
+            let capability_args = parse_agent_json_object(&args.json)?;
+            let config = config_from_args(args.runtime, None, config_path, None)?;
+            let runtime = AgentRuntime::from_env(Harness::new(config)?, permissions)?;
+            let result = runtime.invoke_capability(&args.capability, capability_args)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+    Ok(())
+}
+
+async fn run_agent_task(args: AgentTaskArgs, config_path: Option<PathBuf>) -> Result<()> {
+    match args.command {
+        AgentTaskCommand::Start(args) => start_agent_task(args, config_path).await?,
+        AgentTaskCommand::Status { name } => agent_task_status(name.as_deref())?,
+        AgentTaskCommand::Log(args) => agent_task_log(args)?,
+        AgentTaskCommand::Stop(args) => agent_task_stop(args)?,
+        AgentTaskCommand::Supervise(args) => supervise_agent_task(args, config_path).await?,
+    }
+    Ok(())
+}
+
+async fn start_agent_task(args: AgentTaskStartArgs, config_path: Option<PathBuf>) -> Result<()> {
+    let AgentTaskStartArgs {
+        name,
+        capability,
+        json: args_json,
+        interval_ms,
+        max_runs,
+        permissions,
+        runtime,
+    } = args;
+    if interval_ms == 0 {
+        bail!("agent task interval must be at least 1 ms");
+    }
+    let permissions = permissions.into_permissions()?;
+    permissions.check(&capability)?;
+    if !default_capability_descriptors()
+        .iter()
+        .any(|descriptor| descriptor.name == capability)
+    {
+        bail!("unknown capability '{capability}'");
+    }
+    let capability_args = parse_agent_json_object(&args_json)?;
+    let config = config_from_args(runtime, None, config_path, None)?;
+    config.validate()?;
+
+    let store = AgentTaskStore::from_env()?;
+    if let Some(existing) = store.read(&name)? {
+        if existing.running() {
+            bail!(
+                "agent task '{}' is already running with pid {}",
+                existing.name,
+                existing.pid
+            );
+        }
+    }
+
+    let timestamp = leash_harness::daemon::now_ms();
+    let mut record = AgentTaskRecord {
+        format: AGENT_TASK_FORMAT.to_string(),
+        name: name.clone(),
+        pid: 0,
+        capability,
+        args: capability_args,
+        interval_ms,
+        max_runs,
+        runs: 0,
+        state: AgentTaskState::Starting,
+        permissions,
+        profile: config.profile.as_str().to_string(),
+        log_path: store.log_path(&name)?,
+        created_at_ms: timestamp,
+        updated_at_ms: timestamp,
+        last_result: None,
+        last_error: None,
+    };
+    store.write(&record)?;
+
+    let child_args = agent_task_supervisor_args(&name, &config);
+    match spawn_daemon(
+        &std::env::current_exe()?,
+        &child_args,
+        &record.log_path,
+        &format!("agent-task-{name}"),
+    ) {
+        Ok(pid) => {
+            record.pid = pid;
+            record.updated_at_ms = leash_harness::daemon::now_ms();
+            store.write(&record)?;
+        }
+        Err(error) => {
+            record.state = AgentTaskState::Failed;
+            record.last_error = Some(error.to_string());
+            record.updated_at_ms = leash_harness::daemon::now_ms();
+            store.write(&record)?;
+            return Err(error);
+        }
+    }
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let record = store.read(&name)?.unwrap_or(record);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&agent_task_view(record))?
+    );
+    Ok(())
+}
+
+async fn supervise_agent_task(
+    args: AgentTaskSuperviseArgs,
+    config_path: Option<PathBuf>,
+) -> Result<()> {
+    let store = AgentTaskStore::from_env()?;
+    let record = store
+        .read(&args.name)?
+        .ok_or_else(|| anyhow::anyhow!("agent task '{}' was not found", args.name))?;
+    let config = config_from_args(args.runtime, None, config_path, None)?;
+    let runtime = AgentRuntime::from_env(Harness::new(config)?, record.permissions.clone())?;
+    runtime.supervise_task(&store, &args.name).await?;
+    Ok(())
+}
+
+fn agent_task_status(name: Option<&str>) -> Result<()> {
+    let store = AgentTaskStore::from_env()?;
+    let records = if let Some(name) = name {
+        vec![store
+            .read(name)?
+            .ok_or_else(|| anyhow::anyhow!("agent task '{name}' was not found"))?]
+    } else {
+        store.list()?
+    };
+    let tasks = records
+        .into_iter()
+        .map(|record| store.refresh(record).map(agent_task_view))
+        .collect::<Result<Vec<_>>>()?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "state_dir": store.root(),
+            "tasks": tasks,
+        }))?
+    );
+    Ok(())
+}
+
+fn agent_task_log(args: AgentTaskLogArgs) -> Result<()> {
+    let store = AgentTaskStore::from_env()?;
+    let record = store
+        .read(&args.name)?
+        .ok_or_else(|| anyhow::anyhow!("agent task '{}' was not found", args.name))?;
+    let text = tail_file(&record.log_path, args.lines)?;
+    if !text.is_empty() {
+        println!("{text}");
+    }
+    Ok(())
+}
+
+fn agent_task_stop(args: AgentTaskStopArgs) -> Result<()> {
+    let store = AgentTaskStore::from_env()?;
+    let stopped = store.stop(&args.name, Duration::from_millis(args.graceful_timeout_ms))?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "ok": true,
+            "outcome": stopped.outcome,
+            "task": agent_task_view(stopped.task),
+        }))?
+    );
+    Ok(())
+}
+
+fn agent_task_view(record: AgentTaskRecord) -> Value {
+    let running = record.running();
+    json!({
+        "name": record.name,
+        "pid": record.pid,
+        "running": running,
+        "state": record.state,
+        "capability": record.capability,
+        "args": record.args,
+        "interval_ms": record.interval_ms,
+        "max_runs": record.max_runs,
+        "runs": record.runs,
+        "permissions": record.permissions,
+        "profile": record.profile,
+        "log_path": record.log_path,
+        "created_at_ms": record.created_at_ms,
+        "updated_at_ms": record.updated_at_ms,
+        "last_error": record.last_error,
+    })
+}
+
+fn parse_agent_json_object(text: &str) -> Result<Value> {
+    let value: Value = serde_json::from_str(text)?;
+    if !value.is_object() {
+        bail!("agent capability arguments must be a JSON object");
+    }
+    Ok(value)
+}
+
+fn agent_task_supervisor_args(name: &str, config: &HarnessConfig) -> Vec<String> {
+    let mut args = vec![
+        "agent".to_string(),
+        "task".to_string(),
+        "supervise".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--role".to_string(),
+        config.role.clone(),
+        "--profile".to_string(),
+        config.profile.as_str().to_string(),
+        "--stream-transport".to_string(),
+        config.stream_transport.as_str().to_string(),
+        "--deadman-ms".to_string(),
+        config.deadman_ms.to_string(),
+        "--soft-odometry-limit-m".to_string(),
+        config.soft_odometry_limit_m.to_string(),
+        "--serial-port".to_string(),
+        config.serial_port.clone(),
+        "--serial-baud".to_string(),
+        config.serial_baud.to_string(),
+        "--mavlink-endpoint".to_string(),
+        config.mavlink_endpoint.clone(),
+        "--accelerator".to_string(),
+        config.accelerator.as_str().to_string(),
+        "--agent-provider".to_string(),
+        "deterministic-test".to_string(),
+        "--agent-model".to_string(),
+        "deterministic-test".to_string(),
+        "--policy-mode".to_string(),
+        config.policy_mode.as_str().to_string(),
+    ];
+    if config.allow_untokened_drive {
+        args.push("--allow-untokened-drive".to_string());
+    } else {
+        args.push("--no-untokened-drive".to_string());
+    }
+    if config.allow_physical_actuation {
+        args.push("--allow-physical-actuation".to_string());
+    }
+    if config.allow_physical_navigation {
+        args.push("--allow-physical-navigation".to_string());
+    }
+    if let Some(path) = &config.replay_source {
+        args.push("--replay-source".to_string());
+        args.push(path.display().to_string());
+        args.push("--replay-speed".to_string());
+        args.push(config.replay_speed.to_string());
+    }
+    if config.drive_invert {
+        args.push("--drive-invert".to_string());
+    }
+    if config.drive_swap {
+        args.push("--drive-swap".to_string());
+    }
+    if config.require_accelerator {
+        args.push("--require-accelerator".to_string());
+    }
+    if config.resource_sampling {
+        args.push("--resource-sampling".to_string());
+    } else {
+        args.push("--no-resource-sampling".to_string());
+    }
+    args
 }
 
 fn print_stack_list(format: ListFormat) -> Result<()> {

@@ -13,6 +13,8 @@ use std::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 pub const DEFAULT_RUN_NAME: &str = "default";
 
@@ -156,12 +158,16 @@ pub fn spawn_daemon(
 ) -> Result<u32> {
     let stdout = open_log_append(log_path)?;
     let stderr = stdout.try_clone()?;
-    let child = Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .args(args)
         .env("LEASH_RUN_ID", run_id)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stderr(Stdio::from(stderr));
+    #[cfg(unix)]
+    command.process_group(0);
+    let child = command
         .spawn()
         .with_context(|| format!("spawn {}", executable.display()))?;
     Ok(child.id())
