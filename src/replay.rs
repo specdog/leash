@@ -428,6 +428,7 @@ mod tests {
             right_cmd: 0.0,
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
+            odometry_pose: None,
             session_id: None,
             deadman_ok: true,
             estop: false,

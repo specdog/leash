@@ -299,7 +299,7 @@ impl RawTelemetry {
             #[cfg(feature = "waveshare-ugv")]
             odometry_pose: Some(Pose2d {
                 ts_ms,
-                frame_id: "map".to_string(),
+                frame_id: "odom".to_string(),
                 x_m: 0.0,
                 y_m: 0.0,
                 yaw_rad: 0.0,
@@ -1410,57 +1410,6 @@ impl Harness {
                 now,
             );
         }
-        #[cfg(feature = "waveshare-ugv")]
-        if self.config.profile == Profile::WaveshareUgv {
-            if let Some(pose) = raw.odometry_pose.clone() {
-                let snapshot = self.localization_provider.snapshot(now);
-                let current_pose_stale = snapshot
-                    .status
-                    .last_update_ms
-                    .map_or(true, |ts| now.saturating_sub(ts) > 500);
-                let current_pose_missing = snapshot.localization.pose.is_none();
-                if current_pose_stale || current_pose_missing {
-                    let sequence = snapshot.status.sequence.unwrap_or(0).saturating_add(1);
-                    let localization_ts_ms = pose.ts_ms;
-                    let (map, occupancy_grid, costmap) = waveshare_map_frames(localization_ts_ms);
-                    let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
-                    let _ = self.localization_provider.apply_at(
-                        LocalizationProviderUpdate {
-                            version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION
-                                .to_string(),
-                            sequence,
-                            localization: LocalizationFrame {
-                                version: LOCALIZATION_FRAME_VERSION.to_string(),
-                                ts_ms: localization_ts_ms,
-                                map: MapIdentity {
-                                    map_id: "waveshare-odom".to_string(),
-                                    map_revision: "odom-v1".to_string(),
-                                    frame_id: "map".to_string(),
-                                },
-                                pose: Some(PoseWithCovariance2d {
-                                    pose,
-                                    covariance: vec![
-                                        0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02,
-                                    ],
-                                }),
-                                health: LocalizationHealth {
-                                    status: LocalizationStatus::Tracking,
-                                    last_update_ms: Some(localization_ts_ms),
-                                    message: "waveshare wheel odometry pose".to_string(),
-                                    error: None,
-                                },
-                            },
-                            map,
-                            occupancy_grid,
-                            costmap,
-                            path: VisualizationPath::default(),
-                            voxel_grid,
-                        },
-                        now,
-                    );
-                }
-            }
-        }
         let localization_snapshot = self.localization_provider.snapshot(now);
         let voxel_grid = self.voxel_grid_for(&localization_snapshot.occupancy_grid);
         let resource = self.config.resource_sampling.then(current_resource_sample);
@@ -1479,6 +1428,7 @@ impl Harness {
             right_cmd: command.right_cmd,
             odometry_left: raw.odometry_left,
             odometry_right: raw.odometry_right,
+            odometry_pose: relative_odometry_pose(&raw),
             session_id: command.active_session_id.as_deref().map(operator_owner_id),
             deadman_ok: !command.stopped_by_deadman,
             estop: command.estop,
@@ -1639,9 +1589,15 @@ impl Harness {
             .pose
             .as_ref()
             .map(|localized| localized.pose.clone())
+            .or_else(|| {
+                telemetry
+                    .odometry_pose
+                    .as_ref()
+                    .map(|odom| odom.pose.clone())
+            })
             .unwrap_or(Pose2d {
                 ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
+                frame_id: "odom".to_string(),
                 x_m,
                 y_m: 0.0,
                 yaw_rad,
@@ -2719,7 +2675,7 @@ fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
         raw.odometry_prev_right = Some(right_m);
         raw.odometry_pose = Some(Pose2d {
             ts_ms,
-            frame_id: "map".to_string(),
+            frame_id: "odom".to_string(),
             x_m: 0.0,
             y_m: 0.0,
             yaw_rad: 0.0,
@@ -2741,6 +2697,37 @@ fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
     }
     raw.odometry_prev_left = Some(left_m);
     raw.odometry_prev_right = Some(right_m);
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn relative_odometry_pose(raw: &RawTelemetry) -> Option<PoseWithCovariance2d> {
+    let pose = raw.odometry_pose.clone()?;
+    let distance_m = raw
+        .odometry_left
+        .zip(raw.odometry_right)
+        .map(|(left, right)| ((left.abs() + right.abs()) * 0.5).max(0.0))
+        .unwrap_or_default();
+    let linear_variance = 0.01 + distance_m * 0.02;
+    let yaw_variance = 0.02 + distance_m * 0.04;
+    Some(PoseWithCovariance2d {
+        pose,
+        covariance: vec![
+            linear_variance,
+            0.0,
+            0.0,
+            0.0,
+            linear_variance,
+            0.0,
+            0.0,
+            0.0,
+            yaw_variance,
+        ],
+    })
+}
+
+#[cfg(not(feature = "waveshare-ugv"))]
+fn relative_odometry_pose(_raw: &RawTelemetry) -> Option<PoseWithCovariance2d> {
+    None
 }
 
 fn battery_percent_from_voltage(voltage: f64) -> Option<f64> {
@@ -2907,48 +2894,6 @@ fn simulated_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, Costma
     let map = MapMetadata {
         ts_ms,
         map_id: "sim-local".to_string(),
-        frame_id: "map".to_string(),
-        width: 4,
-        height: 4,
-        resolution_m: 0.25,
-        origin: origin.clone(),
-        cell_order: "row-major".to_string(),
-    };
-    let occupancy_grid = OccupancyGridFrame {
-        ts_ms,
-        frame_id: "map".to_string(),
-        width: 4,
-        height: 4,
-        resolution_m: 0.25,
-        origin: origin.clone(),
-        metadata: map.clone(),
-        cells: planner_occupancy_cells(),
-    };
-    let costmap = CostmapFrame {
-        ts_ms,
-        frame_id: "map".to_string(),
-        width: 4,
-        height: 4,
-        resolution_m: 0.25,
-        origin,
-        metadata: map.clone(),
-        costs: planner_costs(),
-    };
-    (map, occupancy_grid, costmap)
-}
-
-#[cfg(feature = "waveshare-ugv")]
-fn waveshare_map_frames(ts_ms: u128) -> (MapMetadata, OccupancyGridFrame, CostmapFrame) {
-    let origin = Pose2d {
-        ts_ms,
-        frame_id: "map".to_string(),
-        x_m: -0.5,
-        y_m: -0.5,
-        yaw_rad: 0.0,
-    };
-    let map = MapMetadata {
-        ts_ms,
-        map_id: "waveshare-odom".to_string(),
         frame_id: "map".to_string(),
         width: 4,
         height: 4,
@@ -3629,38 +3574,14 @@ mod tests {
 
     #[cfg(feature = "waveshare-ugv")]
     #[tokio::test]
-    async fn waveshare_telemetry_falls_back_to_odometry_when_localization_stale() {
+    async fn waveshare_keeps_odometry_relative_when_localization_is_stale() {
         let (harness, _) = waveshare_sensor_harness();
         let stale_ts = now_ms().saturating_sub(10_000);
-        let received_ts = now_ms();
 
-        // Seed provider with a stale SLAM pose.
-        let stale_localization = LocalizationFrame {
-            version: LOCALIZATION_FRAME_VERSION.to_string(),
-            ts_ms: stale_ts,
-            map: MapIdentity {
-                map_id: "waveshare-odom".to_string(),
-                map_revision: "rev".to_string(),
-                frame_id: "map".to_string(),
-            },
-            pose: Some(PoseWithCovariance2d {
-                pose: Pose2d {
-                    ts_ms: stale_ts,
-                    frame_id: "map".to_string(),
-                    x_m: 1.0,
-                    y_m: 2.0,
-                    yaw_rad: 3.0,
-                },
-                covariance: vec![0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02],
-            }),
-            health: LocalizationHealth {
-                status: LocalizationStatus::Tracking,
-                last_update_ms: Some(stale_ts),
-                message: "stale slam".to_string(),
-                error: None,
-            },
-        };
-        let (map, occupancy_grid, costmap) = waveshare_map_frames(stale_ts);
+        // Seed a coherent but stale global SLAM snapshot.
+        let raw = RawTelemetry::sim();
+        let stale_localization = simulated_localization_frame(stale_ts, &raw);
+        let (map, occupancy_grid, costmap) = simulated_map_frames(stale_ts);
         let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
         harness
             .localization_provider
@@ -3675,7 +3596,7 @@ mod tests {
                     path: VisualizationPath::default(),
                     voxel_grid,
                 },
-                received_ts,
+                stale_ts,
             )
             .unwrap();
 
@@ -3686,25 +3607,33 @@ mod tests {
             raw.odometry_right = Some(0.0);
             integrate_odometry_pose(&mut raw, 0.0, 0.0);
             integrate_odometry_pose(&mut raw, 0.05, 0.15);
+            raw.odometry_left = Some(0.05);
+            raw.odometry_right = Some(0.15);
         }
 
         let telemetry = harness.telemetry();
-        let pose = telemetry
+        let global_pose = telemetry
             .localization
             .pose
             .as_ref()
-            .expect("telemetry should publish a pose")
-            .pose
-            .clone();
-        assert!(
-            pose.ts_ms > stale_ts,
-            "telemetry pose timestamp should advance past stale SLAM"
+            .expect("stale global pose remains visible as stale evidence");
+        assert_eq!(global_pose.pose.ts_ms, stale_ts);
+        assert_eq!(telemetry.localization.map.frame_id, "map");
+        assert_eq!(
+            telemetry.localization_provider.state,
+            crate::localization::LocalizationProviderState::Stale
         );
+
+        let odometry = telemetry
+            .odometry_pose
+            .expect("wheel odometry is published separately");
+        assert_eq!(odometry.pose.frame_id, "odom");
         assert!(
-            (pose.yaw_rad - 0.5).abs() < 1e-6,
-            "yaw should reflect wheel odometry pivot: {}",
-            pose.yaw_rad
+            (odometry.pose.yaw_rad - 0.5).abs() < 1e-6,
+            "yaw should reflect relative wheel odometry pivot: {}",
+            odometry.pose.yaw_rad
         );
+        assert!(odometry.covariance[0] > 0.01);
     }
 
     #[tokio::test]
