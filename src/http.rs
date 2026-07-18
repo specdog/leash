@@ -601,7 +601,7 @@ async fn cognition_status(
 
 async fn cognition_snapshot(
     State(harness): State<Harness>,
-) -> Json<Vec<crate::cognition::CognitionLayerSnapshotV1>> {
+) -> Json<crate::cognition::CognitionSnapshotsV1> {
     Json(harness.cognition_snapshots())
 }
 

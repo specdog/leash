@@ -58,6 +58,13 @@ pub struct CognitionLayerSnapshotV1 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CognitionSnapshotsV1 {
+    pub schema_version: String,
+    pub layers: Vec<CognitionLayerSnapshotV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct CognitionBoundaryFrameV1 {
     pub schema_version: String,
     pub ts_ms: u128,
@@ -202,6 +209,7 @@ impl Default for CognitionState {
 pub struct CognitionRuntime {
     state: Arc<Mutex<CognitionState>>,
     backend: Arc<str>,
+    owner: Arc<str>,
     checkpoint_dir: Arc<PathBuf>,
     boundary_tx: broadcast::Sender<CognitionBoundaryFrameV1>,
     #[cfg(feature = "cuda")]
@@ -209,7 +217,7 @@ pub struct CognitionRuntime {
 }
 
 impl CognitionRuntime {
-    pub fn new(accelerator: &AcceleratorStatus) -> Self {
+    pub fn new(accelerator: &AcceleratorStatus, owner: &str) -> Self {
         #[cfg(feature = "cuda")]
         let cuda = (accelerator.active == AcceleratorBackend::Cuda)
             .then(crate::cuda_cognition::CudaCognition::new)
@@ -232,6 +240,7 @@ impl CognitionRuntime {
         Self {
             state: Arc::new(Mutex::new(state)),
             backend: Arc::from(backend),
+            owner: Arc::from(owner.trim()),
             checkpoint_dir: Arc::new(default_checkpoint_dir()),
             boundary_tx,
             #[cfg(feature = "cuda")]
@@ -243,7 +252,7 @@ impl CognitionRuntime {
         CognitionCapabilitiesV1 {
             schema_version: COGNITION_CONTRACT_VERSION.to_string(),
             runtime: "leash".to_string(),
-            owner: "guard".to_string(),
+            owner: self.owner.to_string(),
             state_dim: COGNITION_STATE_DIM,
             owned_layers: vec![0, 1, 2],
             sensor_plane: SENSOR_LAYER,
@@ -699,7 +708,8 @@ mod tests {
     fn predictive_layers_decay_when_sensor_evidence_expires() {
         let accelerator =
             crate::accelerator::resolve_accelerator(AcceleratorBackend::Cpu, false).unwrap();
-        let runtime = CognitionRuntime::new(&accelerator);
+        let runtime = CognitionRuntime::new(&accelerator, "test-embodiment");
+        assert_eq!(runtime.capabilities().owner, "test-embodiment");
         let now = now_ms();
         runtime.state.lock().sensor_ts_ms = Some(now);
         runtime.tick(now);

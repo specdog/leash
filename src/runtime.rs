@@ -32,8 +32,8 @@ use crate::{
     adapter::{simulated_imu_sample, simulated_range_scan, GimbalAdapter, MobileBaseAdapter},
     capability::{default_capability_descriptors, CapabilityRegistry},
     cognition::{
-        CognitionBoundaryFrameV1, CognitionCheckpointV1, CognitionLayerSnapshotV1,
-        CognitionRuntime, CognitionStatusV1,
+        CognitionBoundaryFrameV1, CognitionCheckpointV1, CognitionRuntime, CognitionSnapshotsV1,
+        CognitionStatusV1, COGNITION_CONTRACT_VERSION,
     },
     config::{AcceleratorBackend, HarnessConfig, Profile},
     localization::{
@@ -505,7 +505,7 @@ impl Harness {
 
         let (telemetry_tx, _) = broadcast::channel(128);
         let stream_transport = new_stream_transport(config.stream_transport);
-        let cognition = CognitionRuntime::new(&accelerator);
+        let cognition = CognitionRuntime::new(&accelerator, &config.role);
         let harness = Self {
             config,
             started_at: Instant::now(),
@@ -575,8 +575,11 @@ impl Harness {
         self.cognition.status(now_ms(), zero_motion)
     }
 
-    pub fn cognition_snapshots(&self) -> Vec<CognitionLayerSnapshotV1> {
-        self.cognition.snapshots(now_ms())
+    pub fn cognition_snapshots(&self) -> CognitionSnapshotsV1 {
+        CognitionSnapshotsV1 {
+            schema_version: COGNITION_CONTRACT_VERSION.to_string(),
+            layers: self.cognition.snapshots(now_ms()),
+        }
     }
 
     pub fn cognition_boundary(&self) -> CognitionBoundaryFrameV1 {
@@ -2767,7 +2770,8 @@ fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
         pose.yaw_rad += delta_yaw;
         // Keep yaw in [-π, π] so it stays human-readable and avoids drift.
         let two_pi = 2.0 * std::f64::consts::PI;
-        pose.yaw_rad = (pose.yaw_rad + std::f64::consts::PI).rem_euclid(two_pi) - std::f64::consts::PI;
+        pose.yaw_rad =
+            (pose.yaw_rad + std::f64::consts::PI).rem_euclid(two_pi) - std::f64::consts::PI;
         pose.ts_ms = ts_ms;
     }
     raw.odometry_prev_left = Some(left_m);
@@ -3656,9 +3660,9 @@ mod tests {
         // Spin clockwise enough to cross -PI.
         // With track 0.20, each (0, +0.4 m) update adds delta_yaw = 0.4 / 0.20 = 2.0 rad.
         // Pass cumulative odometry, so each right reading grows.
-        integrate_odometry_pose(&mut raw, 0.0, 0.4);   // yaw =  2.0
-        integrate_odometry_pose(&mut raw, 0.0, 0.8);   // yaw =  4.0 -> wraps to -2.283...
-        integrate_odometry_pose(&mut raw, 0.0, 1.2);   // yaw = -0.283...
+        integrate_odometry_pose(&mut raw, 0.0, 0.4); // yaw =  2.0
+        integrate_odometry_pose(&mut raw, 0.0, 0.8); // yaw =  4.0 -> wraps to -2.283...
+        integrate_odometry_pose(&mut raw, 0.0, 1.2); // yaw = -0.283...
         let pose = raw.odometry_pose.clone().unwrap();
         assert!(
             pose.yaw_rad <= std::f64::consts::PI && pose.yaw_rad >= -std::f64::consts::PI,

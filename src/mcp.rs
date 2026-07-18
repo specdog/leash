@@ -220,9 +220,7 @@ impl LeashMcp {
         name = "cognition_snapshot",
         description = "Read compact Leash L0-L2 predictive-coding layer snapshots"
     )]
-    pub async fn cognition_snapshot(
-        &self,
-    ) -> Json<Vec<crate::cognition::CognitionLayerSnapshotV1>> {
+    pub async fn cognition_snapshot(&self) -> Json<crate::cognition::CognitionSnapshotsV1> {
         Json(self.harness.cognition_snapshots())
     }
 
@@ -403,7 +401,7 @@ pub fn tool_descriptors() -> Vec<McpToolDescriptor> {
             "telemetry",
             SafetyClass::ObserveOnly,
             empty_object_schema(),
-            "CognitionLayerSnapshotV1[]",
+            "CognitionSnapshotsV1",
         ),
         tool_descriptor(
             "cognition_checkpoint",
