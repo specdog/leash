@@ -14,7 +14,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket},
-        Form, Path as AxumPath, State, WebSocketUpgrade,
+        Form, Path as AxumPath, Query, State, WebSocketUpgrade,
     },
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -186,6 +186,13 @@ struct DriveReq {
     approval: Option<bool>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ActionEvidenceQuery {
+    #[serde(default)]
+    after_sequence: u64,
+    limit: Option<usize>,
+}
+
 #[derive(Debug, Deserialize)]
 struct CameraAimReq {
     token: Option<String>,
@@ -251,6 +258,8 @@ pub fn router(harness: Harness) -> Router {
         .route("/capabilities", get(capabilities))
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
+        .route("/action-evidence", get(action_evidence))
+        .route("/evidence/action/applied", get(action_evidence))
         .route("/localization", get(localization_status))
         .route("/localization/update", post(localization_update))
         .route("/events/telemetry", get(sse_telemetry))
@@ -315,6 +324,16 @@ async fn health(State(harness): State<Harness>) -> Json<crate::types::Health> {
 
 async fn capabilities(State(harness): State<Harness>) -> Json<crate::types::Capabilities> {
     Json(harness.capabilities())
+}
+
+async fn action_evidence(
+    State(harness): State<Harness>,
+    Query(query): Query<ActionEvidenceQuery>,
+) -> Result<Json<crate::types::AppliedActionEvidencePage>, HttpError> {
+    Ok(Json(harness.applied_action_evidence(
+        query.after_sequence,
+        query.limit.unwrap_or(256),
+    )?))
 }
 
 async fn waypoints(State(harness): State<Harness>) -> Json<crate::types::SavedWaypointList> {
