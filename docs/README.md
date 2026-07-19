@@ -16,6 +16,7 @@ flowchart TB
   docs --> sessions["OPERATOR_SESSIONS.md\nsafe recording and offline GUI replay"]
   docs --> defaultBranch["DEFAULT_BRANCH_RECOVERY.md\ndefault-branch audit and recovery proof"]
   docs --> sensors["SENSORS.md\ngeneric range-scan and IMU contracts"]
+  docs --> actionEvidence["ACTION_EVIDENCE.md\npost-safety action interval provenance"]
   docs --> localization["LOCALIZATION.md\nversioned pose, covariance, map, and health wire contract"]
   localization --> providers["LOCALIZATION_PROVIDERS.md\ngeneric provider extension boundary"]
 
@@ -38,5 +39,6 @@ flowchart TB
 - `OPERATOR_SESSIONS.md`: safe operator event recording and offline GUI timeline replay.
 - `DEFAULT_BRANCH_RECOVERY.md`: the audited `main` default-branch recovery, DotDog proof, and repeatable recovery procedure.
 - `SENSORS.md`: middleware-neutral planar range-scan and IMU units, frames, validation, and status behavior.
+- `ACTION_EVIDENCE.md`: lossless post-safety wheel intervals for replay and world-model supervision.
 - `LOCALIZATION.md`: versioned map identity, pose/covariance, health, visualization, and replay behavior.
 - `LOCALIZATION_PROVIDERS.md`: in-process, simulation, replay, and non-blocking external localization provider extension guide.

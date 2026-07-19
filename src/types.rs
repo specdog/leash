@@ -1544,6 +1544,47 @@ pub struct DriveOutcome {
     pub soft_odometry_limited: bool,
 }
 
+pub const APPLIED_ACTION_SCHEMA_VERSION: &str = "qualia.applied-action.v1";
+pub const APPLIED_ACTION_PAGE_SCHEMA_VERSION: &str = "leash.applied-action-page.v1";
+
+/// One completed interval of post-safety differential-drive authority.
+///
+/// These values are produced inside Leash after the physical adapter accepts
+/// the command. Consumers must never reconstruct this contract from requested
+/// UI or planner commands.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AppliedActionEvidence {
+    pub schema_version: String,
+    pub authority: String,
+    pub producer_epoch: u64,
+    pub action_sequence: u64,
+    pub interval_start_ns: u64,
+    pub interval_end_ns: u64,
+    pub requested_left: f64,
+    pub requested_right: f64,
+    pub clamped_left: f64,
+    pub clamped_right: f64,
+    pub applied_left: f64,
+    pub applied_right: f64,
+    pub speed_scale: f64,
+    pub safety_flags: u32,
+    pub valid: bool,
+    pub armed: bool,
+    pub deadman_active: bool,
+    pub collision_clamped: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct AppliedActionEvidencePage {
+    pub schema_version: String,
+    pub producer_epoch: u64,
+    pub oldest_sequence: u64,
+    pub latest_sequence: u64,
+    pub entries: Vec<AppliedActionEvidence>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct DroneCommandStatus {
