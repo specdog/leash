@@ -46,16 +46,17 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
-        Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, ImuStatus, LocalizationFrame, LocalizationHealth,
-        LocalizationStatus, MapIdentity, MapMetadata, MotionEvent, MotionEventKind,
-        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
-        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
-        SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame, VisualizationPath,
-        VoxelCell, VoxelGridFrame, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
+        AgentMessage, AgentModelResponse, AppliedActionEvidence, AppliedActionEvidencePage,
+        BatteryStatus, CameraAimOutcome, CameraStatus, Capabilities, CaptureResult, CommandOverlay,
+        CommandStreamState, CostmapFrame, DriveOutcome, Health, ImageObservation, ImuStatus,
+        LocalizationFrame, LocalizationHealth, LocalizationStatus, MapIdentity, MapMetadata,
+        MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus, OperatorTokenStatus,
+        PatrolStatus, PatrolStrategy, PatrolZoneList, PlannerGoal, PlannerStatus,
+        PointCloudMetadata, Pose2d, PoseWithCovariance2d, RangeScanStatus, RawFrameStatus,
+        ResourceSample, SafetyStreamState, SavedWaypointList, SensorSnapshot, SpatialMemoryStatus,
+        SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, VisionResult, VisualizationFrame,
+        VisualizationPath, VoxelCell, VoxelGridFrame, APPLIED_ACTION_PAGE_SCHEMA_VERSION,
+        APPLIED_ACTION_SCHEMA_VERSION, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
         OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
         VOXEL_GRID_VERSION,
     },
@@ -63,6 +64,12 @@ use crate::{
 
 const AGENT_MESSAGE_LIMIT: usize = 128;
 const DASHBOARD_EVENT_LIMIT: usize = 64;
+const ACTION_EVIDENCE_HISTORY_CAPACITY: usize = 4096;
+const ACTION_EVIDENCE_HEARTBEAT_MS: u64 = 100;
+const ACTION_SAFETY_COLLISION_CLAMP: u32 = 1 << 0;
+const ACTION_SAFETY_SOFT_ODOMETRY_LIMIT: u32 = 1 << 1;
+const ACTION_SAFETY_ESTOP: u32 = 1 << 2;
+const ACTION_SAFETY_DEADMAN: u32 = 1 << 3;
 const PLANNER_GRID_WIDTH: usize = 4;
 const PLANNER_GRID_HEIGHT: usize = 4;
 const PLANNER_GRID_CELLS: usize = PLANNER_GRID_WIDTH * PLANNER_GRID_HEIGHT;
@@ -244,6 +251,144 @@ struct CommandState {
     soft_odometry_limited: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ActionCommandEvidence {
+    requested_left: f64,
+    requested_right: f64,
+    clamped_left: f64,
+    clamped_right: f64,
+    applied_left: f64,
+    applied_right: f64,
+    speed_scale: f64,
+    safety_flags: u32,
+    valid: bool,
+    armed: bool,
+    deadman_active: bool,
+    collision_clamped: bool,
+}
+
+impl ActionCommandEvidence {
+    fn stopped(speed_scale: f64, safety_flags: u32) -> Self {
+        Self {
+            requested_left: 0.0,
+            requested_right: 0.0,
+            clamped_left: 0.0,
+            clamped_right: 0.0,
+            applied_left: 0.0,
+            applied_right: 0.0,
+            speed_scale,
+            safety_flags,
+            valid: true,
+            armed: false,
+            deadman_active: safety_flags & ACTION_SAFETY_DEADMAN != 0,
+            collision_clamped: safety_flags & ACTION_SAFETY_COLLISION_CLAMP != 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ActionEvidenceState {
+    producer_epoch: u64,
+    next_sequence: u64,
+    interval_start_ns: u64,
+    current: ActionCommandEvidence,
+    history: VecDeque<AppliedActionEvidence>,
+}
+
+impl ActionEvidenceState {
+    fn new(producer_epoch: u64, speed_scale: f64) -> Self {
+        Self {
+            producer_epoch: producer_epoch.max(1),
+            next_sequence: 1,
+            interval_start_ns: now_ns().max(1),
+            current: ActionCommandEvidence::stopped(speed_scale, 0),
+            history: VecDeque::with_capacity(ACTION_EVIDENCE_HISTORY_CAPACITY),
+        }
+    }
+
+    fn seal(&mut self, interval_end_ns: u64) -> Option<AppliedActionEvidence> {
+        if interval_end_ns <= self.interval_start_ns {
+            return None;
+        }
+        let action_sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        let current = self.current;
+        let evidence = AppliedActionEvidence {
+            schema_version: APPLIED_ACTION_SCHEMA_VERSION.to_string(),
+            authority: "leash".to_string(),
+            producer_epoch: self.producer_epoch,
+            action_sequence,
+            interval_start_ns: self.interval_start_ns,
+            interval_end_ns,
+            requested_left: current.requested_left,
+            requested_right: current.requested_right,
+            clamped_left: current.clamped_left,
+            clamped_right: current.clamped_right,
+            applied_left: current.applied_left,
+            applied_right: current.applied_right,
+            speed_scale: current.speed_scale,
+            safety_flags: current.safety_flags,
+            valid: current.valid,
+            armed: current.armed,
+            deadman_active: current.deadman_active,
+            collision_clamped: current.collision_clamped,
+        };
+        if self.history.len() == ACTION_EVIDENCE_HISTORY_CAPACITY {
+            self.history.pop_front();
+        }
+        self.history.push_back(evidence.clone());
+        self.interval_start_ns = interval_end_ns;
+        Some(evidence)
+    }
+
+    fn transition(&mut self, at_ns: u64, next: ActionCommandEvidence) {
+        self.seal(at_ns);
+        self.current = next;
+        self.interval_start_ns = self.interval_start_ns.max(at_ns);
+    }
+
+    fn set_speed_scale(&mut self, at_ns: u64, speed_scale: f64) {
+        self.seal(at_ns);
+        self.current.speed_scale = speed_scale;
+        self.interval_start_ns = self.interval_start_ns.max(at_ns);
+    }
+
+    fn page(&self, after_sequence: u64, limit: usize) -> Result<AppliedActionEvidencePage> {
+        let oldest_sequence = self
+            .history
+            .front()
+            .map(|entry| entry.action_sequence)
+            .unwrap_or(0);
+        let latest_sequence = self
+            .history
+            .back()
+            .map(|entry| entry.action_sequence)
+            .unwrap_or(0);
+        if after_sequence != 0
+            && oldest_sequence != 0
+            && after_sequence.saturating_add(1) < oldest_sequence
+        {
+            return Err(anyhow!(
+                "applied-action history overrun: requested after {after_sequence}, oldest is {oldest_sequence}"
+            ));
+        }
+        let entries = self
+            .history
+            .iter()
+            .filter(|entry| entry.action_sequence > after_sequence)
+            .take(limit.clamp(1, 512))
+            .cloned()
+            .collect();
+        Ok(AppliedActionEvidencePage {
+            schema_version: APPLIED_ACTION_PAGE_SCHEMA_VERSION.to_string(),
+            producer_epoch: self.producer_epoch,
+            oldest_sequence,
+            latest_sequence,
+            entries,
+        })
+    }
+}
+
 #[cfg(feature = "physical-navigation")]
 #[derive(Debug, Clone)]
 struct PhysicalNavigationLease {
@@ -343,6 +488,7 @@ pub struct Harness {
     started_at: Instant,
     driver: Arc<dyn RobotDriver>,
     command: Arc<Mutex<CommandState>>,
+    action_evidence: Arc<Mutex<ActionEvidenceState>>,
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
@@ -468,11 +614,16 @@ impl Harness {
 
         let (telemetry_tx, _) = broadcast::channel(128);
         let stream_transport = new_stream_transport(config.stream_transport);
+        let action_producer_epoch = now_ns().saturating_add(instance_id).max(1);
         let harness = Self {
             config,
             started_at: Instant::now(),
             driver,
             command: Arc::new(Mutex::new(CommandState::default())),
+            action_evidence: Arc::new(Mutex::new(ActionEvidenceState::new(
+                action_producer_epoch,
+                SpeedMode::default().cap(),
+            ))),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
@@ -497,6 +648,7 @@ impl Harness {
             accelerator,
         };
         harness.spawn_deadman();
+        harness.spawn_action_evidence_loop();
         harness.spawn_planner_loop();
         harness.spawn_patrol_loop();
         #[cfg(feature = "waveshare-ugv")]
@@ -507,6 +659,28 @@ impl Harness {
 
     pub fn config(&self) -> &HarnessConfig {
         &self.config
+    }
+
+    pub fn applied_action_evidence(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> Result<AppliedActionEvidencePage> {
+        self.action_evidence.lock().page(after_sequence, limit)
+    }
+
+    fn seal_action_evidence(&self, at_ns: u64) {
+        self.action_evidence.lock().seal(at_ns);
+    }
+
+    fn spawn_action_evidence_loop(&self) {
+        let harness = self.clone();
+        tokio::spawn(async move {
+            loop {
+                time::sleep(Duration::from_millis(ACTION_EVIDENCE_HEARTBEAT_MS)).await;
+                harness.seal_action_evidence(now_ns());
+            }
+        });
     }
 
     pub fn submit_localization_update(&self, update: LocalizationProviderUpdate) -> Result<()> {
@@ -1291,6 +1465,8 @@ impl Harness {
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
+                "GET /action-evidence".to_string(),
+                "GET /evidence/action/applied".to_string(),
                 "GET /localization".to_string(),
                 "POST /localization/update".to_string(),
                 "GET /events/telemetry".to_string(),
@@ -1633,6 +1809,25 @@ impl Harness {
             && self.physical_actuation_enabled()
     }
 
+    fn write_drive_with_evidence(
+        &self,
+        left: f64,
+        right: f64,
+        next: ActionCommandEvidence,
+    ) -> Result<()> {
+        let mut evidence = self.action_evidence.lock();
+        self.driver.drive(left, right)?;
+        evidence.transition(now_ns(), next);
+        Ok(())
+    }
+
+    fn write_stop_with_evidence(&self, next: ActionCommandEvidence) -> Result<()> {
+        let mut evidence = self.action_evidence.lock();
+        self.driver.stop()?;
+        evidence.transition(now_ns(), next);
+        Ok(())
+    }
+
     pub fn authorize(&self, token: String, ttl_secs: u64, speed_mode: SpeedMode) -> Result<()> {
         let token = token.trim().to_string();
         if token.is_empty() {
@@ -1648,8 +1843,11 @@ impl Harness {
                 && (command.left_cmd != 0.0 || command.right_cmd != 0.0)
         };
         if should_stop_previous_owner {
-            self.driver.stop()?;
             let mut command = self.command.lock();
+            self.write_stop_with_evidence(ActionCommandEvidence::stopped(
+                command.speed_mode.cap(),
+                0,
+            ))?;
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
             command.last_cmd_at = None;
@@ -1693,7 +1891,11 @@ impl Harness {
 
     pub fn set_speed_mode(&self, token: Option<&str>, speed_mode: SpeedMode) -> Result<()> {
         self.validate_session(token)?;
-        self.command.lock().speed_mode = speed_mode;
+        let mut command = self.command.lock();
+        self.action_evidence
+            .lock()
+            .set_speed_scale(now_ns(), speed_mode.cap());
+        command.speed_mode = speed_mode;
         Ok(())
     }
 
@@ -1704,6 +1906,8 @@ impl Harness {
         right: f64,
         speed_mode: Option<SpeedMode>,
     ) -> Result<DriveOutcome> {
+        let requested_left = left;
+        let requested_right = right;
         let session = self.validate_session(token)?;
         let speed_mode = speed_mode.or(session.map(|session| session.speed_mode));
         if let Some(speed_mode) = speed_mode {
@@ -1714,7 +1918,7 @@ impl Harness {
         if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
             && self.obstacle_blocks_motion()
         {
-            self.stop_for_obstacle()?;
+            self.stop_for_obstacle(requested_left, requested_right)?;
             return Err(anyhow!(
                 "drive blocked by the configured lidar collision threshold"
             ));
@@ -1734,7 +1938,29 @@ impl Harness {
             right = 0.0;
         }
 
-        self.driver.drive(left, right)?;
+        let safety_flags = if command.soft_odometry_limited {
+            ACTION_SAFETY_SOFT_ODOMETRY_LIMIT
+        } else {
+            0
+        };
+        self.write_drive_with_evidence(
+            left,
+            right,
+            ActionCommandEvidence {
+                requested_left,
+                requested_right,
+                clamped_left: left,
+                clamped_right: right,
+                applied_left: left,
+                applied_right: right,
+                speed_scale: max_speed,
+                safety_flags,
+                valid: true,
+                armed: token.is_some(),
+                deadman_active: false,
+                collision_clamped: false,
+            },
+        )?;
         command.left_cmd = left;
         command.right_cmd = right;
         command.last_cmd_at = Some(Instant::now());
@@ -1784,17 +2010,30 @@ impl Harness {
             command.left_cmd.abs() > f64::EPSILON || command.right_cmd.abs() > f64::EPSILON
         };
         if moving {
-            if let Err(error) = self.stop_for_obstacle() {
+            if let Err(error) = self.stop_for_obstacle(0.0, 0.0) {
                 warn!(?error, "lidar collision stop failed");
             }
         }
     }
 
     #[cfg(feature = "waveshare-ugv")]
-    fn stop_for_obstacle(&self) -> Result<()> {
-        self.driver.stop()?;
+    fn stop_for_obstacle(&self, requested_left: f64, requested_right: f64) -> Result<()> {
         {
             let mut command = self.command.lock();
+            self.write_stop_with_evidence(ActionCommandEvidence {
+                requested_left,
+                requested_right,
+                clamped_left: 0.0,
+                clamped_right: 0.0,
+                applied_left: 0.0,
+                applied_right: 0.0,
+                speed_scale: command.speed_mode.cap(),
+                safety_flags: ACTION_SAFETY_COLLISION_CLAMP,
+                valid: true,
+                armed: command.active_session_id.is_some(),
+                deadman_active: false,
+                collision_clamped: true,
+            })?;
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
             command.last_cmd_at = Some(Instant::now());
@@ -1851,8 +2090,8 @@ impl Harness {
     }
 
     fn stop_without_planner_cancel(&self) -> Result<DriveOutcome> {
-        self.driver.stop()?;
         let mut command = self.command.lock();
+        self.write_stop_with_evidence(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))?;
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
         command.last_cmd_at = Some(Instant::now());
@@ -1872,8 +2111,11 @@ impl Harness {
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
-        self.driver.stop()?;
         let mut command = self.command.lock();
+        self.write_stop_with_evidence(ActionCommandEvidence::stopped(
+            command.speed_mode.cap(),
+            ACTION_SAFETY_ESTOP,
+        ))?;
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
         command.estop = true;
@@ -2065,12 +2307,20 @@ impl Harness {
     }
 
     fn fail_physical_navigation(&self, status: &str, message: &str) {
-        let _ = self.driver.stop();
-        {
+        let stop_result = {
             let mut command = self.command.lock();
-            command.left_cmd = 0.0;
-            command.right_cmd = 0.0;
-            command.last_cmd_at = Some(Instant::now());
+            self.write_stop_with_evidence(ActionCommandEvidence::stopped(
+                command.speed_mode.cap(),
+                0,
+            ))
+            .map(|()| {
+                command.left_cmd = 0.0;
+                command.right_cmd = 0.0;
+                command.last_cmd_at = Some(Instant::now());
+            })
+        };
+        if let Err(error) = stop_result {
+            warn!(?error, "physical navigation stop failed");
         }
         self.clear_physical_navigation_lease();
         self.cancel_planner_state(status, message);
@@ -2270,6 +2520,10 @@ impl Harness {
     pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
         self.validate_session(token)?;
         let mut command = self.command.lock();
+        self.action_evidence.lock().transition(
+            now_ns(),
+            ActionCommandEvidence::stopped(command.speed_mode.cap(), 0),
+        );
         command.estop = false;
         command.stopped_by_deadman = false;
         Ok(())
@@ -2464,14 +2718,22 @@ impl Harness {
                     }
                 };
                 if should_stop {
-                    if let Err(err) = harness.driver.stop() {
-                        warn!(?err, "deadman stop failed");
-                    }
                     let mut command = harness.command.lock();
-                    command.left_cmd = 0.0;
-                    command.right_cmd = 0.0;
-                    command.stopped_by_deadman = true;
+                    let stop_result =
+                        harness.write_stop_with_evidence(ActionCommandEvidence::stopped(
+                            command.speed_mode.cap(),
+                            ACTION_SAFETY_DEADMAN,
+                        ));
+                    if stop_result.is_ok() {
+                        command.left_cmd = 0.0;
+                        command.right_cmd = 0.0;
+                        command.stopped_by_deadman = true;
+                    }
                     drop(command);
+                    if let Err(err) = stop_result {
+                        warn!(?err, "deadman stop failed");
+                        continue;
+                    }
                     harness.clear_physical_navigation_lease();
                     harness
                         .cancel_planner_state("deadman", "planner movement cancelled by deadman");
@@ -3273,6 +3535,14 @@ pub fn now_ms() -> u128 {
         .as_millis()
 }
 
+fn now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time after unix epoch")
+        .as_nanos()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3398,6 +3668,55 @@ mod tests {
         assert_eq!(telemetry.left_cmd, 0.0);
         assert_eq!(telemetry.right_cmd, 0.0);
         assert!(telemetry.stopped_by_deadman);
+
+        harness.seal_action_evidence(now_ns());
+        let page = harness.applied_action_evidence(0, 64).unwrap();
+        assert!(page.entries.iter().any(|entry| entry.requested_left == 1.0
+            && entry.requested_right == 1.0
+            && entry.applied_left == SpeedMode::Low.cap()
+            && entry.applied_right == SpeedMode::Low.cap()));
+        assert!(page.entries.iter().any(|entry| entry.deadman_active
+            && entry.safety_flags & ACTION_SAFETY_DEADMAN != 0
+            && entry.applied_left == 0.0
+            && entry.applied_right == 0.0));
+    }
+
+    #[tokio::test]
+    async fn applied_action_heartbeats_continuously_cover_zero_motion() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        time::sleep(Duration::from_millis(260)).await;
+        let page = harness.applied_action_evidence(0, 64).unwrap();
+
+        assert!(page.entries.len() >= 2);
+        assert!(page.entries.iter().all(|entry| {
+            entry.schema_version == APPLIED_ACTION_SCHEMA_VERSION
+                && entry.authority == "leash"
+                && entry.producer_epoch == page.producer_epoch
+                && entry.interval_end_ns > entry.interval_start_ns
+                && entry.applied_left == 0.0
+                && entry.applied_right == 0.0
+                && entry.valid
+        }));
+        assert!(page.entries.windows(2).all(|pair| {
+            pair[0].action_sequence + 1 == pair[1].action_sequence
+                && pair[0].interval_end_ns == pair[1].interval_start_ns
+        }));
+    }
+
+    #[test]
+    fn applied_action_history_reports_overrun_instead_of_skipping() {
+        let mut state = ActionEvidenceState::new(7, SpeedMode::Low.cap());
+        let start = state.interval_start_ns;
+        for offset in 1..=(ACTION_EVIDENCE_HISTORY_CAPACITY as u64 + 2) {
+            state.seal(start + offset);
+        }
+
+        let error = state.page(1, 64).unwrap_err().to_string();
+        assert!(error.contains("history overrun"));
+        let page = state.page(0, 64).unwrap();
+        assert_eq!(page.entries.len(), 64);
+        assert_eq!(page.oldest_sequence, 3);
     }
 
     #[test]
