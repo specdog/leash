@@ -58,7 +58,7 @@ for (const endpoint of ["POST /dashboard/authorize", "POST /dashboard/stop", "PO
 for (const endpoint of ["GET /agent", "GET /agent/messages", "POST /agent/messages", "GET /camera/stream/health", "POST /camera/stream/recover"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing agent endpoint: ${endpoint}`);
 }
-for (const endpoint of ["GET /waypoints", "GET /patrol/zones", "POST /patrol/zones/:zone_id/start", "GET /patrol/status", "POST /patrol/stop"]) {
+for (const endpoint of ["GET /waypoints", "POST /planner/goal", "GET /planner/status", "POST /planner/cancel", "GET /patrol/zones", "POST /patrol/zones/:zone_id/start", "GET /patrol/status", "POST /patrol/stop"]) {
   if (!payload.endpoints.includes(endpoint)) throw new Error(`missing navigation endpoint: ${endpoint}`);
 }'
 }
@@ -98,6 +98,17 @@ assert_drive_outcome() {
 if (payload.ok !== true) throw new Error("drive outcome ok was not true");
 if (payload.left <= 0 || payload.right <= 0) throw new Error("drive outcome did not move in simulation");
 if (payload.speed_mode !== "low") throw new Error(`unexpected speed mode: ${payload.speed_mode}`);'
+}
+
+assert_planner_goal() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.ok !== true || !["active", "reached"].includes(payload.status)) throw new Error("planner goal was neither active nor reached");
+if (payload.goal?.frame_id !== "map" || payload.goal?.speed_mode !== "low") throw new Error("planner goal did not preserve its guarded shape");'
+}
+
+assert_planner_cancelled() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.active !== false || payload.status !== "cancelled") throw new Error("planner did not cancel");'
 }
 
 assert_motion_telemetry() {
@@ -379,6 +390,11 @@ assert_policy_denial <"$policy_response"
 curl -fsS -X POST "$base/pilot/authorize" \
   -H "content-type: application/json" \
   --data '{"token":"smoke-token","ttl_secs":30,"speed_mode":"low"}' | parse_json
+curl -fsS -X POST "$base/planner/goal" \
+  -H "content-type: application/json" \
+  --data '{"token":"smoke-token","approval":true,"frame_id":"map","x_m":0.25,"y_m":0.0,"tolerance_m":0.1,"speed_mode":"low"}' | assert_planner_goal
+curl -fsS "$base/planner/status" | parse_json
+curl -fsS -X POST "$base/planner/cancel" | assert_planner_cancelled
 curl -fsS -X POST "$base/estop" | parse_json
 curl -fsS -X POST "$base/estop/reset" \
   -H "content-type: application/json" \
