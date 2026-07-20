@@ -107,6 +107,10 @@ pub struct TelemetryFrame {
     pub right_cmd: f64,
     pub odometry_left: Option<f64>,
     pub odometry_right: Option<f64>,
+    /// Wheel-integrated pose in the local `odom` frame. This is relative
+    /// dead-reckoning only; it must never be presented as a global map pose.
+    #[serde(default)]
+    pub odometry_pose: Option<PoseWithCovariance2d>,
     pub session_id: Option<String>,
     pub deadman_ok: bool,
     pub estop: bool,
@@ -1519,6 +1523,17 @@ pub struct CameraAimOutcome {
     pub tilt_deg: f64,
     pub speed: u32,
     pub accel: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraAimState {
+    pub pan_deg: f64,
+    pub tilt_deg: f64,
+    pub speed: u32,
+    pub accel: u32,
+    pub updated_at_ms: u128,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

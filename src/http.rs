@@ -274,6 +274,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/capabilities", get(capabilities))
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
+        .route("/telemetry/compact", get(compact_telemetry))
         .route("/localization", get(localization_status))
         .route("/localization/update", post(localization_update))
         .route("/events/telemetry", get(sse_telemetry))
@@ -314,6 +315,14 @@ pub fn router(harness: Harness) -> Router {
     let app = app
         .route("/camera/webrtc", get(camera_webrtc_status))
         .route("/camera/webrtc/ws", get(camera_webrtc_ws));
+    #[cfg(feature = "mcp")]
+    let app = app
+        .route("/mcp", post(mcp_protocol))
+        .route("/mcp/status", get(mcp_status))
+        .route("/mcp/tools", get(mcp_tools))
+        .route("/mcp/list-tools", get(mcp_tools))
+        .route("/mcp/modules", get(mcp_modules))
+        .route("/mcp/call", post(mcp_call));
     app.with_state(harness).layer(CorsLayer::permissive())
 }
 
@@ -537,6 +546,47 @@ async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::Telemet
     Json(harness.telemetry())
 }
 
+async fn compact_telemetry(State(harness): State<Harness>) -> Json<Value> {
+    Json(compact_telemetry_value(&harness))
+}
+
+fn compact_telemetry_value(harness: &Harness) -> Value {
+    let telemetry = serde_json::to_value(harness.telemetry()).unwrap_or_else(|_| json!({}));
+    let mut voxel_grid = telemetry
+        .get("voxel_grid")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(grid) = voxel_grid.as_object_mut() {
+        let voxels = grid
+            .get("voxels")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|voxel| voxel.get("occupancy").and_then(Value::as_u64).unwrap_or(0) >= 50)
+            .take(5_000)
+            .map(|voxel| {
+                Value::Array(vec![
+                    voxel.get("x").cloned().unwrap_or(Value::Null),
+                    voxel.get("y").cloned().unwrap_or(Value::Null),
+                    voxel.get("z").cloned().unwrap_or(Value::Null),
+                    voxel.get("occupancy").cloned().unwrap_or(Value::Null),
+                ])
+            })
+            .collect::<Vec<_>>();
+        grid.insert("voxels".to_string(), Value::Array(voxels));
+    }
+
+    json!({
+        "schema_version": "leash.telemetry.compact.v1",
+        "ts_ms": telemetry.get("ts_ms").cloned().unwrap_or(Value::Null),
+        "sensors": telemetry.get("sensors").cloned().unwrap_or_else(|| json!({})),
+        "localization": telemetry.get("localization").cloned().unwrap_or_else(|| json!({})),
+        "localization_provider": telemetry.get("localization_provider").cloned().unwrap_or_else(|| json!({})),
+        "voxel_grid": voxel_grid,
+        "path": telemetry.get("path").cloned().unwrap_or_else(|| json!({}))
+    })
+}
+
 async fn localization_status(
     State(harness): State<Harness>,
 ) -> Json<crate::localization::LocalizationProviderStatus> {
@@ -656,7 +706,7 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "camera": camera,
         "stream_health": camera_stream_health_snapshot(),
-        "gimbal": camera_aim_descriptor()
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
     }))
 }
 
@@ -672,19 +722,22 @@ fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
     CAMERA_RUNTIME_STATE.lock().health(camera_device_path())
 }
 
-async fn camera_aim_status() -> Json<Value> {
+async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
     Json(json!({
         "ok": true,
-        "gimbal": camera_aim_descriptor()
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
     }))
 }
 
-fn camera_aim_descriptor() -> Value {
+fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>) -> Value {
     json!({
         "status": "available",
         "capability": "camera_aim",
         "endpoint": "/camera/aim",
         "aliases": ["/gimbal/aim"],
+        "known": pose.is_some(),
+        "source": pose.as_ref().map(|state| state.source.as_str()).unwrap_or("unavailable"),
+        "pose": pose,
         "range": {
             "pan_deg": [CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG],
             "tilt_deg": [CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG]
@@ -2539,14 +2592,33 @@ mod tests {
 
     use super::{
         agent_console_capability, agent_console_run, agent_console_state, camera_activity,
-        localization_authorized, localization_update, AgentCapabilityReq, AgentConsoleQuery,
-        AgentRunReq, CameraRuntimeState, CAMERA_RUNTIME_STATE,
+        compact_telemetry_value, localization_authorized, localization_update, AgentCapabilityReq,
+        AgentConsoleQuery, AgentRunReq, CameraRuntimeState, CAMERA_RUNTIME_STATE,
     };
     use crate::{Harness, HarnessConfig, LocalizationProviderUpdate};
     use tokio::sync::Mutex;
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static AGENT_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[tokio::test]
+    async fn compact_telemetry_keeps_qualia_inputs_and_drops_dense_surfaces() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let value = compact_telemetry_value(&harness);
+        assert_eq!(
+            value.get("schema_version").and_then(|value| value.as_str()),
+            Some("leash.telemetry.compact.v1")
+        );
+        assert!(value.get("sensors").is_some());
+        assert!(value.get("localization").is_some());
+        assert!(value.get("voxel_grid").is_some());
+        assert!(value.get("path").is_some());
+        assert!(value.get("costmap").is_none());
+        assert!(value
+            .pointer("/voxel_grid/voxels")
+            .and_then(|value| value.as_array())
+            .is_some_and(|voxels| voxels.len() <= 5_000));
+    }
 
     #[test]
     fn camera_runtime_state_tracks_owner_recovery_and_bounded_failures() {
