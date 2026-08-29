@@ -1,0 +1,114 @@
+{
+  "schema_version": "leash.cuda-cognition-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "44ced55",
+  "source_archive_sha256": "3bb742d418e46dc7de9040a528d36384574bf8f766ca4828d1f74ab8ad95887f",
+  "result_sha256": "b9588e1fd5a45711e1a8107ba93f7bddd9d3501a49fe8a1937d2d908887b712e",
+  "tegrastats_log_sha256": "72fa27f3d3e03ee0c4828d5bc70c1aeaddb223405068f0dd2f8d53dcb344b470",
+  "host": {
+    "target": "aarch64-unknown-linux-gnu",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "cuda_sdk": "12.9.0",
+    "compute_capability": "8.7",
+    "rustc": "1.94.1",
+    "cudarc": "0.19.8"
+  },
+  "artifact": {
+    "source_sha256_lf": "ffb6710f9611cf8984bbe44511e33a0d73e7564bba8e1f4b75987a8e888462be",
+    "fatbin_sha256": "c96e10ac48d9b8e58fc9f31eb5cdf58ad5cb907ddd0c49d98784344e86a640a4",
+    "fatbin_bytes": 39080,
+    "rebuilds_compared": 2,
+    "byte_identical": true,
+    "exported_kernels": 6,
+    "driver_probe_passed": true
+  },
+  "validation": {
+    "release_unit_tests_passed": 17,
+    "artifact_contract_tests_passed": 3,
+    "executor_jobs_passed": 312,
+    "resident_randomized_ticks": 100,
+    "cpu_cuda_checkpoint_parity": true,
+    "cpu_to_cuda_restore": true,
+    "cuda_to_cpu_restore": true,
+    "root_cuda_runtime_test_passed": true,
+    "root_layer_sequences_after_one_tick": [1, 1, 1],
+    "active_backend": "cuda",
+    "degraded": false,
+    "circuit_open": false
+  },
+  "residency": {
+    "resident_on_device": [
+      "sensor",
+      "top_down",
+      "layer_activation",
+      "layer_weights",
+      "layer_bias"
+    ],
+    "steady_tick_device_allocations": 0,
+    "root_state_dimension": 1024,
+    "root_sensor_and_top_down_upload_bytes_per_tick": 8192,
+    "maximum_metrics_readback_bytes_per_tick": 36,
+    "layer_2_snapshot_bytes": 4096,
+    "layer_2_snapshot_cadence_hz": 20,
+    "full_checkpoint_state_bytes_excluding_metadata": 45056,
+    "full_checkpoint_cadence_ms": 60000,
+    "checkpoint_schema_version": "qualia.cognition-state.v1",
+    "checkpoint_integrity_digest": "sha256_full_state"
+  },
+  "benchmark": {
+    "command": "cargo run --offline --quiet --release -p leash-cuda --features cuda --example jetson_benchmark -- --iterations 100",
+    "iterations": 100,
+    "warmup_iterations": 10,
+    "sample_order": "alternating CPU and CUDA",
+    "includes": [
+      "executor queue",
+      "sensor and top-down upload",
+      "three kernel launches",
+      "synchronization",
+      "bounded metrics readback"
+    ],
+    "workloads": [
+      {
+        "name": "cognition_resident_small",
+        "elements_per_layer": 4096,
+        "layers": 3,
+        "first_ns": { "cpu": 373706, "cuda": 673362 },
+        "cpu_ns": { "p50": 352777, "p95": 368234, "p99": 394858, "max": 464461 },
+        "cuda_ns": { "p50": 653393, "p95": 742708, "p99": 971002, "max": 1111421 },
+        "cpu_over_cuda_speedup_milli": 539,
+        "decision": "cpu"
+      },
+      {
+        "name": "cognition_resident_large",
+        "elements_per_layer": 65536,
+        "layers": 3,
+        "first_ns": { "cpu": 4259281, "cuda": 6511726 },
+        "cpu_ns": { "p50": 5265740, "p95": 5315374, "p99": 5507379, "max": 5567796 },
+        "cuda_ns": { "p50": 6541167, "p95": 7104637, "p99": 7177056, "max": 7201216 },
+        "cpu_over_cuda_speedup_milli": 805,
+        "decision": "cpu"
+      }
+    ]
+  },
+  "tegrastats": {
+    "interval_ms": 100,
+    "samples": 167,
+    "maximum_ram_mb": 2098,
+    "maximum_gr3d_percent": 75,
+    "maximum_gpu_celsius": 53.75,
+    "maximum_vdd_in_mw": 7747
+  },
+  "policy": {
+    "cuda_cognition_can_be_authoritative_when_explicitly_selected": true,
+    "default_backend_after_benchmark": "cpu",
+    "reason": "CUDA did not beat CPU p50 or p95 at either measured resident size",
+    "motor_authority": false
+  },
+  "safety": {
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_service_modified": false,
+    "live_binary_modified": false
+  }
+}

@@ -47,5 +47,8 @@ The benchmark performs parity checks before timing and emits a versioned JSON
 record for small and large voxel, lidar, advisory collision, camera, and
 cognition workloads. The combined spatial profile uploads one lidar scan and
 runs transform plus collision reduction against the same resident buffer.
+Resident cognition profiles keep activations, weights, and biases on device;
+steady ticks transfer sensor/top-down inputs and fixed-size metrics only. Full
+state is read back only for the versioned checkpoint gate.
 The latest measured Orin NX result and conservative backend decisions are
-recorded in `evidence/jetson-orin-nx-rv2-11-20260829.json`.
+recorded in `evidence/jetson-orin-nx-rv2-12-20260829.json`.

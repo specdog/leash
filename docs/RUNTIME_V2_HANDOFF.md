@@ -94,7 +94,7 @@ This used an in-process fake actuator. It is not physical stop-latency proof.
 
 Production startup no longer has an NVRTC path. The checked fatbin contains
 native SM 8.7 code plus compute 8.7 PTX. The target Orin loaded it through
-`cudarc` 0.19.8 against CUDA 12.9, and all five kernels matched their CPU
+`cudarc` 0.19.8 against CUDA 12.9, and all six kernels matched their CPU
 references. Commit `a18d454` removed the legacy application's remaining inline
 voxel/cognition compilers, routed its probe through the single CUDA owner, and
 passed the release root selection test from isolated `/tmp` source. Source hash
@@ -107,6 +107,14 @@ archive passed 15 release unit tests, 3 artifact tests, and 208 fixed, empty,
 one-million-element, and randomized CPU/CUDA jobs on the Orin with the circuit
 closed. Two CUDA 12.9 builds were byte-identical; the five-symbol fatbin is
 36,032 bytes with SHA-256 `839ac2f5...b77540f`.
+
+Commits `e23b88a` and `44ced55` make explicitly selected CUDA cognition
+canonical and resident. The final six-symbol fatbin is 39,080 bytes with
+SHA-256 `c96e10ac...a640a4`. The exact Orin archive passed 100 randomized
+resident ticks, 312 total executor jobs, bidirectional CPU/CUDA checkpoint
+restore, and a root runtime test proving one sequence advance per layer.
+Steady root ticks read at most 36 metric bytes; the 4 KiB layer-2 state returns
+at 20 Hz and the 45,056-byte full state at the 60-second checkpoint cadence.
 
 The bias-controlled end-to-end benchmark alternated 100 CPU and CUDA samples,
 recorded first-use buffer growth separately, and included queueing, transfer,
@@ -125,16 +133,18 @@ kernel, synchronization, and readback.
 | Camera, 640x480 RGB | CUDA candidate | 2.10x p50 and better p95/p99 |
 | Cognition, 4,096 values | CPU | Upload/readback dominates |
 | Cognition, 65,536 values | CPU | Upload/readback dominates |
+| Resident cognition, 3x4,096 values | CPU | CUDA p50 was 1.85 times slower |
+| Resident cognition, 3x65,536 values | CPU | CUDA p50 was 1.24 times slower |
 
 During the measured RV2-11 run, maximum GPU load was 76%, maximum GPU
 temperature was 52.468 C, and maximum board input was 7,707 mW in 10 W mode.
 Exact evidence is in
 `crates/leash-cuda/evidence/jetson-orin-nx-rv2-11-20260829.json`.
 
-CUDA is not authoritative. Large spatial/lidar and camera are candidates only after a
-startup probe, shadow comparison, and injected-failure fallback proof. The
-current cognition implementation must remain CPU until canonical state remains
-resident on the device instead of being uploaded and read back every tick.
+CUDA is not enabled by default. Explicit CUDA cognition is now authoritative
+and checkpoint-compatible, but the measured policy remains CPU because neither
+resident size beat CPU. Large spatial/lidar and camera remain candidates only
+after a startup probe, shadow comparison, and injected-failure fallback proof.
 
 ### ROS and Nav2
 
@@ -230,17 +240,12 @@ Definition of done:
 - Stop/e-stop still bypass normal transition waiting.
 - No transport server or gateway gains a hardware dependency.
 
-### 3. Finish CUDA residency, shadow, and failure gates
+### 3. Finish CUDA shadow and failure gates
 
-Issues: [#203](https://github.com/specdog/leash/issues/203),
-[#204](https://github.com/specdog/leash/issues/204), and
-[#205](https://github.com/specdog/leash/issues/205)
+Issue: [#205](https://github.com/specdog/leash/issues/205)
 
 - Do not move voxel projection or current cognition to CUDA based on the
   measured results.
-- Keep cognition state, weights, bias, and top-down state resident before
-  benchmarking it again.
-- Add versioned CPU/CUDA checkpoint interchange.
 - Shadow selected workloads and compare outputs without GPU authority.
 - Inject context loss, launch error, timeout, and executor panic.
 - Prove CPU fallback completes within one compute deadline while the safety
@@ -291,6 +296,7 @@ handoff.
   `/tmp/leash-runtime-bench-74a585f`,
   `/tmp/leash-cuda-bench-2392d53`, and
   `/tmp/leash-cuda-bench-64f8dbd`, plus `/tmp/leash-956b667`.
+  RV2-12 exact-commit work used `/tmp/leash-44ced55`.
 - No runtime v2 test opened the base serial port, sent a motor command, changed
   the live service, or modified its configuration.
 - Do not remove or replace the live binary/service without an exact backup,
@@ -315,6 +321,8 @@ handoff.
 - `64f8dbd` removes ordering bias from the CUDA benchmark.
 - `4de7d8c` records CUDA break-even and tegrastats evidence.
 - `956b667` adds collision reduction, dense spatial reuse, and randomized parity.
+- `e23b88a` makes explicitly selected CUDA cognition resident and canonical.
+- `44ced55` proves root CUDA cognition checkpoint restore on the Orin.
 
 Issue comments with implementation evidence were added to #195, #196, #205,
 #206, and #207. Leave the CUDA authority, ROS target, physical safety, and

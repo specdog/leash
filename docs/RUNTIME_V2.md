@@ -34,7 +34,7 @@ The first CUDA gate is now implemented in `leash-cuda`: production code loads a
 checked-in SM 8.7 fatbin with a compute 8.7 PTX fallback, and a bounded
 single-owner executor keeps its context and persistent device buffers private.
 On 2026-08-29, both the CUDA Driver API probe and the Rust `cudarc` executor
-probe passed all five kernels on the target Orin NX without opening the compute
+probe passed all six kernels on the target Orin NX without opening the compute
 circuit or touching motion hardware. The exact RV2-11 commit then passed 208
 fixed, empty, maximum-size, and randomized CPU/CUDA parity jobs. Artifact
 hashes, compiler flags, and the target result are recorded in the CUDA artifact
@@ -42,11 +42,13 @@ manifest. CUDA remains
 non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
 are complete.
 
-As of `956b667`, `leash-cuda` is also the root application's only CUDA owner.
+As of `44ced55`, `leash-cuda` is also the root application's only CUDA owner.
 The legacy inline voxel and cognition NVRTC paths were removed. The root startup
 probe and explicit parity projection use the same bounded prebuilt-fatbin
-executor, while measured voxel projection and cognition remain CPU-selected.
-The release crate tests, 208-job executor probe, and root CUDA-selection test
+executor. Explicit CUDA cognition is now canonical and resident when selected;
+the measured default policy remains CPU because CUDA did not win the resident
+break-even benchmark.
+The release crate tests, 312-job executor probe, and root CUDA-selection test
 passed on the Orin from isolated `/tmp` source archives.
 
 The first bias-controlled end-to-end Orin benchmark is now checked in. It
@@ -57,10 +59,8 @@ combined 10,000-point lidar plus advisory collision job (2.74x p50),
 10,000-point lidar alone (1.64x p50), and both camera sizes. Voxel projection,
 720-point lidar, 720-point collision reduction, and both cognition sizes remain
 CPU-selected. Collision CUDA output is advisory and its standalone large p99
-regressed slightly, so it receives no safety authority. Cognition cannot move
-until state is resident instead of uploaded and read back every tick. During
-the run the GPU reached 76%, 52.468 C, and 7.707 W maximum board input in 10 W
-mode. These are
+regressed slightly, so it receives no safety authority. During the run the GPU
+reached 76%, 52.468 C, and 7.707 W maximum board input in 10 W mode. These are
 selection inputs, not permission to make CUDA authoritative; startup probes,
 shadow comparison, and injected-failure fallback remain required.
 
@@ -416,6 +416,19 @@ Done when:
   format;
 - backend status reports selected, active, degraded, and fallback reasons
   truthfully.
+
+Result at `44ced55`: the shared CUDA owner holds sensor, top-down, activation,
+weight, and bias buffers across ticks. An all-layer tick uploads 8 KiB of inputs
+and reads at most 36 bytes of metrics; the 4 KiB layer-2 latent returns at its
+declared 20 Hz boundary cadence, and the full 45,056-byte state returns only at
+the 60-second checkpoint cadence or an explicit checkpoint request. The
+integrity-digested `qualia.cognition-state.v1` checkpoint restores in both
+CPU-to-CUDA and CUDA-to-CPU directions. The exact Orin probe passed 100
+randomized resident ticks and 312 total jobs, while the root runtime proved one
+advance per layer and CUDA-to-CPU restore. CUDA remained slower at both measured
+resident sizes, so the default policy stays CPU; explicit CUDA selection is
+truthfully authoritative rather than a duplicate update. Evidence is in
+`crates/leash-cuda/evidence/jetson-orin-nx-rv2-12-20260829.json`.
 
 ### RV2-13 - Prove CUDA parity, fallback, and useful speed
 

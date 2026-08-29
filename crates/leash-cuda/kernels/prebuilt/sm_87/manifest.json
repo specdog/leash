@@ -32,7 +32,7 @@
   },
   "target_validation": {
     "date": "2026-08-29",
-    "latest_validation_commit": "956b667",
+    "latest_validation_commit": "44ced55",
     "device": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
     "architecture": "aarch64",
     "compute_capability": "8.7",
@@ -44,7 +44,7 @@
     },
     "rust_executor_probe": {
       "active_backend": "cuda",
-      "cpu_parity_jobs_passed": 208,
+      "cpu_parity_jobs_passed": 312,
       "circuit_open": false,
       "no_motion": true
     },
@@ -52,6 +52,7 @@
       "profile": "sim",
       "release": true,
       "cuda_selection_test_passed": true,
+      "authoritative_cognition_checkpoint_restore_passed": true,
       "legacy_nvrtc_paths_present": false,
       "no_motion": true
     }
