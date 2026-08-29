@@ -1,0 +1,15 @@
+{
+  "format": "leash-runtime-v1-v2-shadow-v1",
+  "events": [
+    { "at_ns": 1000000, "kind": "evidence", "left": 0.0, "right": 0.0, "estop": false },
+    { "at_ns": 2000000, "kind": "authorize", "left": 0.0, "right": 0.0, "estop": false },
+    { "at_ns": 3000000, "kind": "drive", "drive_left": 0.25, "drive_right": -0.25, "left": 0.25, "right": -0.25, "estop": false },
+    { "at_ns": 4000000, "kind": "stop", "left": 0.0, "right": 0.0, "estop": false },
+    { "at_ns": 5000000, "kind": "drive", "drive_left": -0.4, "drive_right": 0.4, "left": -0.4, "right": 0.4, "estop": false },
+    { "at_ns": 6000000, "kind": "estop", "left": 0.0, "right": 0.0, "estop": true },
+    { "at_ns": 7000000, "kind": "reset_estop", "left": 0.0, "right": 0.0, "estop": false },
+    { "at_ns": 8000000, "kind": "authorize", "left": 0.0, "right": 0.0, "estop": false },
+    { "at_ns": 9000000, "kind": "drive", "drive_left": 0.6, "drive_right": 0.6, "left": 0.6, "right": 0.6, "estop": false },
+    { "at_ns": 10000000, "kind": "stop", "left": 0.0, "right": 0.0, "estop": false }
+  ]
+}
