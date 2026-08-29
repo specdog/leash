@@ -1,13 +1,15 @@
 # leash-runtime
 
-`leash-runtime` owns synchronization and scheduling around `leash-core`.
-Domain transitions remain synchronous. This crate provides only bounded,
-non-blocking orchestration primitives:
+Bounded orchestration lanes and the dedicated CPU safety supervisor for the
+Leash v2 deterministic core.
 
-- an atomic safety mailbox that prioritizes e-stop and preserves request counts;
-- bounded single-consumer lanes with reject-newest or drop-oldest behavior;
-- a latest-value sensor slot that rejects non-increasing sample sequences;
-- snapshots for depth, high-water marks, drops, and rejections.
+Run the 100 Hz host timing probe in release mode:
 
-Queue capacity and overflow policy are part of the API. No unbounded channel is
-available from this crate.
+```console
+cargo run --release -p leash-runtime --example control_loop_bench -- --ticks 1000
+```
+
+It emits one versioned JSON record containing p50/p95/p99/maximum completion
+jitter, transition latency, deadline misses, and proposal queue capacity,
+high-water mark, rejection count, and final depth. This is a host diagnostic;
+the Jetson timing and fault-injection record is a separate deployment gate.

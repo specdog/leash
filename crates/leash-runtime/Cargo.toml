@@ -11,3 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 leash-core = { path = "../leash-core", version = "0.1.0" }
+
+[[example]]
+name = "control_loop_bench"
+path = "examples/control_loop_bench.rs"

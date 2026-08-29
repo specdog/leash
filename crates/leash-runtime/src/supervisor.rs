@@ -3,10 +3,10 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, OnceLock,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use leash_core::{
@@ -194,6 +194,7 @@ pub struct SupervisorStatus {
     pub closed: bool,
     pub last_fault: Option<Box<str>>,
     pub metrics: SupervisorMetrics,
+    pub proposal_lane: crate::LaneSnapshot,
 }
 
 struct SharedState {
@@ -202,7 +203,16 @@ struct SharedState {
     closed: AtomicBool,
     next_proposal: AtomicU64,
     last_fault: Mutex<Option<Box<str>>>,
+    worker_thread: OnceLock<thread::Thread>,
     metrics: MetricAtoms,
+}
+
+impl SharedState {
+    fn wake(&self) {
+        if let Some(worker) = self.worker_thread.get() {
+            worker.unpark();
+        }
+    }
 }
 
 struct Proposal {
@@ -248,6 +258,7 @@ impl SupervisorHandle {
                     .metrics
                     .proposals_accepted
                     .fetch_add(1, Ordering::Relaxed);
+                self.shared.wake();
                 Ok(TransitionTicket { receiver })
             }
             Err(SendError::Full(_)) => {
@@ -262,11 +273,15 @@ impl SupervisorHandle {
     }
 
     pub fn stop(&self) -> Result<u64, SafetyRequestError> {
-        self.safety.stop()
+        let sequence = self.safety.stop()?;
+        self.shared.wake();
+        Ok(sequence)
     }
 
     pub fn estop(&self) -> Result<u64, SafetyRequestError> {
-        self.safety.estop()
+        let sequence = self.safety.estop()?;
+        self.shared.wake();
+        Ok(sequence)
     }
 
     pub fn status(&self) -> SupervisorStatus {
@@ -275,6 +290,7 @@ impl SupervisorHandle {
             closed: self.shared.closed.load(Ordering::Acquire),
             last_fault: lock(&self.shared.last_fault).clone(),
             metrics: self.shared.metrics.snapshot(),
+            proposal_lane: self.proposals.snapshot(),
         }
     }
 }
@@ -315,6 +331,7 @@ where
             closed: AtomicBool::new(false),
             next_proposal: AtomicU64::new(1),
             last_fault: Mutex::new(None),
+            worker_thread: OnceLock::new(),
             metrics: MetricAtoms::default(),
         });
         let handle = SupervisorHandle {
@@ -323,9 +340,11 @@ where
             shared: Arc::clone(&shared),
         };
         let panic_shared = Arc::clone(&shared);
+        let thread_shared = Arc::clone(&shared);
         let worker = thread::Builder::new()
             .name("leash-cpu-safety".to_string())
             .spawn(move || {
+                let _ = thread_shared.worker_thread.set(thread::current());
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     run_supervisor(
                         kernel,
@@ -370,6 +389,7 @@ where
 
     fn stop_and_join(&mut self) {
         self.handle.shared.shutdown.store(true, Ordering::Release);
+        self.handle.shared.wake();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -379,6 +399,7 @@ where
 impl<A> Drop for CpuSafetySupervisor<A> {
     fn drop(&mut self) {
         self.handle.shared.shutdown.store(true, Ordering::Release);
+        self.handle.shared.wake();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -401,6 +422,7 @@ fn run_supervisor<P>(
     let mut tick_sequence = Sequence::new(1).expect("one is non-zero");
     let mut event_sequence = Sequence::new(1).expect("one is non-zero");
     let mut internal_estop = false;
+    let mut next_periodic_tick = Instant::now() + config.tick_period;
     while !shared.shutdown.load(Ordering::Acquire) {
         let safety_signal = safety.try_recv().ok().flatten();
         let input = if internal_estop {
@@ -533,7 +555,11 @@ fn run_supervisor<P>(
                 }
             }
         }
-        thread::sleep(config.tick_period);
+        let now = Instant::now();
+        while next_periodic_tick <= now {
+            next_periodic_tick += config.tick_period;
+        }
+        thread::park_timeout(next_periodic_tick.saturating_duration_since(now));
     }
     while let Some(proposal) = proposals.try_recv() {
         let _ = proposal
@@ -769,6 +795,50 @@ mod tests {
         }
         assert!(lock(&state.safety).contains(&SafetyKind::Stop));
         assert!(started.elapsed() < Duration::from_millis(50));
+    }
+
+    #[test]
+    fn proposals_and_safety_wake_a_parked_long_period_supervisor() {
+        let state = PortState::default();
+        let supervisor = CpuSafetySupervisor::spawn(
+            kernel(),
+            TestPort {
+                state: state.clone(),
+                acknowledgements: Vec::new(),
+            },
+            Box::new(AtomicClock(Arc::new(AtomicU64::new(0)))),
+            SupervisorConfig {
+                proposal_capacity: 4,
+                tick_period: Duration::from_secs(1),
+            },
+        )
+        .unwrap();
+        let handle = supervisor.handle();
+        thread::sleep(Duration::from_millis(10));
+
+        let proposal_started = Instant::now();
+        let result = handle
+            .submit(ControlInput::UpdateEvidence {
+                obstacle_blocked: false,
+                lidar_fresh: true,
+                localization_fresh: true,
+            })
+            .unwrap()
+            .wait_timeout(Duration::from_millis(100))
+            .unwrap();
+        assert!(result.is_some());
+        assert!(proposal_started.elapsed() < Duration::from_millis(100));
+
+        let stop_started = Instant::now();
+        handle.stop().unwrap();
+        for _ in 0..100 {
+            if lock(&state.safety).contains(&SafetyKind::Stop) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(lock(&state.safety).contains(&SafetyKind::Stop));
+        assert!(stop_started.elapsed() < Duration::from_millis(100));
     }
 
     #[test]

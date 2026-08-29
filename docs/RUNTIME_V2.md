@@ -60,6 +60,14 @@ to 50 ms on the host and prove it remains live while an unrelated compute or
 gateway worker is stalled. The configured production target remains 100 Hz;
 Jetson deadline and fault-injection evidence is still required before Gate C.
 
+The supervisor no longer waits for a polling sleep when work arrives. Normal
+proposals, stop, e-stop, and shutdown wake the parked owner immediately, while a
+fixed-rate periodic tick remains responsible for deadman and lease expiry. The
+release-mode `control_loop_bench` example emits a versioned JSON timing record
+with jitter percentiles, transition latency, missed deadlines, and proposal
+queue high-water data; checked evidence is stored per host rather than treated
+as a universal real-time claim.
+
 The DIMOS-style domain vocabulary now lives in `leash-core`, not in transport
 JSON: versioned owned activities, states, intents, observations, framed beliefs,
 proposals, effects, and outcomes. Activity transitions are total and distinguish
