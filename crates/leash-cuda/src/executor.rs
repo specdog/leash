@@ -36,6 +36,14 @@ pub enum BackendKind {
     Cuda,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultInjection {
+    ContextLoss,
+    LaunchError,
+    Stall(Duration),
+    WorkerPanic,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PredictiveState {
     pub state: Vec<f32>,
@@ -725,6 +733,7 @@ pub struct ComputeExecutor {
     selected: BackendKind,
     active: BackendKind,
     fallback_reason: Option<String>,
+    injected_fault: Arc<Mutex<Option<FaultInjection>>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -784,9 +793,11 @@ impl ComputeExecutor {
             metrics: Arc::clone(&metrics),
         });
         let circuit_open = Arc::new(AtomicBool::new(false));
+        let injected_fault = Arc::new(Mutex::new(None));
         let worker_queue = Arc::clone(&queue);
         let worker_circuit = Arc::clone(&circuit_open);
         let worker_metrics = Arc::clone(&metrics);
+        let worker_fault = Arc::clone(&injected_fault);
         let (initialized_tx, initialized_rx) = mpsc::sync_channel(0);
         let worker = thread::Builder::new()
             .name("leash-compute-owner".to_string())
@@ -809,6 +820,7 @@ impl ComputeExecutor {
                     &worker_queue,
                     &worker_circuit,
                     &worker_metrics,
+                    &worker_fault,
                 );
             })
             .map_err(|error| StartError::Thread(error.to_string()))?;
@@ -822,6 +834,7 @@ impl ComputeExecutor {
                 selected,
                 active,
                 fallback_reason,
+                injected_fault,
                 worker: Some(worker),
             }),
             Ok(Err(error)) => {
@@ -885,6 +898,18 @@ impl ComputeExecutor {
         self.metrics.snapshot()
     }
 
+    pub fn inject_next_fault(&self, fault: FaultInjection) -> Result<(), SubmitError> {
+        if self.circuit_open.load(Ordering::Acquire) {
+            return Err(SubmitError::CircuitOpen);
+        }
+        let mut injected = self
+            .injected_fault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *injected = Some(fault);
+        Ok(())
+    }
+
     pub fn shutdown(mut self) {
         self.stop_and_join();
     }
@@ -910,6 +935,7 @@ fn worker_loop(
     queue: &WorkQueue,
     circuit_open: &AtomicBool,
     metrics: &MetricAtoms,
+    injected_fault: &Mutex<Option<FaultInjection>>,
 ) {
     while let Some(item) = queue.pop() {
         let _job_id = item.id;
@@ -926,7 +952,26 @@ fn worker_loop(
             Err(WorkError::DeadlineExpired)
         } else {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                backend.execute(item.job)
+                let fault = injected_fault
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take();
+                match fault {
+                    Some(FaultInjection::ContextLoss) => {
+                        Err(WorkError::Backend("injected CUDA context loss".to_string()))
+                    }
+                    Some(FaultInjection::LaunchError) => {
+                        Err(WorkError::Backend("injected CUDA launch error".to_string()))
+                    }
+                    Some(FaultInjection::Stall(duration)) => {
+                        thread::sleep(duration);
+                        backend.execute(item.job)
+                    }
+                    Some(FaultInjection::WorkerPanic) => {
+                        panic!("injected compute worker panic")
+                    }
+                    None => backend.execute(item.job),
+                }
             })) {
                 Ok(result) => result,
                 Err(_) => {

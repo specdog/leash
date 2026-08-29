@@ -3,6 +3,7 @@
 #![deny(unsafe_code)]
 
 mod executor;
+mod gate;
 
 #[cfg(feature = "cuda")]
 #[allow(unsafe_code)]
@@ -12,9 +13,14 @@ use core::fmt;
 
 pub use executor::{
     BackendKind, BackendStatus, CognitionLayerMetrics, CognitionLayerSnapshot, CognitionStep,
-    ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, ExecutorMetrics, JobId,
-    JobPriority, JobTicket, PredictiveState, ResidentCognitionCheckpoint, ResidentCognitionLayer,
-    StartError, SubmitError, WorkError, RESIDENT_COGNITION_SCHEMA_VERSION,
+    ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, ExecutorMetrics, FaultInjection,
+    JobId, JobPriority, JobTicket, PredictiveState, ResidentCognitionCheckpoint,
+    ResidentCognitionLayer, StartError, SubmitError, WorkError, RESIDENT_COGNITION_SCHEMA_VERSION,
+};
+pub use gate::{
+    orin_nx_workload_decision, ComputeGate, ComputeGateConfig, ComputeGateOutcome,
+    ComputeGateStatus, GateMode, GateStartError, ParityTolerance, ShadowComparison, WorkloadClass,
+    WorkloadDecision,
 };
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";

@@ -1393,6 +1393,8 @@ name = "leash-cuda"
 version = "0.1.0"
 dependencies = [
  "cudarc",
+ "leash-core",
+ "leash-runtime",
  "sha2",
 ]
 
