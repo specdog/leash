@@ -21,9 +21,7 @@ jobs:
       - run: cargo test --no-default-features --features sim,mcp
       - run: npm test
       - run: cargo run --features mcp --bin leash-schema -- --check
-      - run: cargo package --locked
-      - run: cargo package -p leash-core --locked
-      - run: cargo package -p leash-cuda --locked
+      - run: cargo package --workspace --locked
       - run: scripts/smoke-all.sh
 
   feature-matrix:
