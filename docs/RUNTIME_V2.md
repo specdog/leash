@@ -50,6 +50,16 @@ disconnect/reconnect, saturation, and owner panic are covered by fake serial
 transcripts. This boundary is not connected to the live service yet, so the
 existing driver remains the deployment path until the shadow gate.
 
+`leash-runtime` now owns a dedicated `leash-cpu-safety` supervisor thread. It
+drives the deterministic kernel from an injected monotonic clock, rejects stop
+and e-stop on the normal bounded proposal lane, and routes every zero effect to
+the atomic controller safety mailbox. Normal authorized drive submission is
+non-blocking; failed or rejected actuator acknowledgements fault the supervisor
+and schedule e-stop. Tests bound priority-stop handling under proposal overload
+to 50 ms on the host and prove it remains live while an unrelated compute or
+gateway worker is stalled. The configured production target remains 100 Hz;
+Jetson deadline and fault-injection evidence is still required before Gate C.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed

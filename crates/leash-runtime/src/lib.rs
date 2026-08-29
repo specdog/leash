@@ -5,6 +5,7 @@
 mod lane;
 mod latest;
 mod safety;
+mod supervisor;
 
 pub use lane::{
     bounded_lane, BoundedReceiver, BoundedSender, LaneCreateError, LaneSnapshot, OverflowPolicy,
@@ -14,4 +15,9 @@ pub use latest::{latest_slot, LatestPublisher, LatestReader, LatestSnapshot, Pub
 pub use safety::{
     safety_mailbox, SafetyKind, SafetyReceiveError, SafetyReceiver, SafetyRequestError,
     SafetySender, SafetySignal,
+};
+pub use supervisor::{
+    ActuationAcknowledgement, ActuationPort, CpuSafetySupervisor, SupervisorConfig,
+    SupervisorEvent, SupervisorHandle, SupervisorMetrics, SupervisorStartError, SupervisorStatus,
+    SupervisorSubmitError, TransitionReceipt, TransitionTicket,
 };

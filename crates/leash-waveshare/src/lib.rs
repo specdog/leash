@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
+    collections::VecDeque,
     fmt,
     io::{self, Read, Write},
     sync::{
@@ -18,9 +19,9 @@ use leash_core::{
     Authorized, Clock, CommandId, DifferentialDrive, EvidenceId, MonotonicNanos, Sequence, Stamped,
 };
 use leash_runtime::{
-    bounded_lane, latest_slot, safety_mailbox, BoundedReceiver, BoundedSender, LaneSnapshot,
-    LatestPublisher, LatestReader, OverflowPolicy, SafetyKind, SafetyReceiver, SafetySender,
-    SafetySignal, SendError,
+    bounded_lane, latest_slot, safety_mailbox, ActuationAcknowledgement, ActuationPort,
+    BoundedReceiver, BoundedSender, LaneSnapshot, LatestPublisher, LatestReader, OverflowPolicy,
+    SafetyKind, SafetyReceiver, SafetyRequestError, SafetySender, SafetySignal, SendError,
 };
 use serde_json::json;
 
@@ -357,6 +358,14 @@ impl AckTicket {
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(SubmitError::Closed),
         }
     }
+
+    pub fn try_take(&self) -> Result<Option<CommandAck>, SubmitError> {
+        match self.receiver.try_recv() {
+            Ok(ack) => Ok(Some(ack)),
+            Err(mpsc::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::TryRecvError::Disconnected) => Err(SubmitError::Closed),
+        }
+    }
 }
 
 enum ControllerCommand {
@@ -453,6 +462,85 @@ impl ControllerHandle {
                 Err(SubmitError::Full)
             }
             Err(SendError::Closed(_)) => Err(SubmitError::Closed),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortError {
+    Submit(SubmitError),
+    Safety(SafetyRequestError),
+}
+
+impl fmt::Display for PortError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Submit(error) => write!(formatter, "submit controller command: {error}"),
+            Self::Safety(error) => write!(formatter, "request controller safety action: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for PortError {}
+
+impl ActuationAcknowledgement for CommandAck {
+    fn applied(&self) -> bool {
+        self.outcome == AckOutcome::Applied
+    }
+
+    fn verified_zero(&self) -> bool {
+        self.verified_zero
+    }
+}
+
+pub struct WaveshareActuationPort {
+    handle: ControllerHandle,
+    pending: VecDeque<AckTicket>,
+}
+
+impl WaveshareActuationPort {
+    pub fn new(handle: ControllerHandle) -> Self {
+        Self {
+            handle,
+            pending: VecDeque::new(),
+        }
+    }
+
+    pub fn pending_acknowledgements(&self) -> usize {
+        self.pending.len()
+    }
+}
+
+impl ActuationPort for WaveshareActuationPort {
+    type Acknowledgement = CommandAck;
+    type Error = PortError;
+
+    fn submit_drive(&mut self, command: Authorized<DifferentialDrive>) -> Result<(), Self::Error> {
+        let ticket = self
+            .handle
+            .submit_drive(command)
+            .map_err(PortError::Submit)?;
+        self.pending.push_back(ticket);
+        Ok(())
+    }
+
+    fn request_safety(&mut self, kind: SafetyKind) -> Result<u64, Self::Error> {
+        self.handle
+            .safety()
+            .request(kind)
+            .map_err(PortError::Safety)
+    }
+
+    fn try_acknowledgement(&mut self) -> Result<Option<Self::Acknowledgement>, Self::Error> {
+        let Some(ticket) = self.pending.front() else {
+            return Ok(None);
+        };
+        match ticket.try_take().map_err(PortError::Submit)? {
+            Some(ack) => {
+                self.pending.pop_front();
+                Ok(Some(ack))
+            }
+            None => Ok(None),
         }
     }
 }
@@ -977,7 +1065,11 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use std::collections::VecDeque;
 
-    use leash_core::{Candidate, NormalizedDrive, ProducerEpoch, SafetyGate, SafetyState};
+    use leash_core::{
+        Candidate, ControlInput, ControlKernel, ControlKernelConfig, DurationNanos,
+        NormalizedDrive, OperatorId, ProducerEpoch, SafetyGate, SafetyState,
+    };
+    use leash_runtime::{CpuSafetySupervisor, SupervisorConfig};
 
     use super::*;
 
@@ -1303,5 +1395,79 @@ mod tests {
             handle.submit_drive(authorized(1, 0.1, 0.1)),
             Err(SubmitError::Closed)
         ));
+    }
+
+    #[test]
+    fn cpu_supervisor_is_the_only_motion_path_into_the_owner() {
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let owner = owner(Arc::clone(&transcript));
+        let controller = owner.handle();
+        wait_connected(&controller);
+        let supervisor = CpuSafetySupervisor::spawn(
+            ControlKernel::new(ControlKernelConfig {
+                command_epoch: ProducerEpoch::new(41).unwrap(),
+                evidence_epoch: ProducerEpoch::new(42).unwrap(),
+                deadman: DurationNanos::from_millis(50).unwrap(),
+            }),
+            WaveshareActuationPort::new(controller.clone()),
+            Box::new(TestClock(Arc::new(AtomicU64::new(100)))),
+            SupervisorConfig {
+                proposal_capacity: 4,
+                tick_period: Duration::from_millis(1),
+            },
+        )
+        .unwrap();
+        let safety = supervisor.handle();
+        safety
+            .submit(ControlInput::UpdateEvidence {
+                obstacle_blocked: false,
+                lidar_fresh: true,
+                localization_fresh: true,
+            })
+            .unwrap()
+            .wait()
+            .unwrap();
+        safety
+            .submit(ControlInput::Authorize {
+                operator: OperatorId::new("integration-test").unwrap(),
+                expires_at: MonotonicNanos::new(1_000_000),
+            })
+            .unwrap()
+            .wait()
+            .unwrap();
+        let speed = NormalizedDrive::new(0.2).unwrap();
+        safety
+            .submit(ControlInput::Drive {
+                command: DifferentialDrive::new(speed, speed),
+                deadline: MonotonicNanos::new(1_000_000),
+            })
+            .unwrap()
+            .wait()
+            .unwrap();
+        for _ in 0..100 {
+            if controller.status().metrics.writes >= 2 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        safety.estop().unwrap();
+        for _ in 0..100 {
+            if controller.status().last_estop_receipt.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            controller
+                .status()
+                .last_estop_receipt
+                .unwrap()
+                .verified_zero
+        );
+        let frames = String::from_utf8(lock(&transcript).writes.clone()).unwrap();
+        assert!(frames.lines().any(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).unwrap();
+            value["L"] == 0.2 && value["R"] == 0.2
+        }));
     }
 }
