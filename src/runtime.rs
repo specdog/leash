@@ -169,6 +169,10 @@ pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
         Ok(())
     }
 
+    fn runtime_v2_status(&self) -> Option<Value> {
+        None
+    }
+
     fn emergency_stop(&self) -> Result<()> {
         self.stop()
     }
@@ -801,6 +805,16 @@ impl Harness {
             && command.right_cmd.abs() <= f64::EPSILON
             && command.active_session_id.is_none();
         self.cognition.status(now_ms(), zero_motion)
+    }
+
+    pub fn runtime_v2_status(&self) -> Value {
+        self.driver.runtime_v2_status().unwrap_or_else(|| {
+            json!({
+                "available": false,
+                "control_authority": "legacy-adapter",
+                "motor_authority": "driver"
+            })
+        })
     }
 
     pub fn cognition_snapshots(&self) -> CognitionSnapshotsV1 {

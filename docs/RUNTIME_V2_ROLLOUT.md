@@ -70,7 +70,7 @@ directory created on the target; it must never be committed.
 implementations/waveshare-ugv/deployment-baseline.sh verify
 
 implementations/waveshare-ugv/deployment-baseline.sh deploy \
-  /tmp/leash-runtime-v2-candidate ARCHIVE --confirm
+  /tmp/leash-runtime-v2-candidate ARCHIVE --accelerator cpu --confirm
 
 implementations/waveshare-ugv/deployment-baseline.sh rollback \
   ARCHIVE --confirm
@@ -100,5 +100,18 @@ under the archive and compares the restored binary byte-for-byte.
   `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`.
   The live binary hash remained the captured baseline and the service remained
   active after the tests.
+- The production `waveshare-ugv` feature now composes the CPU safety supervisor,
+  lossless evidence journal, and sole Waveshare serial owner for every physical
+  drive, stop, and E-stop. `GET /runtime-v2/status` exposes receipt identities,
+  queue watermarks, failure counters, and evidence health for the private soak
+  record without changing existing v1 responses.
+- A production-equivalent aarch64 candidate with
+  `http,mcp,waveshare-ugv,bridge-compat,v4l2-camera,webrtc,cuda,physical-navigation`
+  built successfully in isolated `/tmp` source. The final candidate will be
+  rebuilt from the rollout commit before physical authorization.
+- The exact live baseline was captured read-only under the target's private
+  state directory at `20260829T185447Z`. Its archive checksums pass, both service
+  environment files are retained, and its binary SHA-256 `6aca86b0...294`
+  matches the still-running service.
 - Supervised physical testing, deployment, and rollback are pending explicit
   operator authorization.

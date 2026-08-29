@@ -301,6 +301,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/telemetry/compact", get(compact_telemetry))
         .route("/telemetry/qualia-inputs", get(qualia_inputs))
         .route("/cognition/status", get(cognition_status))
+        .route("/runtime-v2/status", get(runtime_v2_status))
         .route("/cognition/snapshot", get(cognition_snapshot))
         .route("/cognition/checkpoint", post(cognition_checkpoint))
         .route("/cognition/boundary", post(cognition_boundary_update))
@@ -642,6 +643,10 @@ async fn cognition_status(
     State(harness): State<Harness>,
 ) -> Json<crate::cognition::CognitionStatusV1> {
     Json(harness.cognition_status())
+}
+
+async fn runtime_v2_status(State(harness): State<Harness>) -> Json<Value> {
+    Json(harness.runtime_v2_status())
 }
 
 async fn cognition_snapshot(

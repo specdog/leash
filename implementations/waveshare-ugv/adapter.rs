@@ -25,9 +25,7 @@ use leash_waveshare::{
     OwnerConfig, SerialPortFactory, WaveshareActuationPort,
 };
 use parking_lot::Mutex;
-#[cfg(test)]
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     adapter::{GimbalAdapter, MobileBaseAdapter},
@@ -279,6 +277,110 @@ fn runtime_v2_evidence_path() -> Result<PathBuf> {
 }
 
 impl RobotDriver for WaveshareUgvDriver {
+    fn runtime_v2_status(&self) -> Option<Value> {
+        let owner = self.controller_handle.status();
+        let supervisor = self.supervisor_handle.status();
+        let safety_receipt = |receipt: Option<leash_waveshare::SafetyReceipt>| {
+            receipt.map(|receipt| {
+                json!({
+                    "kind": match receipt.kind {
+                        SafetyKind::Stop => "stop",
+                        SafetyKind::EStop => "estop",
+                    },
+                    "first_request_sequence": receipt.first_request_sequence,
+                    "through_request_sequence": receipt.through_request_sequence,
+                    "coalesced": receipt.coalesced,
+                    "applied_sequence": receipt.applied_sequence,
+                    "applied_at_ns": receipt.applied_at.get(),
+                    "verified_zero": receipt.verified_zero
+                })
+            })
+        };
+        let evidence = supervisor.evidence.map(|status| {
+            json!({
+                "healthy": status.healthy(),
+                "normal_capacity": status.normal_capacity,
+                "normal_depth": status.normal_depth,
+                "normal_high_watermark": status.normal_high_watermark,
+                "priority_capacity": status.priority_capacity,
+                "priority_depth": status.priority_depth,
+                "priority_high_watermark": status.priority_high_watermark,
+                "durable_records": status.durable_records,
+                "last_durable_ordinal": status.last_durable_ordinal,
+                "saturated": status.saturated,
+                "storage_full": status.storage_full,
+                "closed": status.closed,
+                "writer_fault": status.writer_fault
+            })
+        });
+        Some(json!({
+            "available": true,
+            "control_authority": "cpu-safety-supervisor",
+            "motor_authority": "waveshare-controller-owner",
+            "cpu_final_authority": true,
+            "controller": {
+                "connected": owner.connected,
+                "estopped": owner.estopped,
+                "last_error": owner.last_error,
+                "last_stop_receipt": safety_receipt(owner.last_stop_receipt),
+                "last_estop_receipt": safety_receipt(owner.last_estop_receipt),
+                "metrics": {
+                    "accepted": owner.metrics.accepted,
+                    "rejected_full": owner.metrics.rejected_full,
+                    "rejected_estopped": owner.metrics.rejected_estopped,
+                    "superseded_by_safety": owner.metrics.superseded_by_safety,
+                    "writes": owner.metrics.writes,
+                    "write_failures": owner.metrics.write_failures,
+                    "telemetry_frames": owner.metrics.telemetry_frames,
+                    "malformed_telemetry": owner.metrics.malformed_telemetry,
+                    "disconnects": owner.metrics.disconnects,
+                    "reconnects": owner.metrics.reconnects,
+                    "worker_panics": owner.metrics.worker_panics
+                },
+                "command_lane": {
+                    "capacity": owner.command_lane.capacity,
+                    "depth": owner.command_lane.depth,
+                    "high_watermark": owner.command_lane.high_watermark,
+                    "sent": owner.command_lane.sent,
+                    "received": owner.command_lane.received,
+                    "rejected": owner.command_lane.rejected,
+                    "dropped": owner.command_lane.dropped,
+                    "closed": owner.command_lane.closed
+                }
+            },
+            "supervisor": {
+                "faulted": supervisor.faulted,
+                "closed": supervisor.closed,
+                "last_fault": supervisor.last_fault,
+                "metrics": {
+                    "proposals_accepted": supervisor.metrics.proposals_accepted,
+                    "proposals_rejected": supervisor.metrics.proposals_rejected,
+                    "transitions": supervisor.metrics.transitions,
+                    "stop_requests": supervisor.metrics.stop_requests,
+                    "estop_requests": supervisor.metrics.estop_requests,
+                    "drives_submitted": supervisor.metrics.drives_submitted,
+                    "acknowledgements": supervisor.metrics.acknowledgements,
+                    "acknowledgement_failures": supervisor.metrics.acknowledgement_failures,
+                    "faults": supervisor.metrics.faults,
+                    "worker_panics": supervisor.metrics.worker_panics,
+                    "evidence_records": supervisor.metrics.evidence_records,
+                    "evidence_failures": supervisor.metrics.evidence_failures
+                },
+                "proposal_lane": {
+                    "capacity": supervisor.proposal_lane.capacity,
+                    "depth": supervisor.proposal_lane.depth,
+                    "high_watermark": supervisor.proposal_lane.high_watermark,
+                    "sent": supervisor.proposal_lane.sent,
+                    "received": supervisor.proposal_lane.received,
+                    "rejected": supervisor.proposal_lane.rejected,
+                    "dropped": supervisor.proposal_lane.dropped,
+                    "closed": supervisor.proposal_lane.closed
+                },
+                "evidence": evidence
+            }
+        }))
+    }
+
     fn owns_native_telemetry(&self) -> bool {
         true
     }
@@ -1511,6 +1613,32 @@ mod tests {
             .authorize_control("operator-test", Duration::from_secs(2))
             .unwrap();
         driver.drive(0.1, 0.1).unwrap();
+        let status = driver.runtime_v2_status().unwrap();
+        assert_eq!(status["available"], true);
+        assert_eq!(status["control_authority"], "cpu-safety-supervisor");
+        assert_eq!(status["motor_authority"], "waveshare-controller-owner");
+        assert_eq!(status["cpu_final_authority"], true);
+        assert_eq!(
+            status["controller"]["last_stop_receipt"]["verified_zero"],
+            true
+        );
+        assert_eq!(
+            status["controller"]["last_estop_receipt"]["verified_zero"],
+            true
+        );
+        assert!(
+            status["controller"]["last_stop_receipt"]["applied_sequence"]
+                .as_u64()
+                .unwrap()
+                < status["controller"]["last_estop_receipt"]["applied_sequence"]
+                    .as_u64()
+                    .unwrap()
+        );
+        assert_eq!(
+            status["supervisor"]["metrics"]["acknowledgement_failures"],
+            0
+        );
+        assert_eq!(status["supervisor"]["evidence"]["healthy"], true);
         drop(driver);
 
         let bytes = transcript.lock().clone();

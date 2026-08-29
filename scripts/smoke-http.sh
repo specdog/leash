@@ -241,6 +241,14 @@ assert_dashboard_page() {
   fi
 }
 
+assert_runtime_v2_sim_status() {
+  node -e 'const payload = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (payload.available !== false) throw new Error("sim unexpectedly reported a Runtime v2 physical authority");
+if (payload.control_authority !== "legacy-adapter" || payload.motor_authority !== "driver") {
+  throw new Error("sim Runtime v2 fallback status was invalid");
+}'
+}
+
 assert_agent_page() {
   local html
   html="$(cat)"
@@ -346,6 +354,7 @@ if (!payload.stop || payload.stop.ok !== true) throw new Error("client stop resp
 }
 
 curl -fsS "$base/health" | assert_health_modules
+curl -fsS "$base/runtime-v2/status" | assert_runtime_v2_sim_status
 curl -fsS "$base/capabilities" | assert_capabilities_streams
 curl -fsS "$base/modules" | parse_json
 curl -fsS "$base/telemetry" | assert_sensor_contracts

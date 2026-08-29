@@ -30,10 +30,11 @@ implementations/waveshare-ugv/deployment-baseline.sh capture \
   --build-features 'http,mcp,waveshare-ugv,bridge-compat'
 ```
 
-The command creates a private, mode-`0700` archive under
+The capture action is read-only. It creates a private, mode-`0700` archive under
 `~/.local/state/leash/waveshare-ugv-baselines/`. It contains the deployed binary,
-service unit, private environment, redacted environment proof, source snapshot,
-checksums, API responses, and device-ownership proof. Do not commit that folder.
+base and effective service units, every private environment file, redacted
+environment proof, source snapshot, checksums, API responses, and
+device-ownership proof. Do not commit that folder.
 
 Prove the recorded source can produce an equivalent binary without taking the
 live service or its devices:
@@ -82,12 +83,40 @@ does not pass:
 implementations/waveshare-ugv/deployment-baseline.sh deploy \
   /tmp/leash-runtime-v2-candidate \
   ~/.local/state/leash/waveshare-ugv-baselines/<timestamp> \
+  --accelerator cpu \
   --confirm
 ```
 
 The successful deployment proof is private under the baseline directory as
 `deploy-<timestamp>/`. Preserve it together with the subsequent rollback
 proof; neither directory belongs in the repository.
+
+Runtime v2 publishes additive controller/supervisor evidence at
+`GET /runtime-v2/status`. It includes the sole-owner identity, verified
+stop/E-stop receipts, queue capacities and high-water marks, failure counters,
+and durable evidence-journal health without changing an existing v1 payload.
+
+After an explicitly authorized deployment, run the supervised hardware soak
+with the chassis secured or wheels lifted, a reachable physical E-stop, and a
+second observer. The service must require and report the selected backend. The
+private token file is read but never copied into evidence:
+
+```bash
+implementations/waveshare-ugv/runtime-v2-hardware-soak.sh \
+  --backend cpu \
+  --pilot-token-file ~/.config/leash/pilot-token \
+  --expected-binary-sha256 '<candidate-sha256>' \
+  --output ~/.local/state/leash/runtime-v2/cpu-hardware-soak.json \
+  --operator-confirmed
+```
+
+The soak limits pulses to normalized drive `0.10` or lower, requests verified
+zero after each pulse, tests one latching E-stop and approved reset, requires
+ordered verified-zero controller receipts, and fails if stop p99 or E-stop
+acknowledgement exceeds 250 ms. It also checks queue/evidence failure counters,
+backend truth, service continuity, RAM, and GPU temperature. Repeat with
+`--backend cuda` only after rolling back and deploying the CUDA-selected
+candidate from the same captured baseline.
 
 ## USB bring-up without committed identity
 

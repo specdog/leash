@@ -32,3 +32,6 @@ flowchart TB
 - `smoke-replay-mcp.sh`: replay mode over MCP.
 - `smoke-physical-gate.sh`: proves physical startup fails without explicit actuation.
 - `smoke-daemon.sh`: daemon start/status/log/restart/stop path.
+- `../implementations/waveshare-ugv/runtime-v2-hardware-soak.sh`: explicitly
+  authorized CPU/CUDA low-speed pulses, ordered verified-zero stop/E-stop
+  receipts, queue/evidence health, and Jetson resource ceilings.

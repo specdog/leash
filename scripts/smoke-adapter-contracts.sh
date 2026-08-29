@@ -40,9 +40,19 @@ done
 baseline_script="implementations/waveshare-ugv/deployment-baseline.sh"
 bash -n "$baseline_script"
 baseline_help="$(bash "$baseline_script" --help)"
-for command in "capture" "verify" "deploy" "rollback" "CANDIDATE" "--source-revision" "--build-features" "--confirm"; do
+for command in "capture" "verify" "deploy" "rollback" "CANDIDATE" "--source-revision" "--build-features" "--accelerator" "--confirm"; do
   if ! grep -Fq -- "$command" <<<"$baseline_help"; then
     echo "deployment baseline help missing: $command" >&2
+    exit 1
+  fi
+done
+
+hardware_soak_script="implementations/waveshare-ugv/runtime-v2-hardware-soak.sh"
+bash -n "$hardware_soak_script"
+hardware_soak_help="$(bash "$hardware_soak_script" --help)"
+for option in "--backend" "--pilot-token-file" "--expected-binary-sha256" "--output" "--operator-confirmed"; do
+  if ! grep -Fq -- "$option" <<<"$hardware_soak_help"; then
+    echo "Runtime v2 hardware soak help missing: $option" >&2
     exit 1
   fi
 done
@@ -62,4 +72,4 @@ if grep -R -E -q -- '(^|[^0-9])10\.[0-9]+\.[0-9]+\.[0-9]+([^0-9]|$)|(^|[^0-9])19
   exit 1
 fi
 
-printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true,"ugv_calibration":true}\n'
+printf '{"ok":true,"contracts":3,"waveshare_traits":2,"template_sections":5,"deployment_baseline":true,"runtime_v2_hardware_soak":true,"sensor_soak":true,"sensor_fixtures":2,"ros2_slam_adapter":true,"ugv_calibration":true}\n'

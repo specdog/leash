@@ -6,7 +6,7 @@ usage() {
 Usage:
   deployment-baseline.sh capture --source-revision VALUE --build-features LIST [options]
   deployment-baseline.sh verify [options]
-  deployment-baseline.sh deploy CANDIDATE ARCHIVE --confirm [options]
+  deployment-baseline.sh deploy CANDIDATE ARCHIVE --accelerator cpu|cuda --confirm [options]
   deployment-baseline.sh rollback ARCHIVE --confirm [options]
 
 Capture or verify a private Waveshare UGV deployment baseline, or restore one.
@@ -19,6 +19,7 @@ Options:
   --source-dir PATH       deployed source (default: resolved ~/leash-current)
   --source-revision TEXT  git revision plus local patch identity; required by capture
   --build-features LIST   exact Cargo feature list; required by capture
+  --accelerator BACKEND   required active backend for deploy: cpu or cuda
   --output PATH           capture destination (default: private state directory)
   --confirm               required for deploy and rollback
   -h, --help              show this help
@@ -51,6 +52,7 @@ confirm="false"
 archive=""
 candidate=""
 env_files=()
+accelerator=""
 
 if [[ "$action" == "deploy" ]]; then
   candidate="${1:-}"
@@ -86,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       build_features="${2:?--build-features requires a value}"
       shift 2
       ;;
+    --accelerator)
+      accelerator="${2:?--accelerator requires a value}"
+      shift 2
+      ;;
     --output)
       output="${2:?--output requires a value}"
       shift 2
@@ -104,7 +110,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for command in cmp curl fuser install readlink sha256sum systemctl; do
+for command in cmp curl fuser install jq readlink sha256sum systemctl; do
   need "$command"
 done
 
@@ -337,6 +343,7 @@ rollback() {
 
 deploy() {
   [[ "$confirm" == "true" ]] || die "deploy requires --confirm"
+  [[ "$accelerator" =~ ^(cpu|cuda)$ ]] || die "deploy requires --accelerator cpu|cuda"
   candidate="$(readlink -f "$candidate")"
   archive="$(readlink -f "$archive")"
   [[ -x "$candidate" ]] || die "candidate binary is not executable"
@@ -347,6 +354,12 @@ deploy() {
   (cd "$archive" && sha256sum --check archive.sha256)
   service_paths
   cmp "$archive/leash" "$binary" || die "active binary does not match the verified baseline"
+  local configured_env
+  for configured_env in "${env_files[@]:1}"; do
+    if grep -Eq '^(LEASH_ACCELERATOR|LEASH_REQUIRE_ACCELERATOR)=' "$configured_env"; then
+      die "accelerator selection is overridden by a later service environment file"
+    fi
+  done
 
   local proof rollback_on_exit=0
   proof="$archive/deploy-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -356,6 +369,26 @@ deploy() {
   sha256sum "$candidate" >"$proof/candidate.sha256"
   sha256sum "$binary" "$service_file" "$env_file" >"$proof/before.sha256"
   "$candidate" --version >"$proof/candidate-version.txt"
+  awk -v backend="$accelerator" '
+    BEGIN { accelerator_seen=0; required_seen=0 }
+    /^LEASH_ACCELERATOR=/ {
+      if (!accelerator_seen) print "LEASH_ACCELERATOR=" backend
+      accelerator_seen=1
+      next
+    }
+    /^LEASH_REQUIRE_ACCELERATOR=/ {
+      if (!required_seen) print "LEASH_REQUIRE_ACCELERATOR=true"
+      required_seen=1
+      next
+    }
+    { print }
+    END {
+      if (!accelerator_seen) print "LEASH_ACCELERATOR=" backend
+      if (!required_seen) print "LEASH_REQUIRE_ACCELERATOR=true"
+    }
+  ' "$env_file" >"$proof/leash.env.candidate"
+  chmod 0600 "$proof/leash.env.candidate"
+  sha256sum "$proof/leash.env.candidate" >"$proof/candidate-config.sha256"
 
   deploy_cleanup() {
     if [[ "$rollback_on_exit" == 1 ]]; then
@@ -371,13 +404,25 @@ deploy() {
   rollback_on_exit=1
   systemctl --user stop "$service"
   install -m 0755 "$candidate" "$binary"
+  install -m 0600 "$proof/leash.env.candidate" "$env_file"
   systemctl --user start "$service"
   wait_for_health
 
   endpoint /health >"$proof/health.json"
   grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$proof/health.json" \
     || die "candidate health did not report ok=true"
+  jq -e --arg backend "$accelerator" \
+    '.accelerator.requested == $backend and .accelerator.active == $backend and .accelerator.required == true' \
+    "$proof/health.json" >/dev/null || die "candidate did not activate the required backend"
   endpoint /capabilities >"$proof/capabilities.json"
+  endpoint /cognition/status >"$proof/cognition-status.json"
+  endpoint /runtime-v2/status >"$proof/runtime-v2-status.json"
+  jq -e --arg backend "$accelerator" \
+    '.backend_status.selected == $backend and .backend_status.active == $backend and .backend_status.degraded == false and .capabilities.motor_authority == false' \
+    "$proof/cognition-status.json" >/dev/null || die "candidate cognition backend is not healthy"
+  jq -e \
+    '.available == true and .cpu_final_authority == true and .control_authority == "cpu-safety-supervisor" and .motor_authority == "waveshare-controller-owner" and .controller.connected == true and .supervisor.faulted == false and .supervisor.evidence.healthy == true' \
+    "$proof/runtime-v2-status.json" >/dev/null || die "candidate Runtime v2 authority is not healthy"
   endpoint /camera/status >"$proof/camera-status.json"
   endpoint /sensors >"$proof/sensors.json"
   stop_now >"$proof/stop-after.json"
