@@ -68,6 +68,13 @@ with jitter percentiles, transition latency, missed deadlines, and proposal
 queue high-water data; checked evidence is stored per host rather than treated
 as a universal real-time claim.
 
+The first 1,000-tick release run on the Windows x86-64 development host had no
+10 ms transition deadline misses, 0.438 ms p99 completion jitter, 0.094 ms p99
+transition latency, and proposal queue high-water 1/32. The complete command,
+host provenance, and unrounded values are checked into
+`crates/leash-runtime/evidence/host-windows-x86_64-20260829.json`. This result
+does not substitute for the required Jetson Gate C record.
+
 The DIMOS-style domain vocabulary now lives in `leash-core`, not in transport
 JSON: versioned owned activities, states, intents, observations, framed beliefs,
 proposals, effects, and outcomes. Activity transitions are total and distinguish

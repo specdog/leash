@@ -1,0 +1,40 @@
+{
+  "schema_version": "leash.control-loop-benchmark-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "74a585f",
+  "command": "cargo run --quiet --release -p leash-runtime --example control_loop_bench -- --ticks 1000",
+  "host": {
+    "target": "x86_64-pc-windows-msvc",
+    "processor": "Intel(R) Core(TM) i9-14900KF",
+    "physical_cores": 24,
+    "logical_processors": 32,
+    "rustc": "1.94.1 (e408947bf 2026-03-25)",
+    "llvm": "21.1.8"
+  },
+  "result": {
+    "schema_version": "leash.control-loop-benchmark.v1",
+    "frequency_hz": 100,
+    "ticks": 1000,
+    "deadline_ns": 10000000,
+    "missed_deadlines": 0,
+    "jitter_ns": {
+      "p50": 58400,
+      "p95": 375800,
+      "p99": 437900,
+      "max": 519200
+    },
+    "transition_latency_ns": {
+      "p50": 8300,
+      "p95": 79600,
+      "p99": 94300,
+      "max": 112400
+    },
+    "proposal_queue": {
+      "capacity": 32,
+      "high_watermark": 1,
+      "rejected": 0,
+      "depth_at_end": 0
+    }
+  },
+  "scope": "Host timing evidence only; this does not satisfy the Jetson Gate C timing and fault-injection requirement."
+}
