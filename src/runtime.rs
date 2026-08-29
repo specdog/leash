@@ -1416,6 +1416,7 @@ impl Harness {
             right_cmd: command.right_cmd,
             odometry_left: raw.odometry_left,
             odometry_right: raw.odometry_right,
+            odometry_pose: None,
             session_id: command.active_session_id.as_deref().map(operator_owner_id),
             deadman_ok: !command.stopped_by_deadman,
             estop: command.estop,
