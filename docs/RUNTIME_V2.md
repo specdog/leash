@@ -68,6 +68,14 @@ precision, expiry, and non-empty evidence lineage; competing proposals resolve
 deterministically by freshness, priority, then typed ID. Drive remains only a
 proposal until the safety kernel produces the unforgeable `Authorized` wrapper.
 
+`leash-gateway` now provides the common edge service for future HTTP, MCP, and
+CLI adapters. It strictly decodes owned DTOs, validates operator IDs and drive
+ranges before constructing domain commands, waits on typed transition tickets
+with an explicit timeout, and renders stable effect DTOs. Stop and e-stop never
+enter that normal proposal lane; they acknowledge acceptance by the atomic
+safety mailbox immediately. The legacy surfaces retain their frozen wire
+contracts until they are switched to this service behind compatibility tests.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed

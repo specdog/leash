@@ -1397,6 +1397,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "leash-gateway"
+version = "0.1.0"
+dependencies = [
+ "leash-core",
+ "leash-runtime",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "leash-harness"
 version = "0.1.1"
 dependencies = [
