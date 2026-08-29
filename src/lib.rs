@@ -7,6 +7,7 @@
 pub mod accelerator;
 pub mod adapter;
 pub mod agent;
+pub mod agent_runtime;
 pub mod calibration;
 pub mod capability;
 pub mod config;
@@ -47,6 +48,12 @@ pub use adapter::{
     MobileBaseAdapter, RangeScanAdapter,
 };
 pub use agent::complete as complete_agent_prompt;
+pub use agent_runtime::{
+    AgentConsoleCapability, AgentConsoleHealth, AgentRunOutput, AgentRuntime, AgentRuntimeSnapshot,
+    AgentSession, AgentSessionStore, AgentSessionSummary, AgentTaskRecord, AgentTaskSnapshot,
+    AgentTaskState, AgentTaskStopOutput, AgentTaskStore, AgentTurn, CapabilityPermissions,
+    AGENT_SESSION_FORMAT, AGENT_TASK_FORMAT,
+};
 pub use calibration::{
     CalibrationEnterRequest, CalibrationEnterResult, CalibrationEnvelope, CalibrationPhase,
     CalibrationStatus,
