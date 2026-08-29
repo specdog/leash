@@ -13,8 +13,6 @@ pub mod capability;
 pub mod cognition;
 pub mod config;
 #[cfg(feature = "cuda")]
-mod cuda_cognition;
-#[cfg(feature = "cuda")]
 mod cuda_voxel;
 pub mod daemon;
 pub mod gateway;

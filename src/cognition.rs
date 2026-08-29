@@ -212,24 +212,12 @@ pub struct CognitionRuntime {
     owner: Arc<str>,
     checkpoint_dir: Arc<PathBuf>,
     boundary_tx: broadcast::Sender<CognitionBoundaryFrameV1>,
-    #[cfg(feature = "cuda")]
-    cuda: Option<Arc<Mutex<crate::cuda_cognition::CudaCognition>>>,
 }
 
 impl CognitionRuntime {
     pub fn new(accelerator: &AcceleratorStatus, owner: &str) -> Self {
-        #[cfg(feature = "cuda")]
-        let cuda = (accelerator.active == AcceleratorBackend::Cuda)
-            .then(crate::cuda_cognition::CudaCognition::new)
-            .transpose()
-            .ok()
-            .flatten()
-            .map(|runtime| Arc::new(Mutex::new(runtime)));
-        #[cfg(feature = "cuda")]
-        let backend = if cuda.is_some() { "cuda" } else { "cpu" };
-        #[cfg(not(feature = "cuda"))]
         let backend = match accelerator.active {
-            AcceleratorBackend::Cuda => "cpu-fallback",
+            AcceleratorBackend::Cuda => "cpu-workload-policy",
             _ => "cpu",
         };
         let (boundary_tx, _) = broadcast::channel(32);
@@ -243,8 +231,6 @@ impl CognitionRuntime {
             owner: Arc::from(owner.trim()),
             checkpoint_dir: Arc::new(default_checkpoint_dir()),
             boundary_tx,
-            #[cfg(feature = "cuda")]
-            cuda,
         }
     }
 
@@ -270,12 +256,6 @@ impl CognitionRuntime {
         let mut state = self.state.lock();
         state.sensor.copy_from_slice(&encoded);
         state.sensor_ts_ms = Some(telemetry.ts_ms);
-        #[cfg(feature = "cuda")]
-        if let Some(cuda) = &self.cuda {
-            if let Err(error) = cuda.lock().update_sensor(&encoded) {
-                tracing::warn!(?error, "CUDA cognition sensor upload failed");
-            }
-        }
     }
 
     pub fn tick(&self, now_ms: u128) {
@@ -322,15 +302,6 @@ impl CognitionRuntime {
                     top_precision,
                     now_ms,
                 );
-                #[cfg(feature = "cuda")]
-                if let Some(cuda) = &self.cuda {
-                    if let Err(error) =
-                        cuda.lock()
-                            .step(layer_index, lower_precision, top_precision)
-                    {
-                        tracing::warn!(?error, layer_index, "CUDA cognition step failed");
-                    }
-                }
                 if layer_index == 2 {
                     publish_boundary = true;
                 }
@@ -387,10 +358,6 @@ impl CognitionRuntime {
         state.top_down_expires_at_ms = frame
             .expires_at_ms
             .min(now_ms.saturating_add(COGNITION_BOUNDARY_TIMEOUT_MS));
-        #[cfg(feature = "cuda")]
-        if let Some(cuda) = &self.cuda {
-            cuda.lock().update_top_down(&frame.latent)?;
-        }
         Ok(())
     }
 

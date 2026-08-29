@@ -1,45 +1,26 @@
 use std::{
     path::Path,
-    sync::{Arc, OnceLock},
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, ensure, Context, Result};
-use cudarc::{
-    driver::{CudaContext, CudaFunction, CudaStream, LaunchConfig, PushKernelArg},
-    nvrtc::compile_ptx,
+use leash_cuda::{
+    ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority, WorkError,
 };
 
-const KERNEL: &str = r#"
-extern "C" __global__ void project_occupancy(
-    const signed char* cells,
-    int* output,
-    unsigned int cell_count,
-    unsigned int depth
-) {
-    unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int output_count = cell_count * depth;
-    if (index >= output_count) return;
-    signed char occupancy = cells[index / depth];
-    output[index] = occupancy > 0 ? (int)occupancy : 0;
-}
-"#;
+const COMPUTE_DEADLINE: Duration = Duration::from_millis(100);
 
-struct CudaVoxelizer {
-    stream: Arc<CudaStream>,
-    function: CudaFunction,
-}
+static EXECUTOR: OnceLock<Result<ComputeExecutor, String>> = OnceLock::new();
 
-static VOXELIZER: OnceLock<Result<CudaVoxelizer, String>> = OnceLock::new();
-
-fn voxelizer() -> Result<&'static CudaVoxelizer> {
-    VOXELIZER
+fn executor() -> Result<&'static ComputeExecutor> {
+    EXECUTOR
         .get_or_init(|| {
             if !cuda_device_node_present() {
                 return Err("no local CUDA device node is present".to_string());
             }
-            std::panic::catch_unwind(CudaVoxelizer::new)
-                .map_err(|_| "CUDA driver dynamic loading panicked".to_string())?
-                .map_err(|error| format!("{error:#}"))
+            ComputeExecutor::start_cuda(ExecutorConfig::default())
+                .map_err(|error| error.to_string())
         })
         .as_ref()
         .map_err(|error| anyhow!(error.clone()))
@@ -51,63 +32,32 @@ fn cuda_device_node_present() -> bool {
         .any(|path| Path::new(path).exists())
 }
 
-impl CudaVoxelizer {
-    fn new() -> Result<Self> {
-        let device_count = CudaContext::device_count().context("query CUDA device count")?;
-        ensure!(device_count > 0, "no CUDA device is available");
-        let context = CudaContext::new(0).context("create CUDA device 0 context")?;
-        let ptx = compile_ptx(KERNEL).context("compile voxel kernel with NVRTC")?;
-        let module = context.load_module(ptx).context("load voxel CUDA module")?;
-        let function = module
-            .load_function("project_occupancy")
-            .context("load project_occupancy CUDA kernel")?;
-        Ok(Self {
-            stream: context.default_stream(),
-            function,
-        })
-    }
-
-    fn project(&self, cells: &[i8], depth: u32) -> Result<Vec<i32>> {
-        ensure!(depth > 0, "voxel depth must be positive");
-        let output_count = cells
-            .len()
-            .checked_mul(depth as usize)
-            .context("voxel output length overflow")?;
-        let cells_device = self
-            .stream
-            .clone_htod(cells)
-            .context("copy occupancy cells to CUDA")?;
-        let mut output_device = self
-            .stream
-            .alloc_zeros::<i32>(output_count)
-            .context("allocate CUDA voxel output")?;
-        let cell_count = u32::try_from(cells.len()).context("occupancy grid is too large")?;
-        let launch = LaunchConfig::for_num_elems(output_count as u32);
-        unsafe {
-            self.stream
-                .launch_builder(&self.function)
-                .arg(&cells_device)
-                .arg(&mut output_device)
-                .arg(&cell_count)
-                .arg(&depth)
-                .launch(launch)
-        }
-        .context("launch CUDA voxel kernel")?;
-        self.stream
-            .clone_dtoh(&output_device)
-            .context("copy CUDA voxel output to host")
-    }
-}
-
 pub fn probe() -> Result<()> {
-    let output = voxelizer()?.project(&[0, 100, -1], 2)?;
+    let output = project_occupancy(&[0, 100, -1], 2)?;
     ensure!(
         output == [0, 0, 100, 100, 0, 0],
-        "CUDA voxel kernel returned incorrect output"
+        "prebuilt CUDA voxel kernel returned incorrect output"
     );
     Ok(())
 }
 
 pub fn project_occupancy(cells: &[i8], depth: u32) -> Result<Vec<i32>> {
-    voxelizer()?.project(cells, depth)
+    let ticket = executor()?
+        .submit(
+            JobPriority::Interactive,
+            Some(Instant::now() + COMPUTE_DEADLINE),
+            ComputeJob::ProjectOccupancy {
+                cells: cells.to_vec(),
+                depth,
+            },
+        )
+        .context("submit voxel projection to the shared CUDA executor")?;
+    match ticket.wait().map_err(work_error)? {
+        ComputeResult::Occupancy(output) => Ok(output),
+        _ => Err(anyhow!("CUDA executor returned the wrong result variant")),
+    }
+}
+
+fn work_error(error: WorkError) -> anyhow::Error {
+    anyhow!("CUDA voxel projection failed: {error}")
 }

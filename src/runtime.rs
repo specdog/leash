@@ -38,7 +38,7 @@ use crate::{
         CognitionBoundaryFrameV1, CognitionCheckpointV1, CognitionRuntime, CognitionSnapshotsV1,
         CognitionStatusV1, COGNITION_CONTRACT_VERSION,
     },
-    config::{AcceleratorBackend, HarnessConfig, Profile},
+    config::{HarnessConfig, Profile},
     localization::{
         ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationProvider,
         LocalizationProviderStatus, LocalizationProviderUpdate,
@@ -1742,19 +1742,10 @@ impl Harness {
     }
 
     fn voxel_grid_for(&self, grid: &OccupancyGridFrame) -> VoxelGridFrame {
-        if self.accelerator.active == AcceleratorBackend::Cuda {
-            #[cfg(feature = "cuda")]
-            match cuda_projected_voxel_grid(grid, 0.25) {
-                Ok(voxels) => return voxels,
-                Err(error) => {
-                    tracing::error!(?error, "CUDA voxel projection failed after startup probe");
-                    return VoxelGridFrame {
-                        source: "cuda-error".to_string(),
-                        ..VoxelGridFrame::default()
-                    };
-                }
-            }
-        }
+        // Orin end-to-end evidence keeps both measured voxel sizes on CPU.
+        // CUDA remains available for startup probing and explicit shadow work,
+        // but cannot become authoritative for this workload until a later
+        // break-even record changes that decision.
         projected_voxel_grid(grid, 0.25)
     }
 
@@ -3619,7 +3610,7 @@ fn projected_voxel_grid(grid: &OccupancyGridFrame, obstacle_height_m: f64) -> Vo
     }
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(all(test, feature = "cuda"))]
 fn cuda_projected_voxel_grid(
     grid: &OccupancyGridFrame,
     obstacle_height_m: f64,
