@@ -1199,4 +1199,47 @@ mod tests {
         assert_eq!(status.capabilities.backend, "cpu");
         assert!(!status.ok);
     }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_runtime_advances_once_and_restores_its_checkpoint_on_cpu() {
+        let accelerator =
+            crate::accelerator::resolve_accelerator(AcceleratorBackend::Cuda, false).unwrap();
+        if accelerator.active != AcceleratorBackend::Cuda {
+            return;
+        }
+        let mut runtime = CognitionRuntime::new(&accelerator, "cuda-checkpoint-source");
+        let checkpoint_dir = std::env::temp_dir().join(format!(
+            "leash-cognition-cuda-checkpoint-test-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        runtime.checkpoint_dir = Arc::new(checkpoint_dir.clone());
+        let tick_ms = now_ms();
+        runtime.state.lock().sensor_ts_ms = Some(tick_ms);
+        runtime.tick(tick_ms);
+        let status = runtime.status(tick_ms, true);
+        assert_eq!(status.backend_status.active, "cuda");
+        assert!(!status.backend_status.degraded);
+        assert_eq!(
+            status
+                .layers
+                .iter()
+                .map(|layer| layer.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        let boundary = runtime.boundary(tick_ms);
+        let checkpoint = runtime.checkpoint_at(tick_ms + 1).unwrap();
+        assert_eq!(checkpoint.backend, "cuda");
+
+        let cpu = crate::accelerator::resolve_accelerator(AcceleratorBackend::Cpu, false).unwrap();
+        let restored =
+            CognitionRuntime::restore_from_checkpoint(&cpu, "cpu-restore", &checkpoint.path)
+                .unwrap();
+        let restored_boundary = restored.boundary(tick_ms + 1);
+        assert_eq!(restored_boundary.sequence, boundary.sequence);
+        assert_eq!(restored_boundary.state_digest, boundary.state_digest);
+        fs::remove_dir_all(&checkpoint_dir).unwrap();
+    }
 }
