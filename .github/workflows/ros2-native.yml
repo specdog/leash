@@ -19,17 +19,20 @@ permissions:
 jobs:
   humble-rclrs:
     runs-on: ubuntu-22.04
-    container:
-      image: ros:humble-ros-base-jammy@sha256:9bdda47f584f33aae18456225a8a95fe7bcde821727757f02a3252cbc46e8188
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ROS 2 Humble
+        uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
+        with:
+          required-ros-distributions: humble
+
       - name: Install pinned build prerequisites
         shell: bash
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends build-essential curl git libclang-dev python3-pip
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl git libclang-dev python3-pip
           python3 -m pip install --no-cache-dir colcon-cargo colcon-ros-cargo
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
