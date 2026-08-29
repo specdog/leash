@@ -17,3 +17,18 @@ LEASH_CUDA_REBUILD=1 NVCC=/usr/local/cuda/bin/nvcc cargo build -p leash-cuda --f
 
 Rebuilding is a development/release operation. Production service startup only
 loads the prebuilt module.
+
+The target-side no-motion driver probe can be built without a Rust toolchain:
+
+```bash
+g++ -std=c++17 tests/jetson_driver_probe.cpp -I/usr/local/cuda/include \
+  -L/usr/local/cuda/lib64 -lcuda -o /tmp/leash-cuda-probe
+/tmp/leash-cuda-probe kernels/prebuilt/sm_87/leash_kernels.fatbin
+```
+
+With Rust installed on the target, the same check exercises the bounded
+single-owner `cudarc` executor and compares all four jobs to their CPU oracle:
+
+```bash
+cargo run --release --features cuda --example jetson_executor_probe
+```

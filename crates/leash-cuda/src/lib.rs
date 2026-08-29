@@ -1,8 +1,20 @@
 //! Precompiled CUDA kernels and CPU reference contracts for Leash.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+
+mod executor;
+
+#[cfg(feature = "cuda")]
+#[allow(unsafe_code)]
+mod device;
 
 use core::fmt;
+
+pub use executor::{
+    BackendKind, BackendStatus, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig,
+    ExecutorMetrics, JobId, JobPriority, JobTicket, PredictiveState, StartError, SubmitError,
+    WorkError,
+};
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";
 pub const ARTIFACT_SHA256: &str =

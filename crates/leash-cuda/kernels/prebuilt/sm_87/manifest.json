@@ -27,5 +27,23 @@
   "reproducibility": {
     "builds_compared": 2,
     "byte_identical": true
+  },
+  "target_validation": {
+    "date": "2026-08-29",
+    "device": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "architecture": "aarch64",
+    "compute_capability": "8.7",
+    "rust": "1.94.1",
+    "cudarc": "0.19.8",
+    "driver_probe": {
+      "kernels_passed": 4,
+      "no_motion": true
+    },
+    "rust_executor_probe": {
+      "active_backend": "cuda",
+      "cpu_parity_jobs_passed": 4,
+      "circuit_open": false,
+      "no_motion": true
+    }
   }
 }

@@ -30,6 +30,16 @@ CUDA is therefore part of this plan, but motor arbitration, deadman, e-stop,
 command limiting, and the final serial write stay on the CPU. A GPU fault must
 never delay or bypass a stop.
 
+The first CUDA gate is now implemented in `leash-cuda`: production code loads a
+checked-in SM 8.7 fatbin with a compute 8.7 PTX fallback, and a bounded
+single-owner executor keeps its context and persistent device buffers private.
+On 2026-08-29, both the CUDA Driver API probe and the Rust `cudarc` executor
+probe passed all four kernels on the target Orin NX without opening the compute
+circuit or touching motion hardware. Artifact hashes, compiler flags, and the
+target result are recorded in the CUDA artifact manifest. CUDA remains
+non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
+are complete.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed
