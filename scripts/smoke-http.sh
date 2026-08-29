@@ -244,10 +244,12 @@ assert_dashboard_page() {
 assert_agent_page() {
   local html
   html="$(cat)"
-  if [[ "$html" != *"Leash Agent Input"* ]]; then
-    echo "agent page missing Leash Agent Input" >&2
-    return 1
-  fi
+  for text in "Leash Agent Console" 'id="prompt-form"' 'id="agent-prompt"'; do
+    if [[ "$html" != *"$text"* ]]; then
+      echo "agent page missing $text" >&2
+      return 1
+    fi
+  done
 }
 
 dashboard_ts() {
