@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Nav2Kinematics::new(Meters::new(0.4)?, MetersPerSecond::new(1.0)?)?,
         ActivityId::new(ProducerEpoch::new(91)?, Sequence::new(1)?),
         ProducerEpoch::new(92)?,
-        Box::new([BeliefId::new(ProducerEpoch::new(93)?, Sequence::new(1)?)]),
+        vec![BeliefId::new(ProducerEpoch::new(93)?, Sequence::new(1)?)].into_boxed_slice(),
     )?;
     let mut executor = NativeRosExecutor::from_env(queues.handle(), config)?;
     let halt = executor.halt_handle();
