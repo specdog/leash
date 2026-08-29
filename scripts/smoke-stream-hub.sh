@@ -3,6 +3,7 @@ set -euo pipefail
 
 port="${LEASH_STREAM_HUB_SMOKE_PORT:-18084}"
 log_file="$(mktemp -t leash-stream-hub-smoke.XXXXXX.log)"
+stderr_file="$(mktemp -t leash-stream-hub-smoke.XXXXXX.stderr)"
 timeout_secs="${LEASH_SMOKE_TIMEOUT_SECS:-60}"
 
 cleanup() {
@@ -10,11 +11,12 @@ cleanup() {
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
-  rm -f "$log_file"
+  rm -f "$log_file" "$stderr_file"
 }
 trap cleanup EXIT
 
-cargo run --quiet -- serve stream-hub --profile sim --listen "127.0.0.1:$port" >"$log_file" 2>&1 &
+cargo run --quiet -- serve stream-hub --profile sim --listen "127.0.0.1:$port" \
+  >"$log_file" 2>"$stderr_file" &
 server_pid=$!
 
 ready=false
@@ -34,6 +36,7 @@ EOF
   fi
   if ! kill -0 "$server_pid" 2>/dev/null; then
     echo "stream hub smoke server exited before readiness" >&2
+    cat "$stderr_file" >&2
     cat "$log_file" >&2
     exit 1
   fi
@@ -42,6 +45,7 @@ done
 
 if [[ "$ready" != true ]]; then
   echo "stream hub smoke server was not ready after ${timeout_secs}s" >&2
+  cat "$stderr_file" >&2
   cat "$log_file" >&2
   exit 1
 fi
@@ -101,6 +105,7 @@ EOF
 
 if ! kill -0 "$server_pid" 2>/dev/null; then
   echo "stream hub smoke server exited after client traffic" >&2
+  cat "$stderr_file" >&2
   cat "$log_file" >&2
   exit 1
 fi

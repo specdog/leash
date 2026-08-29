@@ -159,6 +159,7 @@ pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
         Ok(())
     }
 
+    #[cfg_attr(not(feature = "waveshare-ugv"), allow(dead_code))]
     fn update_control_evidence(
         &self,
         _obstacle_blocked: bool,

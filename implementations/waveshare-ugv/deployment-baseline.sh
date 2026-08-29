@@ -10,7 +10,8 @@ Usage:
   deployment-baseline.sh rollback ARCHIVE --confirm [options]
 
 Capture or verify a private Waveshare UGV deployment baseline, or restore one.
-Run this script on the UGV host. It sends stop commands but never drive commands.
+Run this script on the UGV host. Verify, deploy, and rollback send stop commands;
+capture is read-only. No action ever sends drive commands.
 
 Options:
   --service NAME          systemd user service (default: leash.service)
@@ -49,6 +50,7 @@ output=""
 confirm="false"
 archive=""
 candidate=""
+env_files=()
 
 if [[ "$action" == "deploy" ]]; then
   candidate="${1:-}"
@@ -115,15 +117,23 @@ service_paths() {
   [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || die "$service has no running MainPID"
   binary="$(readlink -f "/proc/$main_pid/exe")"
   service_file="$(service_property FragmentPath)"
-  env_file="$(service_property EnvironmentFiles | awk '{print $1}')"
+  mapfile -t env_files < <(service_property EnvironmentFiles | awk '{print $1}' | sed '/^$/d')
+  [[ "${#env_files[@]}" -gt 0 ]] || die "service environment is unavailable"
+  env_file="${env_files[0]}"
   [[ -x "$binary" ]] || die "service binary is not executable"
   [[ -f "$service_file" ]] || die "service unit is unavailable"
-  [[ -f "$env_file" ]] || die "service environment is unavailable"
+  local configured_env
+  for configured_env in "${env_files[@]}"; do
+    [[ -f "$configured_env" ]] || die "service environment is unavailable: $configured_env"
+  done
 }
 
 env_value() {
   local key="$1"
-  sed -n "s/^${key}=//p" "$env_file" | tail -1
+  local configured_env
+  for configured_env in "${env_files[@]}"; do
+    sed -n "s/^${key}=//p" "$configured_env"
+  done | tail -1
 }
 
 endpoint() {
@@ -198,6 +208,16 @@ capture() {
   install -m 0755 "$binary" "$output/leash"
   install -m 0644 "$service_file" "$output/leash.service"
   install -m 0600 "$env_file" "$output/leash.env"
+  systemctl --user cat "$service" >"$output/leash.service.effective"
+  mkdir -m 0700 "$output/environment"
+  : >"$output/environment-files.txt"
+  local configured_env env_index env_copy
+  for env_index in "${!env_files[@]}"; do
+    configured_env="${env_files[$env_index]}"
+    env_copy="$(printf '%03d.env' "$env_index")"
+    install -m 0600 "$configured_env" "$output/environment/$env_copy"
+    printf '%s=%s\n' "$env_copy" "$configured_env" >>"$output/environment-files.txt"
+  done
   awk '
     /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
     /^[A-Za-z_][A-Za-z0-9_]*=/ { sub(/=.*/, "=<redacted>"); print; next }
@@ -243,13 +263,16 @@ capture() {
     printf 'build_features=%s\n' "$build_features"
     printf 'source_snapshot=source.tar.gz\n'
     printf 'service=%s\n' "$service"
+    printf 'environment_file_count=%s\n' "${#env_files[@]}"
   } >"$output/manifest.txt"
 
   (
     cd "$output"
-    sha256sum leash leash.service leash.env source.tar.gz >archive.sha256
+    sha256sum leash leash.service leash.service.effective leash.env source.tar.gz \
+      environment-files.txt environment/*.env >archive.sha256
   )
-  chmod 0600 "$output"/*
+  find "$output" -type f -exec chmod 0600 {} +
+  chmod 0700 "$output" "$output/environment"
   chmod 0700 "$output/leash"
   printf '%s\n' "$output"
 }
