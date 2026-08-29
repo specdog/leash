@@ -233,6 +233,23 @@ Done when:
 - a dependency-policy test rejects reverse edges and feature leakage;
 - the existing CLI, schemas, and 225 baseline tests remain green.
 
+Supported build combinations are explicit:
+
+- `leash-core`, `leash-runtime`, `leash-replay`, and `leash-gateway` have one
+  dependency-minimal default build and no optional runtime features;
+- `leash-waveshare` builds without hardware by default; `serial` adds the
+  serial-port factory while retaining the same single-owner boundary;
+- `leash-cuda` builds its CPU contracts by default; `cuda` is supported on the
+  Linux Jetson/CUDA build host and loads the checked artifact;
+- `leash-ros2` builds its DTO/conversion boundary by default, `rclrs-shim`
+  keeps all-feature builds ROS-installation-free, and `native-rclrs` is
+  supported on Linux in a sourced ROS 2 Humble workspace; and
+- the facade's core-only, default, MCP-only, HTTP simulation, hardware adapter,
+  and all-feature combinations are enforced by `.github/workflows/ci.yml`.
+
+Native `rclrs` is intentionally unavailable on Windows; the portable ROS DTO,
+conversion, replay, and queue contracts remain supported there.
+
 ### RV2-02 - Add owned domain types and compile-time API contracts
 
 Goal: make invalid control states hard to construct without complicated

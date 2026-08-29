@@ -12,3 +12,8 @@ semantic diffs.
 
 The baseline safety scenario is
 [`fixtures/control-safety-v1.json`](fixtures/control-safety-v1.json).
+
+The checked activity/belief replay is
+[`fixtures/activity-belief-v1.json`](fixtures/activity-belief-v1.json). It
+covers start, suspend/resume, cancel, succeed, stale-belief failure, belief
+expiry, and deterministic competition between proposals.

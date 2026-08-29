@@ -1150,6 +1150,14 @@ mod tests {
         }
     }
 
+    struct PanicClock;
+
+    impl Clock for PanicClock {
+        fn now(&mut self) -> MonotonicNanos {
+            panic!("injected safety worker panic")
+        }
+    }
+
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct TestAck(bool);
 
@@ -1505,6 +1513,68 @@ mod tests {
         *lock(mutex) = true;
         ready.notify_one();
         unrelated.join().unwrap();
+    }
+
+    #[test]
+    fn worker_panic_is_contained_closed_and_observable() {
+        let supervisor = CpuSafetySupervisor::spawn(
+            kernel(),
+            TestPort {
+                state: PortState::default(),
+                acknowledgements: Vec::new(),
+            },
+            Box::new(PanicClock),
+            SupervisorConfig {
+                proposal_capacity: 4,
+                tick_period: Duration::from_millis(1),
+            },
+        )
+        .unwrap();
+        let handle = supervisor.handle();
+        for _ in 0..100 {
+            if handle.status().closed {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let status = handle.status();
+        assert!(status.closed);
+        assert!(status.faulted);
+        assert_eq!(status.metrics.worker_panics, 1);
+        assert_eq!(
+            status.last_fault.as_deref(),
+            Some("CPU safety worker panicked")
+        );
+        assert_eq!(
+            handle.submit(ControlInput::Idle).err(),
+            Some(SupervisorSubmitError::Faulted)
+        );
+    }
+
+    #[test]
+    fn shutdown_wakes_a_parked_worker_and_closes_its_lane() {
+        let supervisor = CpuSafetySupervisor::spawn(
+            kernel(),
+            TestPort {
+                state: PortState::default(),
+                acknowledgements: Vec::new(),
+            },
+            Box::new(AtomicClock(Arc::new(AtomicU64::new(0)))),
+            SupervisorConfig {
+                proposal_capacity: 4,
+                tick_period: Duration::from_secs(60),
+            },
+        )
+        .unwrap();
+        let handle = supervisor.handle();
+        let started = Instant::now();
+        supervisor.shutdown();
+        assert!(started.elapsed() < Duration::from_millis(50));
+        assert!(handle.status().closed);
+        assert_eq!(
+            handle.submit(ControlInput::Idle).err(),
+            Some(SupervisorSubmitError::Closed)
+        );
     }
 
     #[test]

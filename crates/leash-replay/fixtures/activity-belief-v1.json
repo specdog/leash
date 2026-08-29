@@ -1,0 +1,55 @@
+{
+  "schema_version": "leash.activity-belief-replay.v1",
+  "activities": [
+    {
+      "sequence": 1,
+      "events": [
+        { "at_ns": 10, "event": { "kind": "start" } },
+        { "at_ns": 20, "event": { "kind": "suspend" } },
+        { "at_ns": 30, "event": { "kind": "resume" } },
+        { "at_ns": 40, "event": { "kind": "succeed" } }
+      ],
+      "expected_state": "succeeded"
+    },
+    {
+      "sequence": 2,
+      "events": [
+        { "at_ns": 10, "event": { "kind": "start" } },
+        { "at_ns": 20, "event": { "kind": "cancel" } }
+      ],
+      "expected_state": "cancelled"
+    },
+    {
+      "sequence": 3,
+      "events": [
+        { "at_ns": 10, "event": { "kind": "start" } },
+        { "at_ns": 20, "event": { "kind": "fail", "reason": "stale_belief" } }
+      ],
+      "expected_state": "failed_stale_belief"
+    }
+  ],
+  "belief": {
+    "sequence": 1,
+    "observed_at_ns": 10,
+    "expires_at_ns": 20,
+    "check_at_ns": 21,
+    "expected_fresh": false
+  },
+  "arbitration": {
+    "at_ns": 25,
+    "first": {
+      "sequence": 1,
+      "created_at_ns": 10,
+      "deadline_ns": 100,
+      "priority": 4
+    },
+    "second": {
+      "sequence": 2,
+      "created_at_ns": 10,
+      "deadline_ns": 100,
+      "priority": 9
+    },
+    "expected_selected_sequence": 2,
+    "expected_rejection": "lower_priority"
+  }
+}
