@@ -1,0 +1,39 @@
+{
+  "schema_version": "leash.runtime-v2.provenance.v1",
+  "captured_on": "2026-08-29",
+  "upstream_base": "0426ab1",
+  "deployed_source": {
+    "label": "leash-qualia-combined-1f004d6",
+    "git_metadata_present": false,
+    "files": 75,
+    "sorted_file_manifest_sha256": "304d726805ae7f4651dac17b7a8b1ce17a8ab09407c4781f104a4dc22b6f770c"
+  },
+  "deployed_binary": {
+    "sha256": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294"
+  },
+  "target": {
+    "board": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "architecture": "aarch64",
+    "cuda_sdk": "12.9.0",
+    "cuda_compute_capability": "8.7"
+  },
+  "observed_runtime": {
+    "profile": "waveshare-ugv",
+    "accelerator_requested": "none",
+    "accelerator_active": "none",
+    "cuda_compiled": true,
+    "cuda_available": false,
+    "cognition_backend": "cpu"
+  },
+  "import_commits": [
+    "6a50c70",
+    "dbf1424",
+    "4ab54f4",
+    "cfb06c3"
+  ],
+  "notes": [
+    "The deployed source directory is not a Git worktree.",
+    "The manifest hash is SHA-256 over sorted UTF-8 lines of relative-path, tab, file-SHA-256, newline.",
+    "No host address, credential, device serial, or private calibration value is recorded here."
+  ]
+}
