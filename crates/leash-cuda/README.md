@@ -32,3 +32,13 @@ single-owner `cudarc` executor and compares all four jobs to their CPU oracle:
 ```bash
 cargo run --release --features cuda --example jetson_executor_probe
 ```
+
+Measure end-to-end CPU/CUDA break-even behavior on the Jetson (including the
+executor queue, host/device transfers, synchronization, and readback):
+
+```bash
+cargo run --release --features cuda --example jetson_benchmark -- --iterations 20
+```
+
+The benchmark performs parity checks before timing and emits a versioned JSON
+record for small and large voxel, lidar, camera, and cognition workloads.

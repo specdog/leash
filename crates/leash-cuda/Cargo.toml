@@ -19,3 +19,8 @@ cudarc = { version = "0.19.8", optional = true, default-features = false, featur
 
 [dev-dependencies]
 sha2 = "0.10"
+
+[[example]]
+name = "jetson_benchmark"
+path = "examples/jetson_benchmark.rs"
+required-features = ["cuda"]
