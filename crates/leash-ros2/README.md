@@ -17,11 +17,18 @@ localization, and lidar freshness, requests a priority stop on loss, and sends
 valid drive proposals to `leash-runtime`'s CPU safety supervisor. It has no
 reference to a serial implementation.
 
-An `rclrs` executor package can map generated ROS messages to these DTOs when
-built in a sourced ROS 2 environment. Callbacks enqueue observations or
-proposals only. Velocity proposals still pass through the CPU safety supervisor
-and the single Waveshare owner before they can become physical output.
+The feature-gated `native-rclrs` module and the
+`implementations/waveshare-ugv/ros2-native` package map generated Humble
+messages to these DTOs in a single owned executor. Callbacks enqueue
+observations or proposals only. Velocity proposals still pass through the CPU
+safety supervisor and the single Waveshare owner before they can become
+physical output.
 
-The `rclrs` executor is deliberately not claimed by this crate yet. It must be
-built and tested in a sourced ROS 2 environment with the rosbag equivalence
-fixture before RV2-14 is complete.
+GitHub Actions run `33269287419` built the native package in a sourced ROS 2
+Humble environment and exercised scan, IMU, odometry, transforms, maps,
+localization, paths, and velocity proposals through generated messages. All
+eight callbacks were accepted with the declared QoS depths, no queue or
+conversion rejection, no executor error, and `hardware_access=false`. The
+portable rosbag-export/Leash replay equivalence test runs in the normal
+workspace suite. The durable result and artifact digest are recorded in
+`evidence/github-humble-native-20260829.json`.

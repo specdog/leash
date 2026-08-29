@@ -1,0 +1,47 @@
+{
+  "schema_version": "leash.ros2-native-evidence.v1",
+  "captured_at": "2026-08-29T18:58:08Z",
+  "platform": "GitHub Actions ubuntu-22.04 with ROS 2 Humble",
+  "workflow": ".github/workflows/ros2-native.yml",
+  "github_run": {
+    "id": 33269287419,
+    "url": "https://github.com/specdog/leash/actions/runs/33269287419",
+    "head_sha": "607f3e34b5c81aba5a2676d23b7c3c0e435758e8",
+    "conclusion": "success"
+  },
+  "artifact": {
+    "name": "ros2-native-smoke",
+    "result_file": "ros2-native-smoke.json",
+    "result_sha256": "23301ffd1786399351fea2566b01570eab89452ded529e0535e5fbb1fe8bcc86"
+  },
+  "native_executor": {
+    "executor_errors": 0,
+    "callbacks_accepted": 8,
+    "conversion_rejected": 0,
+    "queue_rejected": 0,
+    "received": {
+      "scan": true,
+      "imu": true,
+      "odometry": true,
+      "transform": true,
+      "map": true,
+      "localization": true,
+      "path": true,
+      "proposal": true
+    },
+    "qos_depths": {
+      "sensor": 1,
+      "command": 8,
+      "map": 1
+    },
+    "proposal_capacity": 8,
+    "hardware_access": false
+  },
+  "portable_equivalence": {
+    "test": "crates/leash-ros2/tests/rosbag_equivalence.rs",
+    "rosbag_export_fixture": "crates/leash-ros2/fixtures/rosbag2-export-v1.json",
+    "leash_event_fixture": "crates/leash-ros2/fixtures/leash-domain-events-v1.json",
+    "result": "equivalent domain events"
+  },
+  "safety_statement": "ROS callbacks only enqueue owned observations and proposals; the native smoke has no hardware dependency and reported hardware_access=false."
+}

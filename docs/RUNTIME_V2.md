@@ -135,7 +135,7 @@ command/query facade, and local CLI calls use that MCP dispatcher. Edge-owned
 decoding rejects unknown control fields. The RV2-00 semantic fixture now runs
 its public health, capabilities, and telemetry contracts through the facade.
 
-The ROS-independent half of RV2-14 now lives in `leash-ros2`. It provides
+The ROS-independent contracts for RV2-14 live in `leash-ros2`. They provide
 checked, bidirectional conversions for scans, IMU, planar odometry and
 transforms, occupancy maps, localization, and paths; explicit ROS/monotonic
 clock correlation; declared QoS; latest-value sensor queues; and bounded
@@ -145,8 +145,14 @@ inside the ROS boundary: a dispatcher rechecks proposal time and Nav2 source
 freshness, then submits to the CPU safety supervisor. A host integration test
 proves the path from ROS velocity proposal through safety to the single
 Waveshare owner, and proves a disconnected Nav2 source requests verified zero.
-The actual `rclrs` executor and rosbag equivalence fixture still require a
-sourced ROS 2 target environment, so RV2-14 and RV2-15 remain open.
+The feature-gated native module and
+`implementations/waveshare-ugv/ros2-native` package own the `rclrs` executor.
+GitHub Actions run `33269287419` built it in sourced ROS 2 Humble and accepted
+all eight generated-message callbacks with the declared QoS depths, no queue,
+conversion, or executor errors, and `hardware_access=false`. The checked
+rosbag-export and Leash replay fixtures produce equivalent domain events. The
+artifact digest and unrounded result are in
+`crates/leash-ros2/evidence/github-humble-native-20260829.json`.
 
 ## Runtime shape
 
