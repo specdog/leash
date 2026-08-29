@@ -6,6 +6,8 @@ fatbin and do not compile inline CUDA source with NVRTC during startup.
 The current artifact contains native SM 8.7 cubin and compute 8.7 PTX for the
 Jetson Orin NX. It was built twice with CUDA 12.9; both outputs had the same
 SHA-256 recorded in `kernels/prebuilt/sm_87/manifest.json`.
+The source digest is calculated after canonicalizing line endings to LF, so the
+same Git source verifies on Windows and Linux build hosts.
 
 The optional `cuda` feature compiles the driver loader and module probe. The
 default build has no CUDA dependency. To deliberately rebuild on an Orin CUDA
