@@ -8924,6 +8924,18 @@
             "null"
           ]
         },
+        "odometry_pose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PoseWithCovariance2d"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Wheel-integrated pose in the local `odom` frame. This is relative\ndead-reckoning only; it must never be presented as a global map pose."
+        },
         "odometry_right": {
           "format": "double",
           "type": [
@@ -10807,6 +10819,18 @@
                 "number",
                 "null"
               ]
+            },
+            "odometry_pose": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PoseWithCovariance2d"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Wheel-integrated pose in the local `odom` frame. This is relative\ndead-reckoning only; it must never be presented as a global map pose."
             },
             "odometry_right": {
               "format": "double",
