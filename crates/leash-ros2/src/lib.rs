@@ -2,10 +2,18 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(all(feature = "native-rclrs", not(feature = "rclrs-shim")))]
+#[cfg(all(
+    target_os = "linux",
+    feature = "native-rclrs",
+    not(feature = "rclrs-shim")
+))]
 mod native;
 
-#[cfg(all(feature = "native-rclrs", not(feature = "rclrs-shim")))]
+#[cfg(all(
+    target_os = "linux",
+    feature = "native-rclrs",
+    not(feature = "rclrs-shim")
+))]
 pub use native::*;
 
 use std::fmt;
