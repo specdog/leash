@@ -40,6 +40,18 @@ target result are recorded in the CUDA artifact manifest. CUDA remains
 non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
 are complete.
 
+The first bias-controlled end-to-end Orin benchmark is now checked in. It
+alternates 100 CPU and CUDA samples after parity and warm-up, measures first-use
+buffer growth separately, and includes queueing, both transfers,
+synchronization, and readback. CUDA wins p50 and p95 for 10,000-point lidar
+(1.68x p50) and 640x480 camera normalization (1.78x p50). Voxel projection,
+720-point lidar, and both cognition sizes remain faster on CPU; the small camera
+case loses at p95 and also stays on CPU. Cognition cannot move until state is
+resident instead of uploaded and read back every tick. During the run the GPU
+reached 75%, 52.687 C, and 7.695 W maximum board input in 10 W mode. These are
+selection inputs, not permission to make CUDA authoritative; startup probes,
+shadow comparison, and injected-failure fallback remain required.
+
 The RV2 Waveshare boundary is also available as `leash-waveshare`. A single
 named owner thread holds the serial factory and live stream, performs all reads,
 writes, framing, and reconnects, and writes a verified zero before accepting

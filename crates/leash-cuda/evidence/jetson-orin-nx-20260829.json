@@ -1,0 +1,129 @@
+{
+  "schema_version": "leash.cuda-benchmark-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "64f8dbd",
+  "source_crate_sha256": "1571c2261071458c68b85bc78fd1652c648e5ba60a5849fc40f23e74b27a93f4614",
+  "result_sha256": "e3babf334e4d9222b95b33992e9b9792343cda12362bff77147ce8665788eeb7",
+  "tegrastats_log_sha256": "06bba6f03995aa90a60e254bb381caf1fb8f160c88e7b507da2611169b3738d0",
+  "command": "cargo run --offline --quiet --release --features cuda --example jetson_benchmark -- --iterations 100",
+  "host": {
+    "target": "aarch64-unknown-linux-gnu",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "online_processors": 6,
+    "cuda_sdk": "12.9.0",
+    "compute_capability": "8.7",
+    "rustc": "1.94.1",
+    "cudarc": "0.19.8"
+  },
+  "method": {
+    "iterations": 100,
+    "warmup_iterations": 10,
+    "sample_order": "alternating CPU and CUDA",
+    "first_use_recorded_separately": true,
+    "included": [
+      "executor queue",
+      "host-to-device transfer",
+      "kernel",
+      "synchronization",
+      "device-to-host readback"
+    ],
+    "parity_checked_before_timing": true
+  },
+  "workloads": [
+    {
+      "name": "voxel_small",
+      "elements": 204800,
+      "first_ns": { "cpu": 649329, "cuda": 1860114 },
+      "cpu_ns": { "p50": 133988, "p95": 156516, "p99": 171237, "max": 172644 },
+      "cuda_ns": { "p50": 492494, "p95": 1055740, "p99": 1140063, "max": 1145343 },
+      "cpu_over_cuda_speedup_milli": 272,
+      "decision": "cpu"
+    },
+    {
+      "name": "voxel_large",
+      "elements": 2560000,
+      "first_ns": { "cpu": 4268626, "cuda": 9584672 },
+      "cpu_ns": { "p50": 1177663, "p95": 1302211, "p99": 1555113, "max": 1597899 },
+      "cuda_ns": { "p50": 5452050, "p95": 5526515, "p99": 5826812, "max": 5901246 },
+      "cpu_over_cuda_speedup_milli": 216,
+      "decision": "cpu"
+    },
+    {
+      "name": "lidar_small",
+      "elements": 720,
+      "first_ns": { "cpu": 105347, "cuda": 806486 },
+      "cpu_ns": { "p50": 44193, "p95": 47041, "p99": 59649, "max": 323240 },
+      "cuda_ns": { "p50": 137027, "p95": 157412, "p99": 171877, "max": 173701 },
+      "cpu_over_cuda_speedup_milli": 322,
+      "decision": "cpu"
+    },
+    {
+      "name": "lidar_large",
+      "elements": 10000,
+      "first_ns": { "cpu": 375786, "cuda": 389610 },
+      "cpu_ns": { "p50": 376906, "p95": 390635, "p99": 392298, "max": 393579 },
+      "cuda_ns": { "p50": 223942, "p95": 234822, "p99": 240294, "max": 246215 },
+      "cpu_over_cuda_speedup_milli": 1683,
+      "decision": "cuda_after_startup_probe_and_shadow"
+    },
+    {
+      "name": "camera_small",
+      "elements": 230400,
+      "first_ns": { "cpu": 1162943, "cuda": 1295298 },
+      "cpu_ns": { "p50": 1157215, "p95": 1191712, "p99": 1198911, "max": 1209024 },
+      "cuda_ns": { "p50": 659249, "p95": 1201248, "p99": 1212353, "max": 1231905 },
+      "cpu_over_cuda_speedup_milli": 1755,
+      "decision": "cpu_tail_latency_not_better"
+    },
+    {
+      "name": "camera_large",
+      "elements": 921600,
+      "first_ns": { "cpu": 4814944, "cuda": 3215765 },
+      "cpu_ns": { "p50": 3793957, "p95": 4574042, "p99": 4614779, "max": 4619804 },
+      "cuda_ns": { "p50": 2133881, "p95": 2229020, "p99": 2487011, "max": 2505347 },
+      "cpu_over_cuda_speedup_milli": 1777,
+      "decision": "cuda_after_startup_probe_and_shadow"
+    },
+    {
+      "name": "cognition_small",
+      "elements": 4096,
+      "first_ns": { "cpu": 47745, "cuda": 486829 },
+      "cpu_ns": { "p50": 43105, "p95": 50370, "p99": 57730, "max": 59362 },
+      "cuda_ns": { "p50": 183653, "p95": 212006, "p99": 225126, "max": 253447 },
+      "cpu_over_cuda_speedup_milli": 234,
+      "decision": "cpu_until_state_remains_device_resident"
+    },
+    {
+      "name": "cognition_large",
+      "elements": 65536,
+      "first_ns": { "cpu": 426924, "cuda": 1039739 },
+      "cpu_ns": { "p50": 422987, "p95": 436524, "p99": 447467, "max": 476205 },
+      "cuda_ns": { "p50": 824086, "p95": 870647, "p99": 1129214, "max": 1141854 },
+      "cpu_over_cuda_speedup_milli": 513,
+      "decision": "cpu_until_state_remains_device_resident"
+    }
+  ],
+  "cuda_status": {
+    "active": "cuda",
+    "degraded": false,
+    "circuit_open": false,
+    "completed": 880,
+    "failed": 0,
+    "queue_high_watermark": 1
+  },
+  "tegrastats": {
+    "interval_ms": 100,
+    "samples": 157,
+    "maximum_ram_mb": 2118,
+    "maximum_gr3d_percent": 75,
+    "maximum_gpu_celsius": 52.687,
+    "maximum_vdd_in_mw": 7695
+  },
+  "safety": {
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_service_modified": false,
+    "cuda_has_actuation_authority": false
+  }
+}

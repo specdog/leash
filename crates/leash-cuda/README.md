@@ -42,3 +42,5 @@ cargo run --release --features cuda --example jetson_benchmark -- --iterations 2
 
 The benchmark performs parity checks before timing and emits a versioned JSON
 record for small and large voxel, lidar, camera, and cognition workloads.
+The measured Orin NX result and conservative backend decisions are recorded in
+`evidence/jetson-orin-nx-20260829.json`.
