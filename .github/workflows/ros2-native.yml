@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential curl git libclang-dev python3-pip
+          sudo apt-get install -y --no-install-recommends build-essential curl git libclang-dev python3-pip ros-humble-test-msgs
           python3 -m pip install --no-cache-dir colcon-cargo colcon-ros-cargo
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -88,7 +88,7 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           source target/ros2-ws/install/local_setup.bash
-          ros2 run leash_ros2_native_node leash_ros2_native_node --duration-ms 8000 > target/ros2-native-smoke.json &
+          ros2 run leash_ros2_native_node leash_ros2_native_node --duration-ms 30000 > target/ros2-native-smoke.json &
           node_pid=$!
           sleep 2
           ros2 topic pub --once /scan sensor_msgs/msg/LaserScan "{header: {stamp: {sec: 0, nanosec: 100}, frame_id: laser}, angle_min: -1.0, angle_max: 1.0, angle_increment: 1.0, range_min: 0.5, range_max: 8.0, ranges: [1.0, .nan, 2.0]}"
