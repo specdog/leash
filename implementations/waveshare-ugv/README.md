@@ -117,13 +117,15 @@ implementations/waveshare-ugv/runtime-v2-hardware-soak.sh \
   --operator-confirmed
 ```
 
-The soak limits pulses to normalized drive `0.10` or lower, requests verified
-zero after each pulse, tests one latching E-stop and approved reset, requires
-ordered verified-zero controller receipts, and fails if stop p99 or E-stop
+The soak defaults to one supervised non-zero pulse at normalized drive `0.10`
+or lower, requests verified zero, then monitors the stationary service for the
+rest of the soak. It tests one latching E-stop and approved reset, requires an
+ordered verified-zero controller receipt, and fails if stop or E-stop
 acknowledgement exceeds 250 ms. It also checks queue/evidence failure counters,
-backend truth, service continuity, RAM, and GPU temperature. Repeat with
-`--backend cuda` only after rolling back and deploying the CUDA-selected
-candidate from the same captured baseline.
+backend truth, service continuity, zero telemetry, RAM, and GPU temperature.
+If a backend-specific rerun is required, use `--backend cuda` only after
+rolling back and deploying the CUDA-selected candidate from the same captured
+baseline. CUDA remains outside the motor-authority path.
 
 ## USB bring-up without committed identity
 

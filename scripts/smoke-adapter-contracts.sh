@@ -50,7 +50,7 @@ done
 hardware_soak_script="implementations/waveshare-ugv/runtime-v2-hardware-soak.sh"
 bash -n "$hardware_soak_script"
 hardware_soak_help="$(bash "$hardware_soak_script" --help)"
-for option in "--backend" "--pilot-token-file" "--expected-binary-sha256" "--output" "--operator-confirmed"; do
+for option in "--backend" "--pilot-token-file" "--expected-binary-sha256" "--output" "--motion-pulses" "--operator-confirmed"; do
   if ! grep -Fq -- "$option" <<<"$hardware_soak_help"; then
     echo "Runtime v2 hardware soak help missing: $option" >&2
     exit 1

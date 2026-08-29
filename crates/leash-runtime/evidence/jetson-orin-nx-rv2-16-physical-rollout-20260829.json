@@ -1,0 +1,132 @@
+{
+  "schema_version": "leash.runtime-v2-physical-rollout-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "candidate_source_commit": "87d84ef48027e90657b979349aa2cd6d1cbbdf6c",
+  "rollout_tool_commit": "9cc6c685c66b81227d2f56e049310b3c0cb0d9e1",
+  "candidate_binary_sha256": "b062d3b102f4112afc59e7e89e43eea454281e4c449ede881684a66754a0ad48",
+  "baseline_binary_sha256": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294",
+  "operator": {
+    "authorization_confirmed": true,
+    "secured_chassis_or_lifted_wheels_confirmed": true,
+    "physical_estop_reachable_confirmed": true,
+    "second_observer_confirmed": true,
+    "direction_observation_confirmed": "positive logical drive moved forward after inversion correction",
+    "requested_no_further_repetitive_motion": true
+  },
+  "direction_mapping": {
+    "initial_baseline_mapping": {
+      "drive_invert": false,
+      "drive_swap": false,
+      "operator_observation": "positive logical drive moved backward",
+      "accepted_as_evidence": false,
+      "response": "verified zero followed by byte-identical rollback"
+    },
+    "accepted_candidate_mapping": {
+      "drive_invert": true,
+      "drive_swap": false,
+      "operator_observation": "forward",
+      "observed_pulses": [
+        { "normalized_drive": 0.05, "duration_ms": 200, "verified_zero_confirmation_ms": 88 },
+        { "normalized_drive": 0.08, "duration_ms": 500, "verified_zero_confirmation_ms": 11 }
+      ],
+      "maximum_verified_zero_confirmation_ms": 88,
+      "threshold_ms": 250,
+      "result": "pass"
+    }
+  },
+  "cpu_supervised_hardware": {
+    "deployment_proof_id": "deploy-20260829T192851Z",
+    "deployment_proof_aggregate_sha256": "d8360184656aceae551b5a2008afbc114654782f570de88a84532e60b0a0e315",
+    "candidate_configuration_sha256": "bb7873916c7fe0ab874b4b25442999eb1854bbc494829397ed9d9529a96747b5",
+    "approved_forward_drive_requests": 44,
+    "lidar_collision_rejections": 1,
+    "collision_gate_response": "verified zero and stop; no safety bypass",
+    "operator_observed_direction": "forward",
+    "acknowledgement_failures": 0,
+    "controller_write_failures": 0,
+    "supervisor_faults": 0,
+    "evidence_failures": 0,
+    "journal_log_sha256": "9682a15488001b4c21a7a37b204dc6a7baec86d6d4c2278ca1f13f88907b4025",
+    "resources": {
+      "tegrastats_samples": 590,
+      "maximum_ram_mb": 1546,
+      "maximum_gpu_celsius": 52.312,
+      "tegrastats_sha256": "e81df3d2d7f2e1c933ac682fc4d4ee4876657addfa9be8cbb2305e67acc0c132"
+    },
+    "result": "pass_with_enforced_collision_stop"
+  },
+  "rollback": {
+    "proof_id": "rollback-20260829T193520Z",
+    "proof_aggregate_sha256": "036270adad82634e1cc70b0485e9a3a94571e7f83eae88753db92a1166353f1e",
+    "archive_checksums": "pass",
+    "restored_binary_sha256": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294",
+    "restored_binary_byte_identical": true,
+    "service_active": true,
+    "post_rollback_health": "pass",
+    "post_rollback_camera": "pass",
+    "post_rollback_sensors": "pass",
+    "post_rollback_zero": "pass",
+    "post_rollback_device_ownership": "pass",
+    "result": "pass"
+  },
+  "cuda_supervised_hardware": {
+    "deployment_proof_id": "deploy-20260829T193638Z",
+    "deployment_proof_aggregate_sha256": "b0c9de24881ec972cedca3e6ba8ffa595da2f39d7fe85aba743eb7930cf3c45e",
+    "candidate_configuration_sha256": "b7757ccdbf39d1549b5ec2457898ea714ad6779230f13816401afdcd50aeb912",
+    "requested_backend": "cuda",
+    "active_backend": "cuda",
+    "required_backend": true,
+    "startup_probe": "pass",
+    "cognition_degraded": false,
+    "cuda_motor_authority": false,
+    "cpu_final_authority": true,
+    "motor_authority": "waveshare-controller-owner",
+    "physical_motion_repeated": false,
+    "physical_motion_reason": "operator directed no further repetitive motion; motor path is the CPU-only path already observed above",
+    "estop": {
+      "acknowledgement_ms": 37.622,
+      "threshold_ms": 250,
+      "verified_zero": true,
+      "telemetry_zero_while_latched": true,
+      "approved_reset": true,
+      "final_verified_zero": true,
+      "private_result_sha256": "e78843a21aed0f2030cbad231e0e084af529c188b79d4c687a41d52c359e0463"
+    },
+    "prior_no_motion_cuda_gate": "jetson-orin-nx-rv2-16-nomotion-20260829.json",
+    "result": "pass"
+  },
+  "final_deployment": {
+    "service_active": true,
+    "binary_sha256": "b062d3b102f4112afc59e7e89e43eea454281e4c449ede881684a66754a0ad48",
+    "service_unit_sha256": "28e531a1aa196fecbb0a6b65fbe698f54b2725a696b394be162673601174702e",
+    "configuration_sha256": "b7757ccdbf39d1549b5ec2457898ea714ad6779230f13816401afdcd50aeb912",
+    "accelerator": "cuda",
+    "drive_invert": true,
+    "drive_swap": false,
+    "telemetry_left": 0,
+    "telemetry_right": 0,
+    "estop_latched": false,
+    "controller_connected": true,
+    "controller_write_failures": 0,
+    "acknowledgement_failures": 0,
+    "evidence_failures": 0,
+    "evidence_healthy": true,
+    "camera": "pass",
+    "sensors": "pass"
+  },
+  "wifi_management": {
+    "saved_profile_activated": true,
+    "autoconnect": true,
+    "wifi_address_assigned": true,
+    "ssh_over_wifi": "pass",
+    "http_health_over_wifi": "pass",
+    "cuda_deployment_over_wifi": "pass",
+    "icmp_echo": "filtered",
+    "network_identity_committed": false
+  },
+  "prior_evidence": {
+    "candidate": "jetson-orin-nx-rv2-16-candidate-20260829.json",
+    "no_motion": "jetson-orin-nx-rv2-16-nomotion-20260829.json"
+  },
+  "result": "pass"
+}

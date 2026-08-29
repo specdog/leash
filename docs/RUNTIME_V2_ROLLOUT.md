@@ -121,7 +121,32 @@ evidence.
   `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-candidate-20260829.json`.
 - The exact live baseline was captured read-only under the target's private
   state directory at `20260829T185447Z`. Its archive checksums pass, both service
-  environment files are retained, and its binary SHA-256 `6aca86b0...294`
-  matches the still-running service.
-- Supervised physical testing, deployment, and rollback are pending explicit
-  operator authorization.
+  environment files are retained, and its binary SHA-256 is
+  `6aca86b0...294`.
+- The operator confirmed the secured chassis or lifted wheels, reachable
+  physical E-stop, second observer, and deployment authorization. An initial
+  positive command with the inherited false-inversion mapping moved backward;
+  verified zero was obtained and the byte-identical baseline was restored. The
+  accepted mapping is `LEASH_DRIVE_INVERT=true` and
+  `LEASH_DRIVE_SWAP=false`. Two short direction samples then moved forward and
+  obtained verified zero in 88 ms and 11 ms, both within the 250 ms threshold.
+- The CPU-supervised run recorded 44 approved forward commands, zero controller
+  write, acknowledgement, supervisor, or evidence failures, and one correctly
+  enforced lidar collision rejection. Its 590 resource samples peaked at
+  1,546 MiB RAM and 52.312 C GPU temperature. No safety gate was bypassed.
+- One-command rollback proof `rollback-20260829T193520Z` restored the captured
+  baseline binary byte-for-byte and passed service, health, camera, sensor,
+  zero-motion, ownership, and archive-checksum gates.
+- The same candidate was then deployed with required CUDA selected. Health and
+  cognition reported active CUDA without degradation, while CPU remained the
+  final safety and motor authority. At the operator's direction, no redundant
+  CUDA-labelled motion loop was run: CUDA has no independent motor path. The
+  real serial E-stop acknowledged verified zero in 37.622 ms, remained zero
+  while latched, reset only with approval, and finished at verified zero.
+- The final live service is the candidate binary `b062d3b1...d48` with active,
+  required CUDA and the accepted wheel mapping. It is reachable over an
+  autoconnected saved Wi-Fi profile; SSH, HTTP health, and the final deployment
+  all passed over Wi-Fi. Network identity is intentionally not checked in.
+- Scrubbed deployment, rollback, resource, direction, and stop proof is checked
+  in at
+  `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`.

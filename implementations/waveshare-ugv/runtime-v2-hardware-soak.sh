@@ -14,6 +14,7 @@ wheels, a reachable physical E-stop, and a second observer present.
 
 Options:
   --duration-secs N       soak duration before final E-stop (default: 120; min: 60)
+  --motion-pulses N       supervised non-zero pulses during the soak (default: 1; max: 5)
   --pulse-ms N            duration of each low-speed pulse (default: 250; max: 500)
   --settle-ms N           zero-motion interval after each pulse (default: 500)
   --drive N               normalized wheel command magnitude (default: 0.08; max: 0.10)
@@ -22,7 +23,9 @@ Options:
   --operator-confirmed    assert all on-site physical safety preconditions
   -h, --help              show this help
 
-The token is read from a private file and is never written to evidence.
+The token is read from a private file and is never written to evidence. After
+the small supervised motion sample, the remaining soak is stationary and keeps
+checking backend, controller, evidence, telemetry-zero, and service health.
 EOF
 }
 
@@ -40,6 +43,7 @@ pilot_token_file=""
 expected_binary_sha256=""
 output=""
 duration_secs=120
+motion_pulses=1
 pulse_ms=250
 settle_ms=500
 drive=0.08
@@ -54,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --expected-binary-sha256) expected_binary_sha256="${2:?missing SHA-256}"; shift 2 ;;
     --output) output="${2:?missing output}"; shift 2 ;;
     --duration-secs) duration_secs="${2:?missing duration}"; shift 2 ;;
+    --motion-pulses) motion_pulses="${2:?missing motion pulse count}"; shift 2 ;;
     --pulse-ms) pulse_ms="${2:?missing pulse duration}"; shift 2 ;;
     --settle-ms) settle_ms="${2:?missing settle duration}"; shift 2 ;;
     --drive) drive="${2:?missing drive magnitude}"; shift 2 ;;
@@ -73,6 +78,8 @@ done
 [[ "$expected_binary_sha256" =~ ^[0-9a-f]{64}$ ]] || die "expected binary SHA-256 must be lowercase hex"
 [[ -n "$output" && ! -e "$output" ]] || die "--output must name a new file"
 [[ "$duration_secs" =~ ^[0-9]+$ && "$duration_secs" -ge 60 ]] || die "duration must be at least 60 seconds"
+[[ "$motion_pulses" =~ ^[0-9]+$ && "$motion_pulses" -ge 1 && "$motion_pulses" -le 5 ]] \
+  || die "motion pulse count must be 1..5"
 [[ "$pulse_ms" =~ ^[0-9]+$ && "$pulse_ms" -gt 0 && "$pulse_ms" -le 500 ]] || die "pulse must be 1..500 ms"
 [[ "$settle_ms" =~ ^[0-9]+$ && "$settle_ms" -ge 250 ]] || die "settle must be at least 250 ms"
 awk -v value="$drive" 'BEGIN {exit !(value > 0 && value <= 0.10)}' || die "drive must be >0 and <=0.10"
@@ -165,12 +172,33 @@ started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 started_epoch="$(date +%s)"
 deadline=$((started_epoch + duration_secs))
 pulses=0
+stationary_samples=0
 pulse_sleep="$(awk -v ms="$pulse_ms" 'BEGIN {printf "%.3f", ms / 1000}')"
 settle_sleep="$(awk -v ms="$settle_ms" 'BEGIN {printf "%.3f", ms / 1000}')"
 
 while (( $(date +%s) < deadline )); do
   [[ "$(systemctl --user is-active "$service")" == "active" ]] || die "$service stopped during soak"
   [[ "$(systemctl --user show "$service" -p MainPID --value)" == "$service_pid" ]] || die "$service restarted during soak"
+  if (( pulses >= motion_pulses )); then
+    health="$(curl -fsS --max-time 2 "$base_url/health")"
+    cognition="$(curl -fsS --max-time 2 "$base_url/cognition/status")"
+    runtime_v2="$(curl -fsS --max-time 2 "$base_url/runtime-v2/status")"
+    telemetry="$(curl -fsS --max-time 2 "$base_url/telemetry")"
+    jq -e --arg backend "$backend" \
+      '.ok == true and .accelerator.active == $backend and .accelerator.required == true' \
+      <<<"$health" >/dev/null || die "backend health changed during stationary soak"
+    jq -e --arg backend "$backend" \
+      '.ok == true and .backend_status.active == $backend and .backend_status.degraded == false' \
+      <<<"$cognition" >/dev/null || die "cognition backend degraded during stationary soak"
+    jq -e \
+      '.controller.connected == true and .controller.estopped == false and .supervisor.faulted == false and .supervisor.evidence.healthy == true' \
+      <<<"$runtime_v2" >/dev/null || die "Runtime v2 authority degraded during stationary soak"
+    jq -e '.left_cmd == 0 and .right_cmd == 0 and .estop == false' <<<"$telemetry" >/dev/null \
+      || die "stationary soak observed non-zero motion"
+    stationary_samples=$((stationary_samples + 1))
+    sleep 1
+    continue
+  fi
   authorize
   drive_result="$(drive_pulse)"
   jq -e --argjson drive "$drive" '.ok == true and .left == $drive and .right == $drive' \
@@ -201,6 +229,8 @@ while (( $(date +%s) < deadline )); do
   pulses=$((pulses + 1))
   sleep "$settle_sleep"
 done
+
+(( pulses == motion_pulses )) || die "the requested supervised motion sample was incomplete"
 
 authorize
 before_estop_status="$(curl -fsS --max-time 2 "$base_url/runtime-v2/status")"
@@ -279,7 +309,9 @@ jq -n \
   --arg service "$service" \
   --argjson service_pid "$service_pid" \
   --argjson duration_secs "$duration_secs" \
+  --argjson requested_motion_pulses "$motion_pulses" \
   --argjson pulses "$pulses" \
+  --argjson stationary_samples "$stationary_samples" \
   --argjson drive "$drive" \
   --argjson pulse_ms "$pulse_ms" \
   --argjson settle_ms "$settle_ms" \
@@ -295,7 +327,7 @@ jq -n \
   --argjson max_ram_mb "$max_ram_mb" \
   --argjson max_gpu_temp_c "$max_gpu_temp_c" \
   --arg tegrastats_sha256 "$tegrastats_sha256" \
-  '{schema_version:$schema_version,ok:true,started_at:$started_at,finished_at:$finished_at,backend:$backend,binary:{path:$binary,sha256:$binary_sha256},service:{name:$service,pid:$service_pid,restarted:false},motion:{duration_secs:$duration_secs,pulses:$pulses,normalized_drive:$drive,pulse_ms:$pulse_ms,settle_ms:$settle_ms},thresholds:{verified_stop_p99_ms:250,estop_ack_ms:250,max_ram_mb:3072,max_gpu_temp_c:80},results:{verified_stop_p99_ms:$p99_stop_ms,estop_ack_ms:$estop_latency_ms,zero_ack_timeouts:0,initial_zero:$initial_zero,final_zero:$final_zero,samples:$samples},health:($health|{ok,mode,role,profile,accelerator}),cognition:($cognition|{ok,backend_status,capabilities}),runtime_v2:$runtime_v2,resources:{tegrastats_samples:$tegrastats_samples,max_ram_mb:$max_ram_mb,max_gpu_temp_c:$max_gpu_temp_c,tegrastats_sha256:$tegrastats_sha256},operator_token_recorded:false}' \
+  '{schema_version:$schema_version,ok:true,started_at:$started_at,finished_at:$finished_at,backend:$backend,binary:{path:$binary,sha256:$binary_sha256},service:{name:$service,pid:$service_pid,restarted:false},motion:{duration_secs:$duration_secs,requested_pulses:$requested_motion_pulses,pulses:$pulses,stationary_samples:$stationary_samples,normalized_drive:$drive,pulse_ms:$pulse_ms,settle_ms:$settle_ms},thresholds:{verified_stop_p99_ms:250,estop_ack_ms:250,max_ram_mb:3072,max_gpu_temp_c:80},results:{verified_stop_p99_ms:$p99_stop_ms,estop_ack_ms:$estop_latency_ms,zero_ack_timeouts:0,initial_zero:$initial_zero,final_zero:$final_zero,samples:$samples},health:($health|{ok,mode,role,profile,accelerator}),cognition:($cognition|{ok,backend_status,capabilities}),runtime_v2:$runtime_v2,resources:{tegrastats_samples:$tegrastats_samples,max_ram_mb:$max_ram_mb,max_gpu_temp_c:$max_gpu_temp_c,tegrastats_sha256:$tegrastats_sha256},operator_token_recorded:false}' \
   >"$output"
 chmod 600 "$output" "$tegrastats_file"
 printf '{"ok":true,"backend":"%s","pulses":%s,"verified_stop_p99_ms":%s,"estop_ack_ms":%s,"output":"%s"}\n' \

@@ -8,13 +8,14 @@ Status date: 2026-08-29
 - Remote: `https://github.com/specdog/leash`
 - Branch: `feat/rust-native-runtime-v2`
 - Candidate implementation commit: `87d84ef48027e90657b979349aa2cd6d1cbbdf6c`
-- Branch is pushed and synchronized with origin, 56 commits ahead of `main` at
-  the candidate implementation commit.
+- Rollout direction/configuration hardening commit:
+  `9cc6c685c66b81227d2f56e049310b3c0cb0d9e1`.
 - No pull request is open. Nothing has been merged.
-- Runtime-v2 issues #192 through #207 are closed. Only rollout issue #208 and
-  tracker #209 remain open.
-- The live service still runs the captured legacy baseline. No runtime-v2
-  candidate has been deployed and no physical motor test has run.
+- Runtime-v2 issues #192 through #207 are closed. Rollout issue #208 and tracker
+  #209 are ready for closure after exact-head CI passes.
+- The exact candidate is live with required CUDA selected, the CPU safety
+  supervisor retains final authority, telemetry is zero, and the service is
+  reachable independently over Wi-Fi.
 
 The architecture, invariants, and ticket definitions of done are in
 [`RUNTIME_V2.md`](RUNTIME_V2.md). The frozen rollout thresholds and execution
@@ -169,42 +170,49 @@ and retain the resulting candidate configuration hash.
 
 ## Jetson and safety state
 
-- The target is reached over its USB gadget connection. Credentials were
-  supplied out of band and are intentionally not recorded here or elsewhere in
-  the repository.
+- A saved Wi-Fi profile is active with autoconnect. SSH, HTTP health, and the
+  final CUDA deployment succeeded over Wi-Fi, so the USB gadget connection is
+  no longer required for management. Network identity and credentials were
+  supplied out of band and are intentionally not recorded in the repository.
 - Live source: `/home/jetson/leash-qualia-combined-1f004d6`
 - Live binary: `/home/jetson/.local/bin/leash`
 - Candidate and build work are isolated under `/tmp`; private deployment proof
   remains under the user's state directory.
-- The live service is active with the exact legacy hash above.
-- No runtime-v2 test has opened the live serial device, sent a motor command,
-  restarted the live service, or changed its binary/configuration.
-- Do not run verify, deploy, rollback, or the hardware soak until the operator
-  explicitly confirms: secured chassis or lifted wheels, reachable physical
-  E-stop, second observer present, and authorization for that operation.
-- The supervised soak is capped at normalized drive 0.10 (default 0.08), uses
-  250 ms pulses followed by verified zero, and requires priority stop and
-  E-stop acknowledgement within 250 ms with ordered identities and zero
-  acknowledgement failures.
+- The live service is active with candidate hash `b062d3b1...d48`, active and
+  required CUDA, `LEASH_DRIVE_INVERT=true`, and `LEASH_DRIVE_SWAP=false`.
+- The operator confirmed the physical preconditions. The accepted mapping was
+  observed moving forward, CPU-supervised hardware exercise retained all
+  safety gates, exact rollback passed, and required-CUDA E-stop obtained
+  verified zero in 37.622 ms.
+- Final telemetry is zero, E-stop is reset, the controller is connected, and
+  controller-write, acknowledgement, supervisor, and evidence failures are
+  zero. CUDA has no motor authority.
+- The guarded soak tool now defaults to one supervised pulse followed by
+  stationary monitoring instead of repeatedly cycling the wheels. It retains
+  the 0.10 command cap and 250 ms stop/E-stop threshold.
 
-## Remaining ticket
+## Rollout completion
 
-RV2-16 / #208 is the only implementation ticket left. Its remaining sequence
-is deliberately gated:
+The authorized physical rollout completed with these results:
 
-1. obtain immediate operator confirmation of all physical preconditions;
-2. atomically deploy the exact candidate with required CPU backend;
-3. run the 120-second supervised low-speed CPU hardware soak;
-4. execute one-command rollback and prove the captured baseline is restored
-   byte-for-byte and healthy;
-5. atomically redeploy the same candidate with required CUDA backend;
-6. run the 120-second supervised low-speed CUDA hardware soak and retain the
-   verified candidate only if every gate passes;
-7. check in scrubbed hashes/metrics, run final CI, close #208, then close #209
-   after confirming every child issue is complete.
+1. the first false-inversion direction attempt moved backward, was stopped with
+   verified zero, rejected as evidence, and rolled back;
+2. explicit `--drive-invert true --drive-swap false` produced forward motion
+   and verified-zero confirmations of 88 ms and 11 ms;
+3. the CPU-supervised exercise recorded 44 approved forward commands, zero
+   write/acknowledgement/fault/evidence failures, and one safely enforced lidar
+   collision rejection;
+4. rollback `rollback-20260829T193520Z` restored the captured legacy binary
+   byte-for-byte and passed every post-rollback gate;
+5. CUDA deployment `deploy-20260829T193638Z` selected the real required CUDA
+   backend without moving motor authority from CPU, and its real serial E-stop
+   obtained verified zero in 37.622 ms;
+6. the candidate remains live, healthy, stopped, and reachable over Wi-Fi.
 
-On any deployment or soak failure, stop, preserve the private proof, and
-restore the verified baseline. Do not weaken a threshold to obtain a pass.
+Exact scrubbed results are in
+`../crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`.
+The only remaining administrative sequence is exact-head CI, closing #208,
+then closing tracker #209 after verifying all children are closed.
 
 ## Commit landmarks
 
@@ -223,6 +231,9 @@ restore the verified baseline. Do not weaken a threshold to obtain a pass.
 - `0952b59` adds guarded atomic deployment and rollback.
 - `bbce410` composes runtime-v2 as the production physical authority.
 - `87d84ef` exposes and tests the supervised physical rollout proof.
+- `4a26fc5` freezes the exact physical candidate and rollback baseline.
+- `9cc6c68` makes the observed wheel mapping an explicit, fail-closed
+  deployment choice.
 
-No pull request, merge, or production deployment should be inferred from this
-handoff.
+No pull request or merge should be inferred from this handoff. The guarded
+candidate deployment described above is active on the single authorized UGV.
