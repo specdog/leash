@@ -241,6 +241,15 @@ assert_dashboard_page() {
   fi
 }
 
+assert_agent_page() {
+  local html
+  html="$(cat)"
+  if [[ "$html" != *"Leash Agent Input"* ]]; then
+    echo "agent page missing Leash Agent Input" >&2
+    return 1
+  fi
+}
+
 dashboard_ts() {
   sed -n 's/.*data-telemetry-ts="\([0-9][0-9]*\)".*/\1/p' | head -n 1
 }
@@ -355,7 +364,7 @@ post_dashboard_action stop
 post_dashboard_action estop
 post_dashboard_action estop-reset
 post_dashboard_action capture
-curl -fsS "$base/agent" | grep -q "Leash Agent Input"
+curl -fsS "$base/agent" | assert_agent_page
 curl -fsS -X POST "$base/agent/messages" \
   -H "content-type: application/json" \
   --data '{"source":"web","text":"web smoke message"}' | assert_agent_message web "web smoke message"

@@ -1849,10 +1849,8 @@ mod tests {
         let handle = supervisor.handle();
         handle.submit(ControlInput::Idle).unwrap().wait().unwrap();
         let _ = handle.submit(ControlInput::Idle);
-        for _ in 0..100 {
-            if handle.status().faulted {
-                break;
-            }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !handle.status().faulted && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(1));
         }
         assert!(handle.status().faulted);
