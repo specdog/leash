@@ -11,8 +11,8 @@ use std::{
 };
 
 use crate::{
-    lidar_transform_cpu, normalize_rgb_u8_cpu, predictive_step_cpu, project_occupancy_cpu,
-    ComputeInputError, LidarPoint,
+    collision_sector_reduce_cpu, lidar_transform_cpu, normalize_rgb_u8_cpu, predictive_step_cpu,
+    project_occupancy_cpu, CollisionSector, ComputeInputError, LidarPoint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,6 +58,26 @@ pub enum ComputeJob {
         yaw_offset_rad: f32,
         clockwise: bool,
     },
+    CollisionSectorReduce {
+        ranges_m: Vec<f32>,
+        angle_min_rad: f32,
+        angle_increment_rad: f32,
+        range_min_m: f32,
+        range_max_m: f32,
+        sector_center_rad: f32,
+        sector_half_width_rad: f32,
+    },
+    LidarTransformAndCollision {
+        ranges_m: Vec<f32>,
+        angle_min_rad: f32,
+        angle_increment_rad: f32,
+        range_min_m: f32,
+        range_max_m: f32,
+        yaw_offset_rad: f32,
+        clockwise: bool,
+        sector_center_rad: f32,
+        sector_half_width_rad: f32,
+    },
     NormalizeRgbU8 {
         input: Vec<u8>,
         mean: [f32; 3],
@@ -76,6 +96,11 @@ pub enum ComputeJob {
 pub enum ComputeResult {
     Occupancy(Vec<i32>),
     Lidar(Vec<LidarPoint>),
+    CollisionSector(CollisionSector),
+    Spatial {
+        lidar: Vec<LidarPoint>,
+        collision: CollisionSector,
+    },
     NormalizedRgb(Vec<f32>),
     Predictive(PredictiveState),
 }
@@ -354,6 +379,53 @@ impl Backend for CpuBackend {
                 yaw_offset_rad,
                 clockwise,
             )?)),
+            ComputeJob::CollisionSectorReduce {
+                ranges_m,
+                angle_min_rad,
+                angle_increment_rad,
+                range_min_m,
+                range_max_m,
+                sector_center_rad,
+                sector_half_width_rad,
+            } => Ok(ComputeResult::CollisionSector(collision_sector_reduce_cpu(
+                &ranges_m,
+                angle_min_rad,
+                angle_increment_rad,
+                range_min_m,
+                range_max_m,
+                sector_center_rad,
+                sector_half_width_rad,
+            )?)),
+            ComputeJob::LidarTransformAndCollision {
+                ranges_m,
+                angle_min_rad,
+                angle_increment_rad,
+                range_min_m,
+                range_max_m,
+                yaw_offset_rad,
+                clockwise,
+                sector_center_rad,
+                sector_half_width_rad,
+            } => Ok(ComputeResult::Spatial {
+                lidar: lidar_transform_cpu(
+                    &ranges_m,
+                    angle_min_rad,
+                    angle_increment_rad,
+                    range_min_m,
+                    range_max_m,
+                    yaw_offset_rad,
+                    clockwise,
+                )?,
+                collision: collision_sector_reduce_cpu(
+                    &ranges_m,
+                    angle_min_rad,
+                    angle_increment_rad,
+                    range_min_m,
+                    range_max_m,
+                    sector_center_rad,
+                    sector_half_width_rad,
+                )?,
+            }),
             ComputeJob::NormalizeRgbU8 {
                 input,
                 mean,

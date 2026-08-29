@@ -10,7 +10,7 @@ use cudarc::{
 
 use crate::{
     executor::{Backend, ComputeJob, ComputeResult, PredictiveState, WorkError},
-    ComputeInputError, LidarPoint, PREBUILT_FATBIN,
+    CollisionSector, ComputeInputError, LidarPoint, PREBUILT_FATBIN,
 };
 
 #[derive(Debug)]
@@ -30,6 +30,7 @@ pub(crate) struct CudaBackend {
     stream: Arc<CudaStream>,
     project_occupancy: CudaFunction,
     lidar_transform: CudaFunction,
+    collision_sector_reduce: CudaFunction,
     normalize_rgb: CudaFunction,
     predictive_step: CudaFunction,
     occupancy_cells: CudaSlice<i8>,
@@ -38,6 +39,8 @@ pub(crate) struct CudaBackend {
     lidar_x: CudaSlice<f32>,
     lidar_y: CudaSlice<f32>,
     lidar_valid: CudaSlice<u8>,
+    collision_minimum_bits: CudaSlice<u32>,
+    collision_sample_count: CudaSlice<u32>,
     rgb_input: CudaSlice<u8>,
     rgb_output: CudaSlice<f32>,
     predictive_lower: CudaSlice<f32>,
@@ -66,6 +69,9 @@ impl CudaBackend {
         let lidar_transform = module
             .load_function("lidar_transform")
             .map_err(|error| device_error("load lidar_transform", error))?;
+        let collision_sector_reduce = module
+            .load_function("collision_sector_reduce")
+            .map_err(|error| device_error("load collision_sector_reduce", error))?;
         let normalize_rgb = module
             .load_function("normalize_rgb_u8")
             .map_err(|error| device_error("load normalize_rgb_u8", error))?;
@@ -80,6 +86,8 @@ impl CudaBackend {
             lidar_x: allocate_one(&stream, "lidar x")?,
             lidar_y: allocate_one(&stream, "lidar y")?,
             lidar_valid: allocate_one(&stream, "lidar validity")?,
+            collision_minimum_bits: allocate_one(&stream, "collision minimum")?,
+            collision_sample_count: allocate_one(&stream, "collision sample count")?,
             rgb_input: allocate_one(&stream, "RGB input")?,
             rgb_output: allocate_one(&stream, "RGB output")?,
             predictive_lower: allocate_one(&stream, "predictive lower")?,
@@ -90,6 +98,7 @@ impl CudaBackend {
             stream,
             project_occupancy,
             lidar_transform,
+            collision_sector_reduce,
             normalize_rgb,
             predictive_step,
         })
@@ -145,6 +154,7 @@ impl CudaBackend {
         range_max_m: f32,
         yaw_offset_rad: f32,
         clockwise: bool,
+        upload_ranges: bool,
     ) -> Result<Vec<LidarPoint>, WorkError> {
         if !range_min_m.is_finite()
             || !range_max_m.is_finite()
@@ -152,6 +162,12 @@ impl CudaBackend {
             || range_max_m < range_min_m
         {
             return Err(ComputeInputError::InvalidRangeBounds.into());
+        }
+        if !angle_min_rad.is_finite()
+            || !angle_increment_rad.is_finite()
+            || !yaw_offset_rad.is_finite()
+        {
+            return Err(ComputeInputError::InvalidAngles.into());
         }
         if ranges_m.is_empty() {
             return Ok(Vec::new());
@@ -162,9 +178,11 @@ impl CudaBackend {
         ensure_capacity(&self.stream, &mut self.lidar_x, ranges_m.len())?;
         ensure_capacity(&self.stream, &mut self.lidar_y, ranges_m.len())?;
         ensure_capacity(&self.stream, &mut self.lidar_valid, ranges_m.len())?;
-        self.stream
-            .memcpy_htod(ranges_m, &mut self.lidar_ranges)
-            .map_err(|error| backend_error("upload lidar ranges", error))?;
+        if upload_ranges {
+            self.stream
+                .memcpy_htod(ranges_m, &mut self.lidar_ranges)
+                .map_err(|error| backend_error("upload lidar ranges", error))?;
+        }
         let clockwise = i32::from(clockwise);
         {
             let ranges = self.lidar_ranges.slice(..ranges_m.len());
@@ -210,6 +228,84 @@ impl CudaBackend {
                 valid: valid != 0,
             })
             .collect())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collision_sector(
+        &mut self,
+        ranges_m: &[f32],
+        angle_min_rad: f32,
+        angle_increment_rad: f32,
+        range_min_m: f32,
+        range_max_m: f32,
+        sector_center_rad: f32,
+        sector_half_width_rad: f32,
+        upload_ranges: bool,
+    ) -> Result<CollisionSector, WorkError> {
+        if !range_min_m.is_finite()
+            || !range_max_m.is_finite()
+            || range_min_m < 0.0
+            || range_max_m < range_min_m
+        {
+            return Err(ComputeInputError::InvalidRangeBounds.into());
+        }
+        if !angle_min_rad.is_finite() || !angle_increment_rad.is_finite() {
+            return Err(ComputeInputError::InvalidAngles.into());
+        }
+        if !sector_center_rad.is_finite()
+            || !sector_half_width_rad.is_finite()
+            || !(0.0..=core::f32::consts::PI).contains(&sector_half_width_rad)
+        {
+            return Err(ComputeInputError::InvalidSector.into());
+        }
+        if ranges_m.is_empty() {
+            return Ok(CollisionSector::default());
+        }
+        let count = u32::try_from(ranges_m.len())
+            .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
+        ensure_capacity(&self.stream, &mut self.lidar_ranges, ranges_m.len())?;
+        if upload_ranges {
+            self.stream
+                .memcpy_htod(ranges_m, &mut self.lidar_ranges)
+                .map_err(|error| backend_error("upload collision ranges", error))?;
+        }
+        self.stream
+            .memcpy_htod(&[f32::INFINITY.to_bits()], &mut self.collision_minimum_bits)
+            .map_err(|error| backend_error("reset collision minimum", error))?;
+        self.stream
+            .memcpy_htod(&[0_u32], &mut self.collision_sample_count)
+            .map_err(|error| backend_error("reset collision sample count", error))?;
+        {
+            let ranges = self.lidar_ranges.slice(..ranges_m.len());
+            unsafe {
+                self.stream
+                    .launch_builder(&self.collision_sector_reduce)
+                    .arg(&ranges)
+                    .arg(&mut self.collision_minimum_bits)
+                    .arg(&mut self.collision_sample_count)
+                    .arg(&count)
+                    .arg(&angle_min_rad)
+                    .arg(&angle_increment_rad)
+                    .arg(&range_min_m)
+                    .arg(&range_max_m)
+                    .arg(&sector_center_rad)
+                    .arg(&sector_half_width_rad)
+                    .launch(LaunchConfig::for_num_elems(count))
+            }
+            .map_err(|error| backend_error("launch collision_sector_reduce", error))?;
+        }
+        let minimum_bits = self
+            .stream
+            .clone_dtoh(&self.collision_minimum_bits)
+            .map_err(|error| backend_error("download collision minimum", error))?[0];
+        let sample_count = self
+            .stream
+            .clone_dtoh(&self.collision_sample_count)
+            .map_err(|error| backend_error("download collision sample count", error))?[0];
+        Ok(CollisionSector {
+            min_range_m: (sample_count != 0).then(|| f32::from_bits(minimum_bits)),
+            sample_count,
+        })
     }
 
     fn normalize_rgb(
@@ -365,8 +461,62 @@ impl Backend for CudaBackend {
                     range_max_m,
                     yaw_offset_rad,
                     clockwise,
+                    true,
                 )
                 .map(ComputeResult::Lidar),
+            ComputeJob::CollisionSectorReduce {
+                ranges_m,
+                angle_min_rad,
+                angle_increment_rad,
+                range_min_m,
+                range_max_m,
+                sector_center_rad,
+                sector_half_width_rad,
+            } => self
+                .collision_sector(
+                    &ranges_m,
+                    angle_min_rad,
+                    angle_increment_rad,
+                    range_min_m,
+                    range_max_m,
+                    sector_center_rad,
+                    sector_half_width_rad,
+                    true,
+                )
+                .map(ComputeResult::CollisionSector),
+            ComputeJob::LidarTransformAndCollision {
+                ranges_m,
+                angle_min_rad,
+                angle_increment_rad,
+                range_min_m,
+                range_max_m,
+                yaw_offset_rad,
+                clockwise,
+                sector_center_rad,
+                sector_half_width_rad,
+            } => {
+                let lidar = self.lidar(
+                    &ranges_m,
+                    angle_min_rad,
+                    angle_increment_rad,
+                    range_min_m,
+                    range_max_m,
+                    yaw_offset_rad,
+                    clockwise,
+                    true,
+                )?;
+                let collision = self.collision_sector(
+                    &ranges_m,
+                    angle_min_rad,
+                    angle_increment_rad,
+                    range_min_m,
+                    range_max_m,
+                    sector_center_rad,
+                    sector_half_width_rad,
+                    false,
+                )?;
+                Ok(ComputeResult::Spatial { lidar, collision })
+            }
             ComputeJob::NormalizeRgbU8 {
                 input,
                 mean,

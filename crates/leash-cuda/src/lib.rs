@@ -18,14 +18,15 @@ pub use executor::{
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";
 pub const ARTIFACT_SHA256: &str =
-    "cbe6b07f918812d895c6bf881ac6eaa5ae10e9601b5a4e433a5ba354b09d604f";
-pub const SOURCE_SHA256: &str = "5a1830b81d0eb3d805ed0069c677ea8d28c5eabd26b23a29443eefa6bfedb05e";
+    "839ac2f50841565cb0f7a64aa206bd223a71bbe5a7f0b46430e6506dfb77540f";
+pub const SOURCE_SHA256: &str = "f98093654a249453de49584fcdac4d7d53f763700e2514868f4e56149d2202b0";
 pub const TARGET_SM: &str = "sm_87";
 pub const TARGET_PTX: &str = "compute_87";
 pub const CUDA_SDK: &str = "12.9.0";
-pub const KERNEL_NAMES: [&str; 4] = [
+pub const KERNEL_NAMES: [&str; 5] = [
     "project_occupancy",
     "lidar_transform",
+    "collision_sector_reduce",
     "normalize_rgb_u8",
     "predictive_step",
 ];
@@ -49,7 +50,7 @@ pub const fn artifact() -> KernelArtifact {
     KernelArtifact {
         schema_version: ARTIFACT_SCHEMA_VERSION,
         sha256: ARTIFACT_SHA256,
-        bytes: 23_360,
+        bytes: 36_032,
         cuda_sdk: CUDA_SDK,
         native_target: TARGET_SM,
         ptx_target: TARGET_PTX,
@@ -63,6 +64,8 @@ pub enum ComputeInputError {
     LengthOverflow,
     LengthMismatch,
     InvalidRangeBounds,
+    InvalidAngles,
+    InvalidSector,
     InvalidNormalization,
 }
 
@@ -73,6 +76,8 @@ impl fmt::Display for ComputeInputError {
             Self::LengthOverflow => formatter.write_str("compute output length overflowed"),
             Self::LengthMismatch => formatter.write_str("compute input lengths do not match"),
             Self::InvalidRangeBounds => formatter.write_str("lidar range bounds are invalid"),
+            Self::InvalidAngles => formatter.write_str("lidar angles are invalid"),
+            Self::InvalidSector => formatter.write_str("collision sector is invalid"),
             Self::InvalidNormalization => {
                 formatter.write_str("RGB normalization parameters are invalid")
             }
@@ -89,14 +94,27 @@ pub struct LidarPoint {
     pub valid: bool,
 }
 
-pub fn project_occupancy_cpu(cells: &[i8], depth: u32) -> Result<Vec<i32>, ComputeInputError> {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CollisionSector {
+    pub min_range_m: Option<f32>,
+    pub sample_count: u32,
+}
+
+fn projected_occupancy_len(cell_count: usize, depth: u32) -> Result<usize, ComputeInputError> {
     if depth == 0 {
         return Err(ComputeInputError::ZeroDepth);
     }
-    let output_count = cells
-        .len()
+    let output_count = cell_count
         .checked_mul(depth as usize)
         .ok_or(ComputeInputError::LengthOverflow)?;
+    if u32::try_from(cell_count).is_err() || u32::try_from(output_count).is_err() {
+        return Err(ComputeInputError::LengthOverflow);
+    }
+    Ok(output_count)
+}
+
+pub fn project_occupancy_cpu(cells: &[i8], depth: u32) -> Result<Vec<i32>, ComputeInputError> {
+    let output_count = projected_occupancy_len(cells.len(), depth)?;
     let mut output = Vec::with_capacity(output_count);
     for cell in cells {
         let occupancy = if *cell > 0 { i32::from(*cell) } else { 0 };
@@ -122,6 +140,11 @@ pub fn lidar_transform_cpu(
     {
         return Err(ComputeInputError::InvalidRangeBounds);
     }
+    if !angle_min_rad.is_finite() || !angle_increment_rad.is_finite() || !yaw_offset_rad.is_finite()
+    {
+        return Err(ComputeInputError::InvalidAngles);
+    }
+    u32::try_from(ranges_m.len()).map_err(|_| ComputeInputError::LengthOverflow)?;
     let direction = if clockwise { -1.0 } else { 1.0 };
     Ok(ranges_m
         .iter()
@@ -139,6 +162,60 @@ pub fn lidar_transform_cpu(
             }
         })
         .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn collision_sector_reduce_cpu(
+    ranges_m: &[f32],
+    angle_min_rad: f32,
+    angle_increment_rad: f32,
+    range_min_m: f32,
+    range_max_m: f32,
+    sector_center_rad: f32,
+    sector_half_width_rad: f32,
+) -> Result<CollisionSector, ComputeInputError> {
+    if !range_min_m.is_finite()
+        || !range_max_m.is_finite()
+        || range_min_m < 0.0
+        || range_max_m < range_min_m
+    {
+        return Err(ComputeInputError::InvalidRangeBounds);
+    }
+    if !angle_min_rad.is_finite() || !angle_increment_rad.is_finite() {
+        return Err(ComputeInputError::InvalidAngles);
+    }
+    if !sector_center_rad.is_finite()
+        || !sector_half_width_rad.is_finite()
+        || !(0.0..=core::f32::consts::PI).contains(&sector_half_width_rad)
+    {
+        return Err(ComputeInputError::InvalidSector);
+    }
+    u32::try_from(ranges_m.len()).map_err(|_| ComputeInputError::LengthOverflow)?;
+
+    let mut result = CollisionSector::default();
+    for (index, range_m) in ranges_m.iter().copied().enumerate() {
+        if !range_m.is_finite() || range_m < range_min_m || range_m > range_max_m {
+            continue;
+        }
+        let angle = angle_min_rad + index as f32 * angle_increment_rad;
+        let delta = (angle - sector_center_rad)
+            .sin()
+            .atan2((angle - sector_center_rad).cos());
+        if delta.abs() > sector_half_width_rad {
+            continue;
+        }
+        result.sample_count = result
+            .sample_count
+            .checked_add(1)
+            .ok_or(ComputeInputError::LengthOverflow)?;
+        let range_m = if range_m == 0.0 { 0.0 } else { range_m };
+        result.min_range_m = Some(
+            result
+                .min_range_m
+                .map_or(range_m, |minimum| minimum.min(range_m)),
+        );
+    }
+    Ok(result)
 }
 
 pub fn normalize_rgb_u8_cpu(
@@ -224,7 +301,7 @@ mod tests {
         let artifact = artifact();
         assert_eq!(artifact.schema_version, "leash.cuda-artifact.v1");
         assert_eq!(artifact.sha256.len(), 64);
-        assert_eq!(artifact.bytes, 23_360);
+        assert_eq!(artifact.bytes, 36_032);
         assert_eq!(artifact.native_target, "sm_87");
         assert_eq!(artifact.ptx_target, "compute_87");
         assert_eq!(artifact.kernels, KERNEL_NAMES);
@@ -239,6 +316,14 @@ mod tests {
         assert_eq!(
             project_occupancy_cpu(&[1], 0),
             Err(ComputeInputError::ZeroDepth)
+        );
+        assert_eq!(
+            projected_occupancy_len(u32::MAX as usize, 2),
+            Err(ComputeInputError::LengthOverflow)
+        );
+        assert_eq!(
+            projected_occupancy_len(u32::MAX as usize, 1),
+            Ok(u32::MAX as usize)
         );
     }
 
@@ -258,6 +343,74 @@ mod tests {
         assert!((points[0].x_m - 1.0).abs() < 1e-6);
         assert!(!points[1].valid);
         assert!(!points[2].valid);
+        assert_eq!(
+            lidar_transform_cpu(&[], f32::NAN, 0.1, 0.05, 12.0, 0.0, false),
+            Err(ComputeInputError::InvalidAngles)
+        );
+        assert_eq!(
+            lidar_transform_cpu(&[], 0.0, 0.1, 12.0, 0.05, 0.0, false),
+            Err(ComputeInputError::InvalidRangeBounds)
+        );
+    }
+
+    #[test]
+    fn cpu_collision_reference_defines_empty_non_finite_and_wrapped_sectors() {
+        assert_eq!(
+            collision_sector_reduce_cpu(&[], 0.0, 0.1, 0.05, 12.0, 0.0, 0.5).unwrap(),
+            CollisionSector::default()
+        );
+        let result = collision_sector_reduce_cpu(
+            &[1.0, f32::NAN, f32::INFINITY, 0.25, 20.0],
+            core::f32::consts::PI - 0.2,
+            0.1,
+            0.05,
+            12.0,
+            -core::f32::consts::PI,
+            0.21,
+        )
+        .unwrap();
+        assert_eq!(result.sample_count, 2);
+        assert_eq!(result.min_range_m, Some(0.25));
+        assert_eq!(
+            collision_sector_reduce_cpu(&[], 0.0, 0.1, 0.05, 12.0, 0.0, f32::INFINITY),
+            Err(ComputeInputError::InvalidSector)
+        );
+        assert_eq!(
+            collision_sector_reduce_cpu(&[], 0.0, 0.1, 0.05, 12.0, 0.0, -0.1),
+            Err(ComputeInputError::InvalidSector)
+        );
+    }
+
+    #[test]
+    fn randomized_collision_reference_respects_the_result_contract() {
+        let mut seed = 0x5eed_1234_u32;
+        for _ in 0..64 {
+            let count = (lcg(&mut seed) % 512) as usize;
+            let ranges = (0..count)
+                .map(|index| match index % 31 {
+                    0 => f32::NAN,
+                    1 => f32::INFINITY,
+                    _ => 0.01 + (lcg(&mut seed) % 1_500) as f32 / 100.0,
+                })
+                .collect::<Vec<_>>();
+            let center = (lcg(&mut seed) as f32 / u32::MAX as f32 - 0.5) * core::f32::consts::TAU;
+            let half_width = 0.05 + (lcg(&mut seed) % 250) as f32 / 100.0;
+            let actual = collision_sector_reduce_cpu(
+                &ranges,
+                -core::f32::consts::PI,
+                core::f32::consts::TAU / count.max(1) as f32,
+                0.05,
+                12.0,
+                center,
+                half_width,
+            )
+            .unwrap();
+            assert!(actual.sample_count <= count as u32);
+            assert!(actual.min_range_m.is_none() == (actual.sample_count == 0));
+            if let Some(minimum) = actual.min_range_m {
+                assert!((0.05..=12.0).contains(&minimum));
+            }
+        }
     }
 
     #[test]
@@ -267,6 +420,13 @@ mod tests {
         assert!((output[0] + 1.0).abs() < 1e-6);
         assert!(output[1].abs() < 0.01);
         assert!((output[2] - 1.0).abs() < 1e-6);
+        assert!(normalize_rgb_u8_cpu(&[], [0.5; 3], [2.0; 3])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            normalize_rgb_u8_cpu(&[0, 1], [0.5; 3], [2.0; 3]),
+            Err(ComputeInputError::InvalidNormalization)
+        );
     }
 
     #[test]
@@ -290,5 +450,10 @@ mod tests {
         assert!(state[1] < -0.5);
         assert_ne!(weights, [0.75, 0.75]);
         assert_ne!(bias, [0.0, 0.0]);
+    }
+
+    fn lcg(seed: &mut u32) -> u32 {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *seed
     }
 }

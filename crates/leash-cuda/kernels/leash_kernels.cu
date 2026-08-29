@@ -49,6 +49,37 @@ extern "C" __global__ void lidar_transform(
     valid[index] = 1;
 }
 
+extern "C" __global__ void collision_sector_reduce(
+    const float* ranges_m,
+    uint32_t* minimum_range_bits,
+    uint32_t* sample_count,
+    uint32_t count,
+    float angle_min_rad,
+    float angle_increment_rad,
+    float range_min_m,
+    float range_max_m,
+    float sector_center_rad,
+    float sector_half_width_rad
+) {
+    const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= count) {
+        return;
+    }
+    const float range = ranges_m[index];
+    if (!isfinite(range) || range < range_min_m || range > range_max_m) {
+        return;
+    }
+    const float angle = angle_min_rad + static_cast<float>(index) * angle_increment_rad;
+    const float unwrapped_delta = angle - sector_center_rad;
+    const float delta = atan2f(sinf(unwrapped_delta), cosf(unwrapped_delta));
+    if (fabsf(delta) > sector_half_width_rad) {
+        return;
+    }
+    const float non_negative_range = range == 0.0f ? 0.0f : range;
+    atomicMin(minimum_range_bits, __float_as_uint(non_negative_range));
+    atomicAdd(sample_count, 1U);
+}
+
 extern "C" __global__ void normalize_rgb_u8(
     const uint8_t* input,
     float* output,

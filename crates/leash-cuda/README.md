@@ -29,7 +29,8 @@ g++ -std=c++17 tests/jetson_driver_probe.cpp -I/usr/local/cuda/include \
 ```
 
 With Rust installed on the target, the same check exercises the bounded
-single-owner `cudarc` executor and compares all four jobs to their CPU oracle:
+single-owner `cudarc` executor and compares all five kernels to their CPU
+oracles over fixed, empty, maximum-size, and deterministic randomized inputs:
 
 ```bash
 cargo run --release --features cuda --example jetson_executor_probe
@@ -43,6 +44,8 @@ cargo run --release --features cuda --example jetson_benchmark -- --iterations 2
 ```
 
 The benchmark performs parity checks before timing and emits a versioned JSON
-record for small and large voxel, lidar, camera, and cognition workloads.
+record for small and large voxel, lidar, advisory collision, camera, and
+cognition workloads. The combined spatial profile uploads one lidar scan and
+runs transform plus collision reduction against the same resident buffer.
 The measured Orin NX result and conservative backend decisions are recorded in
 `evidence/jetson-orin-nx-20260829.json`.

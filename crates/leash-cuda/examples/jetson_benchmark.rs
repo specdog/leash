@@ -178,6 +178,9 @@ fn profiles() -> Vec<WorkloadProfile> {
         occupancy("voxel_large", 400 * 400, 16),
         lidar("lidar_small", 720),
         lidar("lidar_large", 10_000),
+        collision("collision_small", 720),
+        collision("collision_large", 10_000),
+        spatial("spatial_combined_large", 10_000),
         rgb("camera_small", 320, 240),
         rgb("camera_large", 640, 480),
         cognition("cognition_small", 4_096),
@@ -221,6 +224,54 @@ fn lidar(name: &'static str, count: usize) -> WorkloadProfile {
             range_max_m: 12.0,
             yaw_offset_rad: 0.1,
             clockwise: false,
+        },
+    }
+}
+
+fn collision(name: &'static str, count: usize) -> WorkloadProfile {
+    let ranges_m = (0..count)
+        .map(|index| match index % 127 {
+            0 => f32::NAN,
+            1 => f32::INFINITY,
+            _ => 0.1 + (index % 1_100) as f32 * 0.01,
+        })
+        .collect::<Vec<_>>();
+    WorkloadProfile {
+        name,
+        elements: ranges_m.len(),
+        job: ComputeJob::CollisionSectorReduce {
+            ranges_m,
+            angle_min_rad: -core::f32::consts::PI,
+            angle_increment_rad: core::f32::consts::TAU / count as f32,
+            range_min_m: 0.05,
+            range_max_m: 12.0,
+            sector_center_rad: 0.0,
+            sector_half_width_rad: core::f32::consts::FRAC_PI_4,
+        },
+    }
+}
+
+fn spatial(name: &'static str, count: usize) -> WorkloadProfile {
+    let ranges_m = (0..count)
+        .map(|index| match index % 127 {
+            0 => f32::NAN,
+            1 => f32::INFINITY,
+            _ => 0.1 + (index % 1_100) as f32 * 0.01,
+        })
+        .collect::<Vec<_>>();
+    WorkloadProfile {
+        name,
+        elements: ranges_m.len(),
+        job: ComputeJob::LidarTransformAndCollision {
+            ranges_m,
+            angle_min_rad: -core::f32::consts::PI,
+            angle_increment_rad: core::f32::consts::TAU / count as f32,
+            range_min_m: 0.05,
+            range_max_m: 12.0,
+            yaw_offset_rad: 0.1,
+            clockwise: false,
+            sector_center_rad: 0.0,
+            sector_half_width_rad: core::f32::consts::FRAC_PI_4,
         },
     }
 }
@@ -319,6 +370,35 @@ fn assert_parity(cpu: &ComputeResult, cuda: &ComputeResult) -> Result<(), Box<dy
                     return Err("lidar parity failed".into());
                 }
             }
+        }
+        (ComputeResult::CollisionSector(cpu), ComputeResult::CollisionSector(cuda)) => {
+            if cpu.sample_count != cuda.sample_count {
+                return Err("collision sample counts differ".into());
+            }
+            match (cpu.min_range_m, cuda.min_range_m) {
+                (Some(cpu), Some(cuda)) if close(cpu, cuda) => {}
+                (None, None) => {}
+                _ => return Err("collision minimum parity failed".into()),
+            }
+        }
+        (
+            ComputeResult::Spatial {
+                lidar: cpu_lidar,
+                collision: cpu_collision,
+            },
+            ComputeResult::Spatial {
+                lidar: cuda_lidar,
+                collision: cuda_collision,
+            },
+        ) => {
+            assert_parity(
+                &ComputeResult::Lidar(cpu_lidar.clone()),
+                &ComputeResult::Lidar(cuda_lidar.clone()),
+            )?;
+            assert_parity(
+                &ComputeResult::CollisionSector(*cpu_collision),
+                &ComputeResult::CollisionSector(*cuda_collision),
+            )?;
         }
         (ComputeResult::NormalizedRgb(cpu), ComputeResult::NormalizedRgb(cuda)) => {
             assert_float_slice(cpu, cuda)?;

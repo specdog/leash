@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -110,6 +111,38 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    CUfunction collision;
+    CUDA_CHECK(cuModuleGetFunction(&collision, module, "collision_sector_reduce"));
+    CUdeviceptr device_minimum_bits;
+    CUdeviceptr device_sample_count;
+    CUDA_CHECK(cuMemAlloc(&device_minimum_bits, sizeof(std::uint32_t)));
+    CUDA_CHECK(cuMemAlloc(&device_sample_count, sizeof(std::uint32_t)));
+    float infinity = INFINITY;
+    std::uint32_t minimum_bits = 0;
+    static_assert(sizeof(infinity) == sizeof(minimum_bits));
+    std::memcpy(&minimum_bits, &infinity, sizeof(minimum_bits));
+    std::uint32_t collision_count = 0;
+    CUDA_CHECK(cuMemcpyHtoD(device_minimum_bits, &minimum_bits, sizeof(minimum_bits)));
+    CUDA_CHECK(cuMemcpyHtoD(device_sample_count, &collision_count, sizeof(collision_count)));
+    float sector_center = 0.0f;
+    float sector_half_width = 0.25f;
+    void* collision_args[] = {
+        &device_ranges, &device_minimum_bits, &device_sample_count, &lidar_count,
+        &angle_min, &angle_increment, &range_min, &range_max, &sector_center,
+        &sector_half_width};
+    CUDA_CHECK(cuLaunchKernel(collision, 1, 1, 1, 128, 1, 1, 0, nullptr,
+                              collision_args, nullptr));
+    CUDA_CHECK(cuCtxSynchronize());
+    CUDA_CHECK(cuMemcpyDtoH(&minimum_bits, device_minimum_bits, sizeof(minimum_bits)));
+    CUDA_CHECK(cuMemcpyDtoH(&collision_count, device_sample_count,
+                            sizeof(collision_count)));
+    float minimum = 0.0f;
+    std::memcpy(&minimum, &minimum_bits, sizeof(minimum));
+    if (collision_count != 1 || !close_enough(minimum, 1.0f)) {
+        std::fprintf(stderr, "collision reduction parity failed\n");
+        return 1;
+    }
+
     CUfunction normalize;
     CUDA_CHECK(cuModuleGetFunction(&normalize, module, "normalize_rgb_u8"));
     const std::uint8_t rgb[] = {0, 127, 255};
@@ -182,6 +215,6 @@ int main(int argc, char** argv) {
 
     CUDA_CHECK(cuModuleUnload(module));
     CUDA_CHECK(cuCtxDestroy(context));
-    std::printf("leash CUDA probe passed: sm_%d%d, 4 kernels\n", major, minor);
+    std::printf("leash CUDA probe passed: sm_%d%d, 5 kernels\n", major, minor);
     return 0;
 }
