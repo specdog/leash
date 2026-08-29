@@ -1,0 +1,2 @@
+[build]
+rustflags = ["--cfg", "ros_distro=\"humble\""]

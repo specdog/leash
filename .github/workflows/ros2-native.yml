@@ -1,0 +1,107 @@
+name: ROS 2 native boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/rust-native-runtime-v2
+    paths:
+      - ".cargo/**"
+      - ".github/workflows/ros2-native.yml"
+      - "crates/leash-core/**"
+      - "crates/leash-runtime/**"
+      - "crates/leash-ros2/**"
+      - "implementations/waveshare-ugv/ros2-native/**"
+
+permissions:
+  contents: read
+
+jobs:
+  humble-rclrs:
+    runs-on: ubuntu-22.04
+    container:
+      image: ros:humble-ros-base-jammy@sha256:9bdda47f584f33aae18456225a8a95fe7bcde821727757f02a3252cbc46e8188
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned build prerequisites
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential curl git libclang-dev python3-pip
+          python3 -m pip install --no-cache-dir colcon-cargo colcon-ros-cargo
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch pinned Rust message generator sources
+        shell: bash
+        run: |
+          mkdir -p target/ros2-ws/src
+          clone_at() {
+            local repository="$1"
+            local revision="$2"
+            local destination="$3"
+            git clone --filter=blob:none "https://github.com/${repository}.git" "$destination"
+            git -C "$destination" checkout --detach "$revision"
+          }
+          clone_at ros2-rust/rosidl_runtime_rs d524fa1ce668642be490e988790e9a5d76978039 target/ros2-ws/src/rosidl_runtime_rs
+          clone_at ros2-rust/rosidl_rust 4adee4f29987c9dcd239a1bd3d99a83f46bbaa3f target/ros2-ws/src/rosidl_rust
+          clone_at ros2/common_interfaces 08434490d3e4abd37ccc5462cdde69b88853b5b8 target/ros2-ws/src/common_interfaces
+          clone_at ros2/rcl_interfaces 82776fc9068d1e0cd4af11c2e2700195994b2eb1 target/ros2-ws/src/rcl_interfaces
+          clone_at ros2/rosidl_defaults 8266f1c0f062d405595570209cfb0ed3f71684ae target/ros2-ws/src/rosidl_defaults
+          clone_at ros2/unique_identifier_msgs 27767cefcf8a80da44641dc208c57722c28aa11c target/ros2-ws/src/unique_identifier_msgs
+          clone_at ros2/geometry2 50af68fac25a409eaf2179d5cc8855ac03760b42 target/ros2-ws/src/geometry2
+          clone_at ros2/example_interfaces f8deb566a1facf91bd38b9f00c4cf684c5007d85 target/ros2-ws/src/example_interfaces
+          clone_at ros2/test_interface_files a0c8f5e338490ddf8b98238dce35c06810115e8b target/ros2-ws/src/test_interface_files
+
+      - name: Build native rclrs boundary in sourced Humble
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon --log-base target/ros2-ws/log build \
+            --merge-install \
+            --build-base target/ros2-ws/build \
+            --install-base target/ros2-ws/install \
+            --base-paths target/ros2-ws/src implementations/waveshare-ugv/ros2-native \
+            --event-handlers console_direct+
+
+      - name: Exercise generated messages and bounded callbacks
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          source target/ros2-ws/install/local_setup.bash
+          ros2 run leash_ros2_native_node leash_ros2_native_node --duration-ms 8000 > target/ros2-native-smoke.json &
+          node_pid=$!
+          sleep 2
+          ros2 topic pub --once /scan sensor_msgs/msg/LaserScan "{header: {stamp: {sec: 0, nanosec: 100}, frame_id: laser}, angle_min: -1.0, angle_max: 1.0, angle_increment: 1.0, range_min: 0.5, range_max: 8.0, ranges: [1.0, .nan, 2.0]}"
+          ros2 topic pub --once /imu/data sensor_msgs/msg/Imu "{header: {stamp: {sec: 0, nanosec: 200}, frame_id: imu_link}, orientation: {w: 1.0}, angular_velocity: {z: 0.25}, linear_acceleration: {z: 1.0}}"
+          ros2 topic pub --once /odom nav_msgs/msg/Odometry "{header: {stamp: {sec: 0, nanosec: 300}, frame_id: odom}, child_frame_id: base_link, pose: {pose: {position: {x: 1.0, y: 2.0}, orientation: {w: 1.0}}}, twist: {twist: {linear: {x: 0.5}, angular: {z: 0.25}}}}"
+          ros2 topic pub --once /tf tf2_msgs/msg/TFMessage "{transforms: [{header: {stamp: {sec: 0, nanosec: 400}, frame_id: odom}, child_frame_id: base_link, transform: {translation: {x: 1.0, y: 2.0}, rotation: {w: 1.0}}}]}"
+          ros2 topic pub --once /map nav_msgs/msg/OccupancyGrid "{header: {stamp: {sec: 0, nanosec: 500}, frame_id: map}, info: {resolution: 0.5, width: 2, height: 2, origin: {orientation: {w: 1.0}}}, data: [0, 50, 100, -1]}"
+          ros2 topic pub --once /amcl_pose geometry_msgs/msg/PoseWithCovarianceStamped "{header: {stamp: {sec: 0, nanosec: 600}, frame_id: map}, pose: {pose: {position: {x: 3.0, y: 4.0}, orientation: {w: 1.0}}}}"
+          ros2 topic pub --once /plan nav_msgs/msg/Path "{header: {stamp: {sec: 0, nanosec: 700}, frame_id: map}, poses: [{header: {stamp: {sec: 0, nanosec: 700}, frame_id: map}, pose: {position: {x: 3.0, y: 4.0}, orientation: {w: 1.0}}}]}"
+          ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.25}, angular: {z: 0.5}}"
+          wait "$node_pid"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("target/ros2-native-smoke.json").read_text())
+          assert result["executor_errors"] == 0, result
+          assert result["conversion_rejected"] == 0, result
+          assert result["queue_rejected"] == 0, result
+          assert all(result["received"].values()), result
+          assert result["qos_depths"] == {"sensor": 1, "command": 8, "map": 1}, result
+          assert result["hardware_access"] is False, result
+          print(json.dumps(result, sort_keys=True))
+          PY
+
+      - name: Upload native ROS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ros2-native-smoke
+          path: |
+            target/ros2-native-smoke.json
+            target/ros2-ws/log

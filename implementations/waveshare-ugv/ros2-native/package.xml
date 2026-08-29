@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>leash_ros2_native_node</name>
+  <version>0.1.0</version>
+  <description>Native rclrs ingress boundary for Leash runtime v2.</description>
+  <maintainer email="maintainers@leash.dev">Leash maintainers</maintainer>
+  <license>MIT</license>
+
+  <depend>rclrs</depend>
+  <depend>rosidl_runtime_rs</depend>
+  <depend>builtin_interfaces</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_msgs</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>

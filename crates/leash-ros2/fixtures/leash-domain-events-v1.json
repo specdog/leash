@@ -1,0 +1,12 @@
+{
+  "schema_version": "leash.ros-domain-events.v1",
+  "events": [
+    { "kind": "scan", "at_ns": 1100, "frame": "laser", "ranges_m": [1.0, null, 2.0] },
+    { "kind": "imu", "at_ns": 1200, "frame": "imu_link", "angular_z_rad_s": 0.25, "linear_z_m_s2": 1.0 },
+    { "kind": "odometry", "at_ns": 1300, "frame": "odom", "child_frame": "base_link", "x_m": 1.0, "y_m": 2.0, "linear_m_s": 0.5, "angular_rad_s": 0.25 },
+    { "kind": "transform", "at_ns": 1400, "parent_frame": "odom", "child_frame": "base_link", "x_m": 1.0, "y_m": 2.0 },
+    { "kind": "map", "at_ns": 1500, "frame": "map", "resolution_m": 0.5, "width": 2, "height": 2, "cells": [0, 50, 100, -1] },
+    { "kind": "localization", "at_ns": 1600, "frame": "map", "x_m": 3.0, "y_m": 4.0 },
+    { "kind": "path", "at_ns": 1700, "frame": "map", "poses": [[3.0, 4.0]] }
+  ]
+}

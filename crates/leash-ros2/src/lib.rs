@@ -2,6 +2,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(all(feature = "native-rclrs", not(feature = "rclrs-shim")))]
+mod native;
+
+#[cfg(all(feature = "native-rclrs", not(feature = "rclrs-shim")))]
+pub use native::*;
+
 use std::fmt;
 
 use leash_core::{
@@ -214,6 +220,12 @@ pub struct PathProposal {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LocalizationObservation {
+    pub pose: Pose2<Map>,
+    pub at: MonotonicNanos,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlanarTransform<Parent, Child> {
     pub parent: Frame<Parent>,
     pub child: Frame<Child>,
@@ -285,7 +297,17 @@ impl Nav2SourceState {
 pub enum Nav2StopReason {
     StaleProposal,
     SourceUnavailable(Nav2Unavailable),
+    SourceRestarted,
+    RosPartition,
     ExplicitCancellation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nav2LifecycleEvent {
+    State(Nav2SourceState),
+    Restarted,
+    Partitioned,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +360,23 @@ impl Nav2ProposalDispatcher {
             }
             _ => Err(Nav2DispatchError::UnsupportedEffect),
         }
+    }
+
+    pub fn enforce_lifecycle(
+        &self,
+        event: Nav2LifecycleEvent,
+        now: MonotonicNanos,
+    ) -> Result<Option<Nav2DispatchAcceptance>, Nav2DispatchError> {
+        let reason = match event {
+            Nav2LifecycleEvent::State(source) => match source.readiness(now) {
+                Ok(()) => return Ok(None),
+                Err(reason) => Nav2StopReason::SourceUnavailable(reason),
+            },
+            Nav2LifecycleEvent::Restarted => Nav2StopReason::SourceRestarted,
+            Nav2LifecycleEvent::Partitioned => Nav2StopReason::RosPartition,
+            Nav2LifecycleEvent::Cancelled => Nav2StopReason::ExplicitCancellation,
+        };
+        self.safety_stop(reason).map(Some)
     }
 
     fn safety_stop(
@@ -923,25 +962,45 @@ pub const MAP_QOS: QosProfile = QosProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RosQueueSnapshot {
     pub scans: LatestSnapshot,
+    pub imus: LatestSnapshot,
+    pub odometry: LatestSnapshot,
+    pub transforms: LatestSnapshot,
+    pub maps: LatestSnapshot,
+    pub localization: LatestSnapshot,
+    pub paths: LatestSnapshot,
     pub proposals: LaneSnapshot,
 }
 
 #[derive(Clone)]
 pub struct RosCallbackHandle {
     scans: LatestPublisher<ScanObservation>,
+    imus: LatestPublisher<ImuObservation>,
+    odometry: LatestPublisher<OdomObservation>,
+    transforms: LatestPublisher<PlanarTransform<Odom, Base>>,
+    maps: LatestPublisher<MapObservation>,
+    localization: LatestPublisher<LocalizationObservation>,
+    paths: LatestPublisher<PathProposal>,
     proposals: BoundedSender<Proposal>,
 }
 
 pub struct RosIngressQueues {
     handle: RosCallbackHandle,
     scans: LatestReader<ScanObservation>,
+    imus: LatestReader<ImuObservation>,
+    odometry: LatestReader<OdomObservation>,
+    transforms: LatestReader<PlanarTransform<Odom, Base>>,
+    maps: LatestReader<MapObservation>,
+    localization: LatestReader<LocalizationObservation>,
+    paths: LatestReader<PathProposal>,
     proposals: BoundedReceiver<Proposal>,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ScanSubmitError {
-    OutOfOrder(Box<Stamped<ScanObservation>>),
+pub enum ObservationSubmitError<T> {
+    OutOfOrder(Box<Stamped<T>>),
 }
+
+pub type ScanSubmitError = ObservationSubmitError<ScanObservation>;
 
 #[derive(Debug, PartialEq)]
 pub enum ProposalSubmitError {
@@ -952,15 +1011,33 @@ pub enum ProposalSubmitError {
 impl RosIngressQueues {
     pub fn new(proposal_capacity: usize) -> Result<Self, ConversionError> {
         let (scan_publisher, scans) = latest_slot();
+        let (imu_publisher, imus) = latest_slot();
+        let (odometry_publisher, odometry) = latest_slot();
+        let (transform_publisher, transforms) = latest_slot();
+        let (map_publisher, maps) = latest_slot();
+        let (localization_publisher, localization) = latest_slot();
+        let (path_publisher, paths) = latest_slot();
         let (proposal_sender, proposals) =
             bounded_lane(proposal_capacity, OverflowPolicy::RejectNewest)
                 .map_err(|_| ConversionError::InvalidScanLength)?;
         Ok(Self {
             handle: RosCallbackHandle {
                 scans: scan_publisher,
+                imus: imu_publisher,
+                odometry: odometry_publisher,
+                transforms: transform_publisher,
+                maps: map_publisher,
+                localization: localization_publisher,
+                paths: path_publisher,
                 proposals: proposal_sender,
             },
             scans,
+            imus,
+            odometry,
+            transforms,
+            maps,
+            localization,
+            paths,
             proposals,
         })
     }
@@ -973,6 +1050,30 @@ impl RosIngressQueues {
         self.scans.take()
     }
 
+    pub fn take_imu(&mut self) -> Option<Stamped<ImuObservation>> {
+        self.imus.take()
+    }
+
+    pub fn take_odometry(&mut self) -> Option<Stamped<OdomObservation>> {
+        self.odometry.take()
+    }
+
+    pub fn take_transform(&mut self) -> Option<Stamped<PlanarTransform<Odom, Base>>> {
+        self.transforms.take()
+    }
+
+    pub fn take_map(&mut self) -> Option<Stamped<MapObservation>> {
+        self.maps.take()
+    }
+
+    pub fn take_localization(&mut self) -> Option<Stamped<LocalizationObservation>> {
+        self.localization.take()
+    }
+
+    pub fn take_path(&mut self) -> Option<Stamped<PathProposal>> {
+        self.paths.take()
+    }
+
     pub fn take_proposal(&mut self) -> Option<Proposal> {
         self.proposals.try_recv()
     }
@@ -980,6 +1081,12 @@ impl RosIngressQueues {
     pub fn snapshot(&self) -> RosQueueSnapshot {
         RosQueueSnapshot {
             scans: self.scans.snapshot(),
+            imus: self.imus.snapshot(),
+            odometry: self.odometry.snapshot(),
+            transforms: self.transforms.snapshot(),
+            maps: self.maps.snapshot(),
+            localization: self.localization.snapshot(),
+            paths: self.paths.snapshot(),
             proposals: self.proposals.snapshot(),
         }
     }
@@ -995,8 +1102,56 @@ impl RosCallbackHandle {
             .publish(Stamped::new(scan.at, sequence, scan))
             .map(|_| ())
             .map_err(|PublishError::SequenceNotIncreasing(scan)| {
-                ScanSubmitError::OutOfOrder(Box::new(scan))
+                ObservationSubmitError::OutOfOrder(Box::new(scan))
             })
+    }
+
+    pub fn submit_imu(
+        &self,
+        sequence: Sequence,
+        imu: ImuObservation,
+    ) -> Result<(), ObservationSubmitError<ImuObservation>> {
+        publish_latest(&self.imus, sequence, imu.at, imu)
+    }
+
+    pub fn submit_odometry(
+        &self,
+        sequence: Sequence,
+        odometry: OdomObservation,
+    ) -> Result<(), ObservationSubmitError<OdomObservation>> {
+        publish_latest(&self.odometry, sequence, odometry.at, odometry)
+    }
+
+    pub fn submit_transform(
+        &self,
+        sequence: Sequence,
+        transform: PlanarTransform<Odom, Base>,
+    ) -> Result<(), ObservationSubmitError<PlanarTransform<Odom, Base>>> {
+        publish_latest(&self.transforms, sequence, transform.at, transform)
+    }
+
+    pub fn submit_map(
+        &self,
+        sequence: Sequence,
+        map: MapObservation,
+    ) -> Result<(), ObservationSubmitError<MapObservation>> {
+        publish_latest(&self.maps, sequence, map.at, map)
+    }
+
+    pub fn submit_localization(
+        &self,
+        sequence: Sequence,
+        localization: LocalizationObservation,
+    ) -> Result<(), ObservationSubmitError<LocalizationObservation>> {
+        publish_latest(&self.localization, sequence, localization.at, localization)
+    }
+
+    pub fn submit_path(
+        &self,
+        sequence: Sequence,
+        path: PathProposal,
+    ) -> Result<(), ObservationSubmitError<PathProposal>> {
+        publish_latest(&self.paths, sequence, path.at, path)
     }
 
     pub fn submit_proposal(&self, proposal: Proposal) -> Result<(), ProposalSubmitError> {
@@ -1008,6 +1163,20 @@ impl RosCallbackHandle {
             }
         }
     }
+}
+
+fn publish_latest<T>(
+    publisher: &LatestPublisher<T>,
+    sequence: Sequence,
+    at: MonotonicNanos,
+    value: T,
+) -> Result<(), ObservationSubmitError<T>> {
+    publisher
+        .publish(Stamped::new(at, sequence, value))
+        .map(|_| ())
+        .map_err(|PublishError::SequenceNotIncreasing(value)| {
+            ObservationSubmitError::OutOfOrder(Box::new(value))
+        })
 }
 
 fn header<F>(
@@ -1146,7 +1315,20 @@ pub fn precision_from_covariance(variance: f64) -> Result<Precision, ConversionE
 
 #[cfg(test)]
 mod tests {
-    use leash_core::{ProducerEpoch, Sequence};
+    use std::{
+        fmt,
+        sync::{Arc, Mutex},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use leash_core::{
+        Authorized, Clock, ControlKernel, ControlKernelConfig, DifferentialDrive, ProducerEpoch,
+        Sequence,
+    };
+    use leash_runtime::{
+        ActuationAcknowledgement, ActuationPort, CpuSafetySupervisor, SafetyKind, SupervisorConfig,
+    };
 
     use super::*;
 
@@ -1181,6 +1363,65 @@ mod tests {
         assert!((actual.x.get() - expected.x.get()).abs() < 1e-12);
         assert!((actual.y.get() - expected.y.get()).abs() < 1e-12);
         assert!((actual.yaw.get() - expected.yaw.get()).abs() < 1e-12);
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestAck;
+
+    impl ActuationAcknowledgement for TestAck {
+        fn applied(&self) -> bool {
+            true
+        }
+
+        fn verified_zero(&self) -> bool {
+            true
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestPortError;
+
+    impl fmt::Display for TestPortError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("test port error")
+        }
+    }
+
+    struct TestPort {
+        safety: Arc<Mutex<Vec<SafetyKind>>>,
+    }
+
+    impl ActuationPort for TestPort {
+        type Acknowledgement = TestAck;
+        type Error = TestPortError;
+
+        fn submit_drive(
+            &mut self,
+            _command: Authorized<DifferentialDrive>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn request_safety(&mut self, kind: SafetyKind) -> Result<u64, Self::Error> {
+            let mut safety = self
+                .safety
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            safety.push(kind);
+            Ok(safety.len() as u64)
+        }
+
+        fn try_acknowledgement(&mut self) -> Result<Option<Self::Acknowledgement>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    struct TestClock;
+
+    impl Clock for TestClock {
+        fn now(&mut self) -> MonotonicNanos {
+            MonotonicNanos::new(100)
+        }
     }
 
     #[test]
@@ -1363,6 +1604,104 @@ mod tests {
             .readiness(MonotonicNanos::new(100)),
             Err(Nav2Unavailable::FutureScan)
         );
+    }
+
+    #[test]
+    fn nav2_lifecycle_faults_and_estop_request_bounded_zero_motion() {
+        let safety_requests = Arc::new(Mutex::new(Vec::new()));
+        let supervisor = CpuSafetySupervisor::spawn(
+            ControlKernel::new(ControlKernelConfig {
+                command_epoch: ProducerEpoch::new(31).unwrap(),
+                evidence_epoch: ProducerEpoch::new(32).unwrap(),
+                deadman: DurationNanos::from_millis(100).unwrap(),
+            }),
+            TestPort {
+                safety: Arc::clone(&safety_requests),
+            },
+            Box::new(TestClock),
+            SupervisorConfig::default(),
+        )
+        .unwrap();
+        let handle = supervisor.handle();
+        let dispatcher = Nav2ProposalDispatcher::new(handle.clone());
+        let now = MonotonicNanos::new(100);
+        let fresh = Nav2SourceState {
+            connected: true,
+            goal_active: true,
+            last_localization: now,
+            last_scan: now,
+            maximum_age: DurationNanos::new(10),
+        };
+        assert!(dispatcher
+            .enforce_lifecycle(Nav2LifecycleEvent::State(fresh), now)
+            .unwrap()
+            .is_none());
+
+        let cases = [
+            (
+                Nav2LifecycleEvent::State(Nav2SourceState {
+                    last_localization: MonotonicNanos::new(80),
+                    ..fresh
+                }),
+                Nav2StopReason::SourceUnavailable(Nav2Unavailable::StaleLocalization),
+            ),
+            (
+                Nav2LifecycleEvent::State(Nav2SourceState {
+                    last_scan: MonotonicNanos::new(80),
+                    ..fresh
+                }),
+                Nav2StopReason::SourceUnavailable(Nav2Unavailable::StaleScan),
+            ),
+            (
+                Nav2LifecycleEvent::Restarted,
+                Nav2StopReason::SourceRestarted,
+            ),
+            (
+                Nav2LifecycleEvent::Partitioned,
+                Nav2StopReason::RosPartition,
+            ),
+            (
+                Nav2LifecycleEvent::Cancelled,
+                Nav2StopReason::ExplicitCancellation,
+            ),
+        ];
+        for (index, (event, expected_reason)) in cases.into_iter().enumerate() {
+            let started = Instant::now();
+            let result = dispatcher
+                .enforce_lifecycle(event, now)
+                .unwrap()
+                .expect("faulted lifecycle must request a stop");
+            assert!(matches!(
+                result,
+                Nav2DispatchAcceptance::SafetyStop { reason, .. } if reason == expected_reason
+            ));
+            wait_for_safety_count(&safety_requests, index + 1);
+            assert!(started.elapsed() < Duration::from_millis(50));
+        }
+        handle.estop().unwrap();
+        wait_for_safety_count(&safety_requests, 6);
+        let requests = safety_requests
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        assert_eq!(&requests[..5], &[SafetyKind::Stop; 5]);
+        assert_eq!(requests[5], SafetyKind::EStop);
+        drop(requests);
+        supervisor.shutdown();
+    }
+
+    fn wait_for_safety_count(safety: &Arc<Mutex<Vec<SafetyKind>>>, count: usize) {
+        for _ in 0..100 {
+            if safety
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .len()
+                >= count
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("safety request {count} did not reach the CPU actuator lane");
     }
 
     #[test]

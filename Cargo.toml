@@ -10,6 +10,7 @@ members = [
   "crates/leash-waveshare",
 ]
 resolver = "2"
+exclude = ["implementations/waveshare-ugv/ros2-native"]
 
 [package]
 name = "leash-harness"

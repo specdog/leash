@@ -1,0 +1,16 @@
+[package]
+name = "leash_ros2_native_node"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native rclrs ingress node for the Leash runtime"
+
+[[bin]]
+name = "leash_ros2_native_node"
+path = "src/main.rs"
+
+[dependencies]
+leash-core = { path = "../../../crates/leash-core" }
+leash-ros2 = { path = "../../../crates/leash-ros2", features = ["native-rclrs"] }
+
+[workspace]

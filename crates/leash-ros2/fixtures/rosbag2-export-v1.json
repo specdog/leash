@@ -1,0 +1,89 @@
+{
+  "schema_version": "leash.rosbag2-export.v1",
+  "recording": {
+    "storage_id": "sqlite3",
+    "serialization_format": "cdr",
+    "ros_distro": "humble",
+    "bag_name": "runtime-v2-boundary-fixture"
+  },
+  "clock": {
+    "monotonic_origin_ns": 1000,
+    "ros_origin_ns": 5000000000
+  },
+  "messages": [
+    {
+      "type": "sensor_msgs/msg/LaserScan",
+      "message": {
+        "header": { "sec": 5, "nanosec": 100, "frame_id": "laser" },
+        "angle_min": -1.0,
+        "angle_max": 1.0,
+        "angle_increment": 1.0,
+        "range_min": 0.5,
+        "range_max": 8.0,
+        "ranges": [1.0, null, 2.0]
+      }
+    },
+    {
+      "type": "sensor_msgs/msg/Imu",
+      "message": {
+        "header": { "sec": 5, "nanosec": 200, "frame_id": "imu_link" },
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "angular_velocity": [0.0, 0.0, 0.25],
+        "linear_acceleration": [0.0, 0.0, 1.0]
+      }
+    },
+    {
+      "type": "nav_msgs/msg/Odometry",
+      "message": {
+        "header": { "sec": 5, "nanosec": 300, "frame_id": "odom" },
+        "child_frame_id": "base_link",
+        "position": [1.0, 2.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0],
+        "linear_x": 0.5,
+        "angular_z": 0.25
+      }
+    },
+    {
+      "type": "geometry_msgs/msg/TransformStamped",
+      "message": {
+        "header": { "sec": 5, "nanosec": 400, "frame_id": "odom" },
+        "child_frame_id": "base_link",
+        "translation": [1.0, 2.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0]
+      }
+    },
+    {
+      "type": "nav_msgs/msg/OccupancyGrid",
+      "message": {
+        "header": { "sec": 5, "nanosec": 500, "frame_id": "map" },
+        "resolution": 0.5,
+        "width": 2,
+        "height": 2,
+        "origin": [0.0, 0.0, 0.0],
+        "origin_orientation": [0.0, 0.0, 0.0, 1.0],
+        "data": [0, 50, 100, -1]
+      }
+    },
+    {
+      "type": "geometry_msgs/msg/PoseStamped",
+      "message": {
+        "header": { "sec": 5, "nanosec": 600, "frame_id": "map" },
+        "position": [3.0, 4.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      }
+    },
+    {
+      "type": "nav_msgs/msg/Path",
+      "message": {
+        "header": { "sec": 5, "nanosec": 700, "frame_id": "map" },
+        "poses": [
+          {
+            "header": { "sec": 5, "nanosec": 700, "frame_id": "map" },
+            "position": [3.0, 4.0, 0.0],
+            "orientation": [0.0, 0.0, 0.0, 1.0]
+          }
+        ]
+      }
+    }
+  ]
+}
