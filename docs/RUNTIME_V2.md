@@ -60,6 +60,14 @@ to 50 ms on the host and prove it remains live while an unrelated compute or
 gateway worker is stalled. The configured production target remains 100 Hz;
 Jetson deadline and fault-injection evidence is still required before Gate C.
 
+The DIMOS-style domain vocabulary now lives in `leash-core`, not in transport
+JSON: versioned owned activities, states, intents, observations, framed beliefs,
+proposals, effects, and outcomes. Activity transitions are total and distinguish
+illegal edges from reversed time; beliefs carry source, typed frame, timestamp,
+precision, expiry, and non-empty evidence lineage; competing proposals resolve
+deterministically by freshness, priority, then typed ID. Drive remains only a
+proposal until the safety kernel produces the unforgeable `Authorized` wrapper.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed

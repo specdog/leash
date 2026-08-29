@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod activity;
 mod control;
 mod drive;
 mod error;
@@ -14,6 +15,13 @@ mod kernel;
 mod time;
 mod units;
 
+pub use activity::{
+    resolve_competing, Activity, ActivityEvent, ActivityFailure, ActivityId, ActivityKind,
+    ActivityState, ActivityTransitionError, Arbitration, Belief, BeliefError, BeliefId,
+    BeliefSource, ComputeIntent, Effect, Intent, Lineage, LineageError, Observation, Outcome,
+    Precision, Proposal, ProposalError, ProposalId, ProposalRejection, ACTIVITY_SCHEMA_VERSION,
+    BELIEF_SCHEMA_VERSION, PROPOSAL_SCHEMA_VERSION,
+};
 pub use control::{
     ActuatorSink, Clock, ComputeBackend, ComputeCompletion, ComputeRequest, Controller, Effects,
     SensorSource, Tick,
