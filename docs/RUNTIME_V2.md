@@ -40,6 +40,13 @@ target result are recorded in the CUDA artifact manifest. CUDA remains
 non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
 are complete.
 
+As of `a18d454`, `leash-cuda` is also the root application's only CUDA owner.
+The legacy inline voxel and cognition NVRTC paths were removed. The root startup
+probe and explicit parity projection use the same bounded prebuilt-fatbin
+executor, while measured voxel projection and cognition remain CPU-selected.
+The release crate tests, four-job executor probe, and root CUDA-selection test
+passed again on the Orin from an isolated `/tmp` source archive.
+
 The first bias-controlled end-to-end Orin benchmark is now checked in. It
 alternates 100 CPU and CUDA samples after parity and warm-up, measures first-use
 buffer growth separately, and includes queueing, both transfers,

@@ -26,3 +26,27 @@ fn compiled_artifact_is_the_checked_in_fatbin() {
     let checked_in = fs::read(root.join("kernels/prebuilt/sm_87/leash_kernels.fatbin")).unwrap();
     assert_eq!(leash_cuda::PREBUILT_FATBIN, checked_in);
 }
+
+#[test]
+fn production_sources_have_no_nvrtc_compilation_path() {
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace = crate_root.parent().unwrap().parent().unwrap();
+    let root_manifest = fs::read_to_string(workspace.join("Cargo.toml")).unwrap();
+    assert!(
+        !root_manifest.contains("cudarc ="),
+        "the application must use the single leash-cuda owner"
+    );
+    for source in [
+        workspace.join("src/cuda_voxel.rs"),
+        workspace.join("src/cognition.rs"),
+        crate_root.join("src/lib.rs"),
+        crate_root.join("src/device.rs"),
+    ] {
+        let text = fs::read_to_string(&source).unwrap();
+        assert!(
+            !text.contains("compile_ptx"),
+            "{} reintroduced startup NVRTC compilation",
+            source.display()
+        );
+    }
+}

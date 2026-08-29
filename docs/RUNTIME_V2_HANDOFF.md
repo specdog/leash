@@ -92,10 +92,14 @@ This used an in-process fake actuator. It is not physical stop-latency proof.
 
 ### CUDA result and current policy
 
-Production startup no longer needs NVRTC for the new executor. The checked
-fatbin contains native SM 8.7 code plus compute 8.7 PTX. The target Orin loaded
-it through `cudarc` 0.19.8 against CUDA 12.9, and all four kernels matched their
-CPU references.
+Production startup no longer has an NVRTC path. The checked fatbin contains
+native SM 8.7 code plus compute 8.7 PTX. The target Orin loaded it through
+`cudarc` 0.19.8 against CUDA 12.9, and all four kernels matched their CPU
+references. Commit `a18d454` removed the legacy application's remaining inline
+voxel/cognition compilers, routed its probe through the single CUDA owner, and
+passed the release root selection test from isolated `/tmp` source. Source hash
+verification now canonicalizes LF/CRLF so the same artifact contract passes on
+Windows and aarch64 Linux.
 
 The bias-controlled end-to-end benchmark alternated 100 CPU and CUDA samples,
 recorded first-use buffer growth separately, and included queueing, transfer,
