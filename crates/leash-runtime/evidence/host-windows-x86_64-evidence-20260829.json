@@ -1,0 +1,42 @@
+{
+  "schema_version": "leash.evidence-benchmark.v1",
+  "recorded_at": "2026-08-29",
+  "implementation_base": "2adde43b58f7843769d0d9116d0c648f09e655c3",
+  "command": "cargo run --quiet --release -p leash-runtime --example evidence_bench -- --samples 1000",
+  "sampling": "alternating_order",
+  "host": {
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "architecture": "x86_64-pc-windows-msvc",
+    "cpu": "Intel(R) Core(TM) i9-14900KF",
+    "physical_cores": 24,
+    "logical_processors": 32,
+    "rustc": "1.94.1 (e408947bf 2026-03-25)",
+    "cargo": "1.94.1 (29ea6fb6a 2026-03-24)"
+  },
+  "decision_samples": 1000,
+  "stop_samples": 100,
+  "journal": {
+    "durable_records": 3202,
+    "records_per_second": 570776,
+    "normal_high_watermark": 2130,
+    "priority_high_watermark": 200,
+    "saturated": false,
+    "storage_full": false
+  },
+  "supervisor_evidence_records": 3202,
+  "supervisor_evidence_failures": 0,
+  "stop_latency_without_evidence_ns": {
+    "p50": 500,
+    "p95": 600,
+    "p99": 700,
+    "max": 5800
+  },
+  "stop_latency_with_evidence_ns": {
+    "p50": 500,
+    "p95": 700,
+    "p99": 1300,
+    "max": 2300
+  },
+  "stop_latency_impact_p99_ns": 600,
+  "scope": "In-process fake actuator software request latency only; not physical motor stop proof."
+}

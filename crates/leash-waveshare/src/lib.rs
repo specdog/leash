@@ -19,9 +19,10 @@ use leash_core::{
     Authorized, Clock, CommandId, DifferentialDrive, EvidenceId, MonotonicNanos, Sequence, Stamped,
 };
 use leash_runtime::{
-    bounded_lane, latest_slot, safety_mailbox, ActuationAcknowledgement, ActuationPort,
-    BoundedReceiver, BoundedSender, LaneSnapshot, LatestPublisher, LatestReader, OverflowPolicy,
-    SafetyKind, SafetyReceiver, SafetyRequestError, SafetySender, SafetySignal, SendError,
+    bounded_lane, latest_slot, safety_mailbox, ActuationAcknowledgement,
+    ActuationAcknowledgementOutcome, ActuationPort, BoundedReceiver, BoundedSender, LaneSnapshot,
+    LatestPublisher, LatestReader, OverflowPolicy, SafetyAcknowledgement, SafetyKind,
+    SafetyReceiver, SafetyRequestError, SafetySender, SafetySignal, SendError,
 };
 use serde_json::json;
 
@@ -491,11 +492,39 @@ impl ActuationAcknowledgement for CommandAck {
     fn verified_zero(&self) -> bool {
         self.verified_zero
     }
+
+    fn outcome(&self) -> ActuationAcknowledgementOutcome {
+        match self.outcome {
+            AckOutcome::Applied => ActuationAcknowledgementOutcome::Applied,
+            AckOutcome::SupersededBySafety => ActuationAcknowledgementOutcome::Superseded,
+            AckOutcome::EStopped | AckOutcome::Disconnected | AckOutcome::IoFailed => {
+                ActuationAcknowledgementOutcome::Failed
+            }
+        }
+    }
+
+    fn command_id(&self) -> Option<CommandId> {
+        Some(self.command_id)
+    }
+
+    fn evidence_id(&self) -> Option<EvidenceId> {
+        self.evidence_id
+    }
+
+    fn applied_sequence(&self) -> Option<u64> {
+        self.applied_sequence
+    }
+
+    fn acknowledged_at(&self) -> Option<MonotonicNanos> {
+        Some(self.at)
+    }
 }
 
 pub struct WaveshareActuationPort {
     handle: ControllerHandle,
     pending: VecDeque<AckTicket>,
+    seen_stop_request: u64,
+    seen_estop_request: u64,
 }
 
 impl WaveshareActuationPort {
@@ -503,6 +532,8 @@ impl WaveshareActuationPort {
         Self {
             handle,
             pending: VecDeque::new(),
+            seen_stop_request: 0,
+            seen_estop_request: 0,
         }
     }
 
@@ -542,6 +573,51 @@ impl ActuationPort for WaveshareActuationPort {
             }
             None => Ok(None),
         }
+    }
+
+    fn try_safety_acknowledgement(&mut self) -> Result<Option<SafetyAcknowledgement>, Self::Error> {
+        let status = self.handle.status();
+        if let Some(receipt) = status
+            .last_estop_receipt
+            .filter(|receipt| receipt.through_request_sequence > self.seen_estop_request)
+        {
+            let first_request_sequence = receipt
+                .first_request_sequence
+                .max(self.seen_estop_request.saturating_add(1));
+            self.seen_estop_request = receipt.through_request_sequence;
+            return Ok(Some(safety_acknowledgement(
+                receipt,
+                first_request_sequence,
+            )));
+        }
+        if let Some(receipt) = status
+            .last_stop_receipt
+            .filter(|receipt| receipt.through_request_sequence > self.seen_stop_request)
+        {
+            let first_request_sequence = receipt
+                .first_request_sequence
+                .max(self.seen_stop_request.saturating_add(1));
+            self.seen_stop_request = receipt.through_request_sequence;
+            return Ok(Some(safety_acknowledgement(
+                receipt,
+                first_request_sequence,
+            )));
+        }
+        Ok(None)
+    }
+}
+
+fn safety_acknowledgement(
+    receipt: SafetyReceipt,
+    first_request_sequence: u64,
+) -> SafetyAcknowledgement {
+    SafetyAcknowledgement {
+        kind: receipt.kind,
+        first_request_sequence,
+        through_request_sequence: receipt.through_request_sequence,
+        applied_sequence: Some(receipt.applied_sequence),
+        at: receipt.applied_at,
+        verified_zero: receipt.verified_zero,
     }
 }
 
@@ -665,7 +741,7 @@ fn run_owner(
                 }
                 SafetyKind::Stop => {
                     if let Some(estop) = *lock(&shared.last_estop_receipt) {
-                        *lock(&shared.last_stop_receipt) = Some(receipt_covered_by(signal, estop));
+                        record_safety_receipt(shared.as_ref(), receipt_covered_by(signal, estop));
                     } else {
                         pending_stop = Some(signal);
                     }
@@ -766,10 +842,34 @@ fn run_owner(
 }
 
 fn record_safety_receipt(shared: &SharedState, receipt: SafetyReceipt) {
-    match receipt.kind {
-        SafetyKind::Stop => *lock(&shared.last_stop_receipt) = Some(receipt),
-        SafetyKind::EStop => *lock(&shared.last_estop_receipt) = Some(receipt),
-    }
+    let target = match receipt.kind {
+        SafetyKind::Stop => &shared.last_stop_receipt,
+        SafetyKind::EStop => &shared.last_estop_receipt,
+    };
+    let mut stored = lock(target);
+    *stored = Some(match *stored {
+        Some(previous) => SafetyReceipt {
+            kind: receipt.kind,
+            first_request_sequence: previous
+                .first_request_sequence
+                .min(receipt.first_request_sequence),
+            through_request_sequence: previous
+                .through_request_sequence
+                .max(receipt.through_request_sequence),
+            coalesced: previous
+                .through_request_sequence
+                .max(receipt.through_request_sequence)
+                .saturating_sub(
+                    previous
+                        .first_request_sequence
+                        .min(receipt.first_request_sequence),
+                ),
+            applied_sequence: receipt.applied_sequence,
+            applied_at: receipt.applied_at,
+            verified_zero: previous.verified_zero && receipt.verified_zero,
+        },
+        None => receipt,
+    });
 }
 
 fn receipt_covered_by(signal: SafetySignal, applied: SafetyReceipt) -> SafetyReceipt {
@@ -1261,6 +1361,40 @@ mod tests {
             handle.submit_drive(authorized(3, 0.2, 0.2)),
             Err(SubmitError::EStopped)
         ));
+    }
+
+    #[test]
+    fn actuation_port_observes_cumulative_safety_receipt_ranges() {
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let owner = owner(transcript);
+        let handle = owner.handle();
+        wait_connected(&handle);
+        let mut port = WaveshareActuationPort::new(handle);
+        assert_eq!(port.request_safety(SafetyKind::Stop).unwrap(), 1);
+        for _ in 0..100 {
+            if port.handle.status().last_stop_receipt.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(port.request_safety(SafetyKind::Stop).unwrap(), 2);
+        for _ in 0..100 {
+            if port
+                .handle
+                .status()
+                .last_stop_receipt
+                .is_some_and(|receipt| receipt.through_request_sequence == 2)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let acknowledgement = port.try_safety_acknowledgement().unwrap().unwrap();
+        assert_eq!(acknowledgement.kind, SafetyKind::Stop);
+        assert_eq!(acknowledgement.first_request_sequence, 1);
+        assert_eq!(acknowledgement.through_request_sequence, 2);
+        assert!(acknowledgement.verified_zero);
+        assert_eq!(port.try_safety_acknowledgement().unwrap(), None);
     }
 
     #[test]

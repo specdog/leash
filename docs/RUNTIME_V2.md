@@ -294,6 +294,16 @@ Done when:
 - stop remains available under every policy denial;
 - fault-injection tests state exact stop deadlines and pass on the Jetson.
 
+Implementation status (2026-08-29): the host path now has an ordered,
+fixed-width, checksummed evidence journal; bounded normal and priority producer
+lanes; a dedicated persistence owner; fail-closed saturation and configured
+storage-full records; torn-tail recovery; controller acknowledgement identity;
+and tests for acceptance, denial, queue rejection, supersession, verified zero,
+failed acknowledgement, writer stall, full storage, and restart. See
+[`RUNTIME_V2_EVIDENCE.md`](RUNTIME_V2_EVIDENCE.md). The isolated Orin release
+tests and bias-controlled evidence throughput/stop-latency run pass; physical
+motor stop proof remains part of the later supervised deployment gate.
+
 ### RV2-07 - Model activities and beliefs as typed state machines
 
 Goal: give DIMOS-like behavior a Rust-native vocabulary instead of dynamic

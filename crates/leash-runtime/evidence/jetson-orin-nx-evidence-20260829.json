@@ -1,0 +1,56 @@
+{
+  "schema_version": "leash.evidence-benchmark.v1",
+  "recorded_at": "2026-08-29T12:16:31-04:00",
+  "implementation_base": "2adde43b58f7843769d0d9116d0c648f09e655c3",
+  "source_archive": {
+    "path": "/tmp/leash-evidence-bench-20260829-2adde43-alt.tar.gz",
+    "sha256": "89078e7db4ddaf0e07254c2bb131da859c9f5a05ca97e045fdb82b13587fa0e1"
+  },
+  "target_directory": "/tmp/leash-evidence-bench-20260829-2adde43-alt",
+  "command": "cargo run --quiet --release -p leash-runtime --example evidence_bench -- --samples 1000 --journal /tmp/leash-evidence-bench-20260829-2adde43-alt/jetson-evidence.journal",
+  "target": {
+    "model": "Jetson Orin NX",
+    "architecture": "aarch64",
+    "kernel": "Linux ubuntu 5.15.148-tegra #1 SMP PREEMPT Thu Sep 18 15:08:33 PDT 2025",
+    "l4t": "R36.4.7, GCID 42132812",
+    "power_mode": "10W",
+    "cpu": "6 x Cortex-A78AE, maximum 1510.4 MHz",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)"
+  },
+  "release_tests": {
+    "command": "cargo test --quiet --release -p leash-runtime --lib",
+    "passed": 24,
+    "failed": 0
+  },
+  "sampling": "alternating_order",
+  "decision_samples": 1000,
+  "stop_samples": 100,
+  "journal": {
+    "durable_records": 3202,
+    "records_per_second": 110293,
+    "normal_high_watermark": 259,
+    "priority_high_watermark": 132,
+    "saturated": false,
+    "storage_full": false,
+    "bytes": 384256,
+    "sha256": "32caf8cf6af9f4d3a23a5f27fba73c5bf5d10e582ca96ebb9b51ea1be76ff0a7"
+  },
+  "supervisor_evidence_records": 3202,
+  "supervisor_evidence_failures": 0,
+  "stop_latency_without_evidence_ns": {
+    "p50": 4928,
+    "p95": 7233,
+    "p99": 13152,
+    "max": 14848
+  },
+  "stop_latency_with_evidence_ns": {
+    "p50": 6464,
+    "p95": 10528,
+    "p99": 11073,
+    "max": 25120
+  },
+  "stop_latency_impact_p99_ns": -2079,
+  "fault_deadline_ns": 50000000,
+  "scope": "In-process fake actuator software request latency only; no serial device, motor command, live service, live binary, or live configuration was accessed or changed."
+}

@@ -2,11 +2,17 @@
 
 #![forbid(unsafe_code)]
 
+mod evidence;
 mod lane;
 mod latest;
 mod safety;
 mod supervisor;
 
+pub use evidence::{
+    read_evidence_records, AcknowledgementIdentity, AcknowledgementKind, EvidenceDecision,
+    EvidenceEnqueueError, EvidenceJournal, EvidenceJournalConfig, EvidenceJournalStatus,
+    EvidenceOpenError, EvidenceProducer, EvidenceRecord, EvidenceRecoveryState, EvidenceSource,
+};
 pub use lane::{
     bounded_lane, BoundedReceiver, BoundedSender, LaneCreateError, LaneSnapshot, OverflowPolicy,
     SendError, SendOutcome,
@@ -17,7 +23,8 @@ pub use safety::{
     SafetySender, SafetySignal,
 };
 pub use supervisor::{
-    ActuationAcknowledgement, ActuationPort, CpuSafetySupervisor, SupervisorConfig,
-    SupervisorEvent, SupervisorHandle, SupervisorMetrics, SupervisorStartError, SupervisorStatus,
-    SupervisorSubmitError, TransitionReceipt, TransitionTicket,
+    ActuationAcknowledgement, ActuationAcknowledgementOutcome, ActuationPort, CpuSafetySupervisor,
+    SafetyAcknowledgement, SupervisorConfig, SupervisorEvent, SupervisorHandle, SupervisorMetrics,
+    SupervisorStartError, SupervisorStatus, SupervisorSubmitError, TransitionReceipt,
+    TransitionTicket,
 };

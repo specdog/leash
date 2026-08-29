@@ -174,7 +174,7 @@ must remain green on developer machines and CI.
 
 ## Remaining work, in recommended order
 
-### 1. Make evidence lossless before broader integration
+### 1. Make evidence lossless before broader integration (completed after handoff)
 
 Issue: [RV2-06 / #198](https://github.com/specdog/leash/issues/198)
 
@@ -195,6 +195,12 @@ Definition of done for the next change:
 - Tests cover acceptance, denial, queue rejection, supersession, zero, failed
   acknowledgement, writer stall, full storage, and restart.
 - Record throughput and stop-latency impact on the Orin.
+
+Post-handoff result: implemented and verified on the host and isolated Orin
+source tree. The checked format, failure semantics, commands, and evidence are
+in [`docs/RUNTIME_V2_EVIDENCE.md`](RUNTIME_V2_EVIDENCE.md) and
+`crates/leash-runtime/evidence/*-evidence-20260829.json`. This remains software
+request-latency evidence with a fake actuator, not physical motor stop proof.
 
 ### 2. Switch legacy HTTP, MCP, and CLI behind the typed gateway
 
