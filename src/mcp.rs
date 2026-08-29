@@ -10,6 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     capability::{InvocationOrigin, SafetyClass},
+    gateway::{GatewayCommand, GatewayCommandResponse, TransportGateway},
     module::{ModuleState, StackBlueprintMetadata},
     runtime::Harness,
     types::{PatrolStrategy, SpatialMemoryKind, SpeedMode},
@@ -114,7 +115,7 @@ impl LeashMcp {
 
     #[tool(name = "health", description = "Read harness health and safety state")]
     pub async fn health(&self) -> Json<crate::types::Health> {
-        Json(self.harness.health())
+        Json(TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp).health())
     }
 
     #[tool(
@@ -122,7 +123,7 @@ impl LeashMcp {
         description = "List harness endpoints, MCP tools, and speed modes"
     )]
     pub async fn capabilities(&self) -> Json<crate::types::Capabilities> {
-        Json(self.harness.capabilities())
+        Json(TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp).capabilities())
     }
 
     #[tool(
@@ -130,7 +131,7 @@ impl LeashMcp {
         description = "List harness modules and stream metadata"
     )]
     pub async fn modules(&self) -> Json<crate::module::ModuleGraph> {
-        Json(self.harness.module_graph())
+        Json(TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp).modules())
     }
 
     #[tool(
@@ -138,7 +139,7 @@ impl LeashMcp {
         description = "Read the latest telemetry and sensor state"
     )]
     pub async fn observe(&self) -> Json<crate::types::TelemetryFrame> {
-        Json(self.harness.telemetry())
+        Json(TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp).observe())
     }
 
     #[tool(
@@ -149,19 +150,13 @@ impl LeashMcp {
         &self,
         params: Parameters<InvokeCapabilityParams>,
     ) -> Result<String, String> {
-        let mut args = serde_json::to_value(&params.0).map_err(|err| err.to_string())?;
-        let capability = args
+        let args = serde_json::to_value(&params.0).map_err(|err| err.to_string())?;
+        let _capability = args
             .get("capability")
             .and_then(|value| value.as_str())
             .ok_or("capability is required")?
             .to_string();
-        if let Some(object) = args.as_object_mut() {
-            object.remove("capability");
-        }
-        let value = self
-            .harness
-            .capability_registry()
-            .invoke_value_with_origin(&capability, args, InvocationOrigin::Mcp)
+        let value = invoke_capability_value_with_origin(&self.harness, args, InvocationOrigin::Mcp)
             .map_err(|err| err.to_string())?;
         serde_json::to_string_pretty(&value).map_err(|err| err.to_string())
     }
@@ -171,14 +166,13 @@ impl LeashMcp {
         description = "Send a non-latching zero-speed motor stop"
     )]
     pub async fn stop(&self) -> Result<Json<crate::types::DriveOutcome>, String> {
-        let value = self
-            .harness
-            .capability_registry()
-            .invoke_value_with_origin("stop", serde_json::json!({}), InvocationOrigin::Mcp)
+        let response = TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp)
+            .execute(GatewayCommand::Stop)
             .map_err(|err| err.to_string())?;
-        serde_json::from_value(value)
-            .map(Json)
-            .map_err(|err| err.to_string())
+        match response {
+            GatewayCommandResponse::Drive(outcome) => Ok(Json(outcome)),
+            _ => Err("typed stop returned the wrong response variant".to_string()),
+        }
     }
 
     #[tool(
@@ -186,9 +180,8 @@ impl LeashMcp {
         description = "Latch emergency stop until estop_reset is invoked"
     )]
     pub async fn estop(&self) -> Result<String, String> {
-        self.harness
-            .capability_registry()
-            .invoke_value_with_origin("estop", serde_json::json!({}), InvocationOrigin::Mcp)
+        TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp)
+            .execute(GatewayCommand::EStop)
             .map_err(|err| err.to_string())?;
         Ok("estop latched".to_string())
     }
@@ -198,14 +191,9 @@ impl LeashMcp {
         description = "Capture a deterministic frame or physical adapter capture metadata"
     )]
     pub async fn capture(&self) -> Result<Json<crate::types::CaptureResult>, String> {
-        let value = self
-            .harness
-            .capability_registry()
-            .invoke_value_with_origin("capture", serde_json::json!({}), InvocationOrigin::Mcp)
-            .map_err(|err| err.to_string())?;
-        serde_json::from_value(value)
-            .map(Json)
-            .map_err(|err| err.to_string())
+        Ok(Json(
+            TransportGateway::new(self.harness.clone(), InvocationOrigin::Mcp).capture(),
+        ))
     }
 
     #[tool(
@@ -428,7 +416,8 @@ pub fn protocol_tool_list() -> McpProtocolToolList {
 }
 
 pub fn status(harness: &Harness, transport: &str) -> McpStatus {
-    let health = harness.health();
+    let gateway = TransportGateway::new(harness.clone(), InvocationOrigin::Mcp);
+    let health = gateway.health();
     let modules_healthy = health.ok;
     let module_count = health.modules.len();
     McpStatus {
@@ -446,7 +435,7 @@ pub fn status(harness: &Harness, transport: &str) -> McpStatus {
 
 pub fn module_tool_map(harness: &Harness) -> McpModuleToolMap {
     let tools = tool_descriptors();
-    let graph = harness.module_graph();
+    let graph = TransportGateway::new(harness.clone(), InvocationOrigin::Mcp).modules();
     let modules = graph
         .modules
         .into_iter()
@@ -523,38 +512,37 @@ pub fn call_tool_value_with_origin(
     match canonical_tool_name(name) {
         "health" => {
             ensure_no_args(args)?;
-            serde_json::to_value(harness.health()).map_err(Into::into)
+            serde_json::to_value(TransportGateway::new(harness.clone(), origin).health())
+                .map_err(Into::into)
         }
         "capabilities" => {
             ensure_no_args(args)?;
-            serde_json::to_value(harness.capabilities()).map_err(Into::into)
+            serde_json::to_value(TransportGateway::new(harness.clone(), origin).capabilities())
+                .map_err(Into::into)
         }
         "modules" => {
             ensure_no_args(args)?;
-            serde_json::to_value(harness.module_graph()).map_err(Into::into)
+            serde_json::to_value(TransportGateway::new(harness.clone(), origin).modules())
+                .map_err(Into::into)
         }
         "observe" => {
             ensure_no_args(args)?;
-            serde_json::to_value(harness.telemetry()).map_err(Into::into)
+            serde_json::to_value(TransportGateway::new(harness.clone(), origin).observe())
+                .map_err(Into::into)
         }
         "invoke_capability" => invoke_capability_value_with_origin(harness, args, origin),
         "stop" => {
             ensure_no_args(args)?;
-            harness
-                .capability_registry()
-                .invoke_value_with_origin("stop", json!({}), origin)
+            execute_gateway_command(harness, origin, GatewayCommand::Stop)
         }
         "estop" => {
             ensure_no_args(args)?;
-            harness
-                .capability_registry()
-                .invoke_value_with_origin("estop", json!({}), origin)
+            execute_gateway_command(harness, origin, GatewayCommand::EStop)
         }
         "capture" => {
             ensure_no_args(args)?;
-            harness
-                .capability_registry()
-                .invoke_value_with_origin("capture", json!({}), origin)
+            serde_json::to_value(TransportGateway::new(harness.clone(), origin).capture())
+                .map_err(Into::into)
         }
         "cognition_status" => {
             ensure_no_args(args)?;
@@ -577,6 +565,9 @@ fn invoke_capability_value_with_origin(
     args: Value,
     origin: InvocationOrigin,
 ) -> Result<Value> {
+    if let Some(command) = gateway_command_at_edge(capability_name(&args)?, &args)? {
+        return execute_gateway_command(harness, origin, command);
+    }
     let mut args = args_object(args)?;
     let capability = args
         .remove("capability")
@@ -585,6 +576,112 @@ fn invoke_capability_value_with_origin(
     harness
         .capability_registry()
         .invoke_value_with_origin(&capability, Value::Object(args), origin)
+}
+
+fn capability_name(args: &Value) -> Result<&str> {
+    args.as_object()
+        .and_then(|args| args.get("capability"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("capability is required"))
+}
+
+fn execute_gateway_command(
+    harness: &Harness,
+    origin: InvocationOrigin,
+    command: GatewayCommand,
+) -> Result<Value> {
+    let response = TransportGateway::new(harness.clone(), origin).execute(command)?;
+    serde_json::to_value(response).map_err(Into::into)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorizeArgs {
+    capability: String,
+    token: String,
+    ttl_secs: Option<u64>,
+    speed_mode: Option<SpeedMode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DriveArgs {
+    capability: String,
+    token: Option<String>,
+    left: f64,
+    right: f64,
+    speed_mode: Option<SpeedMode>,
+    approval: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpeedModeArgs {
+    capability: String,
+    token: Option<String>,
+    speed_mode: SpeedMode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResetEStopArgs {
+    capability: String,
+    token: Option<String>,
+    approval: Option<bool>,
+}
+
+fn gateway_command_at_edge(name: &str, args: &Value) -> Result<Option<GatewayCommand>> {
+    let command = match name {
+        "authorize" => {
+            let args: AuthorizeArgs = serde_json::from_value(args.clone())?;
+            debug_assert_eq!(args.capability, "authorize");
+            GatewayCommand::Authorize {
+                token: args.token,
+                ttl_secs: args.ttl_secs,
+                speed_mode: args.speed_mode,
+            }
+        }
+        "drive" => {
+            let args: DriveArgs = serde_json::from_value(args.clone())?;
+            debug_assert_eq!(args.capability, "drive");
+            GatewayCommand::Drive {
+                token: args.token,
+                left: args.left,
+                right: args.right,
+                speed_mode: args.speed_mode,
+                approval: args.approval,
+            }
+        }
+        "speed_mode" => {
+            let args: SpeedModeArgs = serde_json::from_value(args.clone())?;
+            debug_assert_eq!(args.capability, "speed_mode");
+            GatewayCommand::SetSpeedMode {
+                token: args.token,
+                speed_mode: args.speed_mode,
+            }
+        }
+        "stop" | "estop" => {
+            let args = args_object(args.clone())?;
+            if args.keys().any(|key| key != "capability") {
+                bail!("{name} does not accept arguments");
+            }
+            if name == "stop" {
+                GatewayCommand::Stop
+            } else {
+                GatewayCommand::EStop
+            }
+        }
+        "estop_reset" => {
+            let args: ResetEStopArgs = serde_json::from_value(args.clone())?;
+            debug_assert_eq!(args.capability, "estop_reset");
+            GatewayCommand::ResetEStop {
+                token: args.token,
+                approval: args.approval,
+            }
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(command))
 }
 
 fn ensure_no_args(args: Value) -> Result<()> {
@@ -705,6 +802,29 @@ mod tests {
         let stop: DriveOutcome =
             serde_json::from_value(call_tool_value(&harness, "stop", json!({})).unwrap()).unwrap();
         assert!(stop.ok);
+    }
+
+    #[tokio::test]
+    async fn invoke_capability_control_calls_use_typed_edge_decoding() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let stop: DriveOutcome = serde_json::from_value(
+            call_tool_value(
+                &harness,
+                "invoke_capability",
+                json!({ "capability": "stop" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(stop.ok);
+
+        let error = call_tool_value(
+            &harness,
+            "invoke_capability",
+            json!({ "capability": "stop", "unexpected": true }),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("does not accept arguments"));
     }
 
     #[tokio::test]

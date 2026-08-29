@@ -72,6 +72,7 @@ sha2 = "0.10"
 tokio = { version = "1.43", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+leash-gateway = { path = "crates/leash-gateway", version = "0.1.0" }
 
 axum = { version = "0.7", optional = true, features = ["ws"] }
 futures-util = { version = "0.3", optional = true }

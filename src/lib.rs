@@ -17,6 +17,7 @@ mod cuda_cognition;
 #[cfg(feature = "cuda")]
 mod cuda_voxel;
 pub mod daemon;
+pub mod gateway;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod localization;
@@ -70,6 +71,10 @@ pub use cognition::{
 };
 pub use config::{AcceleratorBackend, AgentProvider, HarnessConfig, Profile};
 pub use daemon::{RunRecord, RunRegistry};
+pub use gateway::{
+    DryRunResponse, GatewayCommand, GatewayCommandResponse, GatewayQuery, GatewayQueryResponse,
+    TransportGateway,
+};
 pub use localization::{
     ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationApplyOutcome,
     LocalizationProvider, LocalizationProviderError, LocalizationProviderSnapshot,

@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use leash_harness::{
     adapter::waveshare_drive_values,
+    capability::InvocationOrigin,
+    gateway::{GatewayQuery, GatewayQueryResponse, TransportGateway},
     types::{AppliedActionEvidence, APPLIED_ACTION_SCHEMA_VERSION},
     Harness, HarnessConfig, ReplayRecording,
 };
@@ -45,20 +47,33 @@ async fn runtime_v1_public_shapes_are_reviewed_golden_contracts() {
     assert_eq!(fixture.format, "leash-runtime-v1-contract-shapes");
 
     let harness = Harness::new(HarnessConfig::default()).unwrap();
+    let gateway = TransportGateway::new(harness.clone(), InvocationOrigin::Runtime);
     assert_shape(
         &fixture,
         "health",
-        serde_json::to_value(harness.health()).unwrap(),
+        serde_json::to_value(match gateway.query(GatewayQuery::Health).unwrap() {
+            GatewayQueryResponse::Health(value) => value,
+            _ => unreachable!("health query response is typed"),
+        })
+        .unwrap(),
     );
     assert_shape(
         &fixture,
         "capabilities",
-        serde_json::to_value(harness.capabilities()).unwrap(),
+        serde_json::to_value(match gateway.query(GatewayQuery::Capabilities).unwrap() {
+            GatewayQueryResponse::Capabilities(value) => value,
+            _ => unreachable!("capabilities query response is typed"),
+        })
+        .unwrap(),
     );
     assert_shape(
         &fixture,
         "telemetry",
-        serde_json::to_value(harness.telemetry()).unwrap(),
+        serde_json::to_value(match gateway.query(GatewayQuery::Observe).unwrap() {
+            GatewayQueryResponse::Observe(value) => value,
+            _ => unreachable!("observe query response is typed"),
+        })
+        .unwrap(),
     );
     assert_shape(
         &fixture,

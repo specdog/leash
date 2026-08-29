@@ -112,13 +112,16 @@ stale evidence, e-stop, rejected and approved reset, explicit stop, and lease
 expiry. Every run verifies the final state digest, ordered effect digest, and
 per-event effect counts; the frozen digests match the core oracle exactly.
 
-`leash-gateway` now provides the common edge service for future HTTP, MCP, and
-CLI adapters. It strictly decodes owned DTOs, validates operator IDs and drive
+`leash-gateway` provides the common edge service for HTTP, MCP, and CLI
+adapters. It strictly decodes owned DTOs, validates operator IDs and drive
 ranges before constructing domain commands, waits on typed transition tickets
 with an explicit timeout, and renders stable effect DTOs. Stop and e-stop never
 enter that normal proposal lane; they acknowledge acceptance by the atomic
 safety mailbox immediately. The legacy surfaces retain their frozen wire
-contracts until they are switched to this service behind compatibility tests.
+contracts through `TransportGateway`: HTTP handlers and MCP call the same typed
+command/query facade, and local CLI calls use that MCP dispatcher. Edge-owned
+decoding rejects unknown control fields. The RV2-00 semantic fixture now runs
+its public health, capabilities, and telemetry contracts through the facade.
 
 The ROS-independent half of RV2-14 now lives in `leash-ros2`. It provides
 checked, bidirectional conversions for scans, IMU, planar odometry and

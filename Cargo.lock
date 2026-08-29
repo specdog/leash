@@ -1415,6 +1415,7 @@ dependencies = [
  "clap",
  "cudarc",
  "futures-util",
+ "leash-gateway",
  "parking_lot",
  "reqwest",
  "rmcp",

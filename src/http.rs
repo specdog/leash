@@ -45,6 +45,7 @@ use crate::agent_runtime::{
     CapabilityPermissions,
 };
 use crate::capability::{InvocationOrigin, SafetyClass};
+use crate::gateway::{GatewayCommand, TransportGateway};
 use crate::runtime::{
     CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
 };
@@ -380,11 +381,11 @@ pub fn mcp_router(harness: Harness) -> Router {
 }
 
 async fn health(State(harness): State<Harness>) -> Json<crate::types::Health> {
-    Json(harness.health())
+    Json(TransportGateway::new(harness, InvocationOrigin::Http).health())
 }
 
 async fn capabilities(State(harness): State<Harness>) -> Json<crate::types::Capabilities> {
-    Json(harness.capabilities())
+    Json(TransportGateway::new(harness, InvocationOrigin::Http).capabilities())
 }
 
 async fn action_evidence(
@@ -427,7 +428,7 @@ async fn patrol_stop(
 }
 
 async fn modules(State(harness): State<Harness>) -> Json<crate::module::ModuleGraph> {
-    Json(harness.module_graph())
+    Json(TransportGateway::new(harness, InvocationOrigin::Http).modules())
 }
 
 #[cfg(feature = "mcp")]
@@ -587,7 +588,7 @@ fn mcp_origin_allowed(headers: &HeaderMap) -> bool {
 }
 
 async fn telemetry(State(harness): State<Harness>) -> Json<crate::types::TelemetryFrame> {
-    Json(harness.telemetry())
+    Json(TransportGateway::new(harness, InvocationOrigin::Http).observe())
 }
 
 async fn compact_telemetry(State(harness): State<Harness>) -> Json<Value> {
@@ -2435,13 +2436,9 @@ fn html_response(body: impl IntoResponse) -> Response {
 }
 
 async fn capture(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "capture",
-            json!({}),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    Ok(Json(serde_json::to_value(
+        TransportGateway::new(harness, InvocationOrigin::Http).capture(),
+    )?))
 }
 
 async fn calibration_status(State(harness): State<Harness>) -> Json<CalibrationStatus> {
@@ -2472,52 +2469,42 @@ async fn pilot_authorize(
     State(harness): State<Harness>,
     Json(req): Json<PilotTokenReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "authorize",
-            json!({
-                "token": req.token,
-                "ttl_secs": req.ttl_secs,
-                "speed_mode": req.speed_mode,
-            }),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
+        GatewayCommand::Authorize {
+            token: req.token,
+            ttl_secs: req.ttl_secs,
+            speed_mode: req.speed_mode,
+        },
+    )?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn pilot_speed_mode(
     State(harness): State<Harness>,
     Json(req): Json<SpeedModeReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "speed_mode",
-            json!({
-                "token": req.token,
-                "speed_mode": req.speed_mode,
-            }),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
+        GatewayCommand::SetSpeedMode {
+            token: req.token,
+            speed_mode: req.speed_mode,
+        },
+    )?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn drive(
     State(harness): State<Harness>,
     Json(req): Json<DriveReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "drive",
-            json!({
-                "token": req.token,
-                "left": req.left,
-                "right": req.right,
-                "speed_mode": req.speed_mode,
-                "approval": req.approval,
-            }),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response =
+        TransportGateway::new(harness, InvocationOrigin::Http).execute(GatewayCommand::Drive {
+            token: req.token,
+            left: req.left,
+            right: req.right,
+            speed_mode: req.speed_mode,
+            approval: req.approval,
+        })?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn camera_aim(
@@ -2541,13 +2528,9 @@ async fn camera_aim(
 }
 
 async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "stop",
-            json!({}),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response =
+        TransportGateway::new(harness, InvocationOrigin::Http).execute(GatewayCommand::Stop)?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn motors_stop_verified(
@@ -2564,13 +2547,9 @@ async fn motors_stop_verified(
 }
 
 async fn estop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "estop",
-            json!({}),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response =
+        TransportGateway::new(harness, InvocationOrigin::Http).execute(GatewayCommand::EStop)?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn estop_reset(
@@ -2578,16 +2557,13 @@ async fn estop_reset(
     req: Option<Json<EstopResetReq>>,
 ) -> Result<Json<Value>, HttpError> {
     let req = req.map(|Json(req)| req).unwrap_or_default();
-    Ok(Json(
-        harness.capability_registry().invoke_value_with_origin(
-            "estop_reset",
-            json!({
-                "token": req.token,
-                "approval": req.approval,
-            }),
-            InvocationOrigin::Http,
-        )?,
-    ))
+    let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
+        GatewayCommand::ResetEStop {
+            token: req.token,
+            approval: req.approval,
+        },
+    )?;
+    Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn stream(State(harness): State<Harness>) -> Response {

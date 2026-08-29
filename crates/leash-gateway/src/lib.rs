@@ -112,7 +112,24 @@ impl fmt::Display for GatewayError {
 impl std::error::Error for GatewayError {}
 
 pub trait CommandService {
-    fn execute(&self, request: CommandRequest) -> Result<CommandResponse, GatewayError>;
+    type Request;
+    type Response;
+    type Error;
+
+    fn execute(&self, request: Self::Request) -> Result<Self::Response, Self::Error>;
+}
+
+/// Transport-neutral query half of a gateway service.
+///
+/// The associated types let compatibility surfaces retain their frozen wire
+/// contracts without introducing HTTP, MCP, CLI, or implementation-crate
+/// dependencies here.
+pub trait QueryService {
+    type Request;
+    type Response;
+    type Error;
+
+    fn query(&self, request: Self::Request) -> Result<Self::Response, Self::Error>;
 }
 
 #[derive(Clone)]
@@ -167,7 +184,11 @@ impl TypedCommandService {
 }
 
 impl CommandService for TypedCommandService {
-    fn execute(&self, request: CommandRequest) -> Result<CommandResponse, GatewayError> {
+    type Request = CommandRequest;
+    type Response = CommandResponse;
+    type Error = GatewayError;
+
+    fn execute(&self, request: Self::Request) -> Result<Self::Response, Self::Error> {
         match request {
             CommandRequest::Authorize {
                 operator,
@@ -442,16 +463,21 @@ mod tests {
     }
 
     #[test]
-    fn planner_cancellation_cannot_remove_an_accepted_estop() {
+    fn planner_cancellation_cannot_remove_an_accepted_safety_request() {
         let (service, port, _supervisor) = service();
+        service.execute(CommandRequest::Stop {}).unwrap();
         service.execute(CommandRequest::EStop {}).unwrap();
         let _ = service.execute(CommandRequest::CancelPlanner {});
         for _ in 0..100 {
-            if port.safety.lock().unwrap().contains(&SafetyKind::EStop) {
+            let safety = port.safety.lock().unwrap();
+            if safety.contains(&SafetyKind::Stop) && safety.contains(&SafetyKind::EStop) {
                 break;
             }
+            drop(safety);
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(port.safety.lock().unwrap().contains(&SafetyKind::EStop));
+        let safety = port.safety.lock().unwrap();
+        assert!(safety.contains(&SafetyKind::Stop));
+        assert!(safety.contains(&SafetyKind::EStop));
     }
 }
