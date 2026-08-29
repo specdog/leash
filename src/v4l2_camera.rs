@@ -1,4 +1,9 @@
-use std::{env, sync::mpsc as std_mpsc, thread, time::Duration};
+use std::{
+    env,
+    sync::mpsc as std_mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Context, Result};
 use axum::body::Bytes;
@@ -98,6 +103,9 @@ fn run_mjpeg_stream(
     };
 
     let mut announced_ready = false;
+    let requested_fps = camera_framerate().unwrap_or(DEFAULT_FRAMERATE).max(1);
+    let publish_interval = Duration::from_secs_f64(1.0 / f64::from(requested_fps));
+    let mut last_published = None::<Instant>;
     loop {
         let (frame, _) = match stream.next() {
             Ok(frame) => frame,
@@ -115,10 +123,16 @@ fn run_mjpeg_stream(
             return Err(anyhow!("V4L2 capture returned non-JPEG frame"));
         };
 
+        let captured_at = Instant::now();
+        if last_published.is_some_and(|instant| instant.elapsed() < publish_interval) {
+            continue;
+        }
+
         let chunk = multipart_jpeg_frame(jpeg);
         if sender.blocking_send(chunk).is_err() {
             return Ok(());
         }
+        last_published = Some(captured_at);
         if !announced_ready {
             announced_ready = true;
             let _ = ready_sender.send(Ok(()));

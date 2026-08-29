@@ -10,14 +10,14 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use parking_lot::{Mutex, RwLock};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::{sync::broadcast, time};
 use tracing::{debug, warn};
 
 #[cfg(feature = "waveshare-ugv")]
 use crate::waveshare_ugv::{
-    imu_with_freshness, read_base_telemetry_loop, scan_blocks_motion, spawn_ld06_reader,
+    imu_with_freshness, read_base_telemetry_loop, scan_blocks_drive, spawn_ld06_reader,
     with_freshness, BaseTelemetryUpdate, WaveshareSensorConfig, WaveshareUgvDriver,
 };
 
@@ -34,6 +34,10 @@ use crate::{
         CalibrationEnterRequest, CalibrationEnterResult, CalibrationLease, CalibrationStatus,
     },
     capability::{default_capability_descriptors, CapabilityRegistry},
+    cognition::{
+        CognitionBoundaryFrameV1, CognitionCheckpointV1, CognitionRuntime, CognitionSnapshotsV1,
+        CognitionStatusV1, COGNITION_CONTRACT_VERSION,
+    },
     config::{AcceleratorBackend, HarnessConfig, Profile},
     localization::{
         ExternalLocalizationProvider, InProcessLocalizationProvider, LocalizationProvider,
@@ -49,18 +53,20 @@ use crate::{
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
     types::{
-        AgentMessage, AgentModelResponse, BatteryStatus, CameraAimOutcome, CameraStatus,
-        Capabilities, CaptureResult, CommandOverlay, CommandStreamState, CostmapFrame,
-        DriveOutcome, Health, ImageObservation, ImuStatus, LocalizationFrame, LocalizationHealth,
-        LocalizationStatus, MapIdentity, MapMetadata, MotionEvent, MotionEventKind,
-        OccupancyGridFrame, OdometryStatus, OperatorTokenStatus, PatrolStatus, PatrolStrategy,
-        PatrolZoneList, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        PoseWithCovariance2d, RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState,
-        SavedWaypointList, SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame,
-        TelemetryStreamFrame, Twist2d, VerifiedZeroEvidence, VisionResult, VisualizationFrame,
-        VisualizationPath, VoxelCell, VoxelGridFrame, ZeroCommandReason, COST_FREE, COST_LETHAL,
-        LOCALIZATION_FRAME_VERSION, OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION,
-        VISUALIZATION_FRAME_VERSION, VOXEL_GRID_VERSION,
+        AgentMessage, AgentModelResponse, AppliedActionEvidence, AppliedActionEvidencePage,
+        BatteryStatus, CameraAimOutcome, CameraAimState, CameraStatus, Capabilities, CaptureResult,
+        CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, ImageObservation,
+        ImuStatus, LocalizationFrame, LocalizationHealth, LocalizationStatus, MapIdentity,
+        MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus,
+        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZoneList, PlannerGoal,
+        PlannerStatus, PointCloudMetadata, Pose2d, PoseWithCovariance2d, RangeScanStatus,
+        RawFrameStatus, ResourceSample, SafetyStreamState, SavedWaypointList, SensorSnapshot,
+        SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
+        VerifiedZeroEvidence, VisionResult, VisualizationFrame, VisualizationPath, VoxelCell,
+        VoxelGridFrame, ZeroCommandReason, APPLIED_ACTION_PAGE_SCHEMA_VERSION,
+        APPLIED_ACTION_SCHEMA_VERSION, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
+        OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
+        VOXEL_GRID_VERSION,
     },
 };
 
@@ -68,6 +74,13 @@ const AGENT_MESSAGE_LIMIT: usize = 128;
 const DASHBOARD_EVENT_LIMIT: usize = 64;
 const VERIFIED_ZERO_TIMEOUT_MS: u64 = 750;
 const VERIFIED_ZERO_POLL_MS: u64 = 5;
+const ACTION_EVIDENCE_HISTORY_CAPACITY: usize = 4096;
+const ACTION_EVIDENCE_HEARTBEAT_MS: u64 = 100;
+const ACTION_SAFETY_COLLISION_CLAMP: u32 = 1 << 0;
+const ACTION_SAFETY_SOFT_ODOMETRY_LIMIT: u32 = 1 << 1;
+const ACTION_SAFETY_ESTOP: u32 = 1 << 2;
+const ACTION_SAFETY_DEADMAN: u32 = 1 << 3;
+const ACTION_SAFETY_VERIFIED_ZERO: u32 = 1 << 4;
 const PLANNER_GRID_WIDTH: usize = 4;
 const PLANNER_GRID_HEIGHT: usize = 4;
 const PLANNER_GRID_CELLS: usize = PLANNER_GRID_WIDTH * PLANNER_GRID_HEIGHT;
@@ -246,12 +259,151 @@ struct CommandState {
     estop: bool,
     stopped_by_deadman: bool,
     soft_odometry_limited: bool,
+    camera_aim: Option<CameraAimState>,
 }
 
 #[derive(Debug, Default)]
 struct CommandIoState {
     sequence: u64,
     verified_zero_in_progress: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ActionCommandEvidence {
+    requested_left: f64,
+    requested_right: f64,
+    clamped_left: f64,
+    clamped_right: f64,
+    applied_left: f64,
+    applied_right: f64,
+    speed_scale: f64,
+    safety_flags: u32,
+    valid: bool,
+    armed: bool,
+    deadman_active: bool,
+    collision_clamped: bool,
+}
+
+impl ActionCommandEvidence {
+    fn stopped(speed_scale: f64, safety_flags: u32) -> Self {
+        Self {
+            requested_left: 0.0,
+            requested_right: 0.0,
+            clamped_left: 0.0,
+            clamped_right: 0.0,
+            applied_left: 0.0,
+            applied_right: 0.0,
+            speed_scale,
+            safety_flags,
+            valid: true,
+            armed: false,
+            deadman_active: safety_flags & ACTION_SAFETY_DEADMAN != 0,
+            collision_clamped: safety_flags & ACTION_SAFETY_COLLISION_CLAMP != 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ActionEvidenceState {
+    producer_epoch: u64,
+    next_sequence: u64,
+    interval_start_ns: u64,
+    current: ActionCommandEvidence,
+    history: VecDeque<AppliedActionEvidence>,
+}
+
+impl ActionEvidenceState {
+    fn new(producer_epoch: u64, speed_scale: f64) -> Self {
+        Self {
+            producer_epoch: producer_epoch.max(1),
+            next_sequence: 1,
+            interval_start_ns: now_ns().max(1),
+            current: ActionCommandEvidence::stopped(speed_scale, 0),
+            history: VecDeque::with_capacity(ACTION_EVIDENCE_HISTORY_CAPACITY),
+        }
+    }
+
+    fn seal(&mut self, interval_end_ns: u64) -> Option<AppliedActionEvidence> {
+        if interval_end_ns <= self.interval_start_ns {
+            return None;
+        }
+        let action_sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        let current = self.current;
+        let evidence = AppliedActionEvidence {
+            schema_version: APPLIED_ACTION_SCHEMA_VERSION.to_string(),
+            authority: "leash".to_string(),
+            producer_epoch: self.producer_epoch,
+            action_sequence,
+            interval_start_ns: self.interval_start_ns,
+            interval_end_ns,
+            requested_left: current.requested_left,
+            requested_right: current.requested_right,
+            clamped_left: current.clamped_left,
+            clamped_right: current.clamped_right,
+            applied_left: current.applied_left,
+            applied_right: current.applied_right,
+            speed_scale: current.speed_scale,
+            safety_flags: current.safety_flags,
+            valid: current.valid,
+            armed: current.armed,
+            deadman_active: current.deadman_active,
+            collision_clamped: current.collision_clamped,
+        };
+        if self.history.len() == ACTION_EVIDENCE_HISTORY_CAPACITY {
+            self.history.pop_front();
+        }
+        self.history.push_back(evidence.clone());
+        self.interval_start_ns = interval_end_ns;
+        Some(evidence)
+    }
+
+    fn transition(&mut self, at_ns: u64, next: ActionCommandEvidence) {
+        self.seal(at_ns);
+        self.current = next;
+        self.interval_start_ns = self.interval_start_ns.max(at_ns);
+    }
+
+    fn set_speed_scale(&mut self, at_ns: u64, speed_scale: f64) {
+        self.seal(at_ns);
+        self.current.speed_scale = speed_scale;
+        self.interval_start_ns = self.interval_start_ns.max(at_ns);
+    }
+
+    fn page(&self, after_sequence: u64, limit: usize) -> Result<AppliedActionEvidencePage> {
+        let oldest_sequence = self
+            .history
+            .front()
+            .map(|entry| entry.action_sequence)
+            .unwrap_or(0);
+        let latest_sequence = self
+            .history
+            .back()
+            .map(|entry| entry.action_sequence)
+            .unwrap_or(0);
+        if after_sequence != 0
+            && oldest_sequence != 0
+            && after_sequence.saturating_add(1) < oldest_sequence
+        {
+            return Err(anyhow!(
+                "applied-action history overrun: requested after {after_sequence}, oldest is {oldest_sequence}"
+            ));
+        }
+        let entries = self
+            .history
+            .iter()
+            .filter(|entry| entry.action_sequence > after_sequence)
+            .take(limit.clamp(1, 512))
+            .cloned()
+            .collect();
+        Ok(AppliedActionEvidencePage {
+            schema_version: APPLIED_ACTION_PAGE_SCHEMA_VERSION.to_string(),
+            producer_epoch: self.producer_epoch,
+            oldest_sequence,
+            latest_sequence,
+            entries,
+        })
+    }
 }
 
 #[cfg(feature = "physical-navigation")]
@@ -273,6 +425,7 @@ impl Default for CommandState {
             estop: false,
             stopped_by_deadman: false,
             soft_odometry_limited: false,
+            camera_aim: None,
         }
     }
 }
@@ -283,6 +436,12 @@ struct RawTelemetry {
     battery_pct: Option<f64>,
     odometry_left: Option<f64>,
     odometry_right: Option<f64>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_pose: Option<Pose2d>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_prev_left: Option<f64>,
+    #[cfg(feature = "waveshare-ugv")]
+    odometry_prev_right: Option<f64>,
     source: String,
     adapter_sample_sequence: u64,
     last_raw_frame_ms: Option<u128>,
@@ -299,6 +458,18 @@ impl RawTelemetry {
             battery_pct: battery_percent_from_voltage(12.3),
             odometry_left: Some(0.0),
             odometry_right: Some(0.0),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: Some(Pose2d {
+                ts_ms,
+                frame_id: "odom".to_string(),
+                x_m: 0.0,
+                y_m: 0.0,
+                yaw_rad: 0.0,
+            }),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: Some(0.0),
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: Some(0.0),
             source: "sim".to_string(),
             adapter_sample_sequence: 0,
             last_raw_frame_ms: Some(ts_ms),
@@ -314,6 +485,12 @@ impl RawTelemetry {
             battery_pct: None,
             odometry_left: None,
             odometry_right: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: None,
             source: source.to_string(),
             adapter_sample_sequence: 0,
             last_raw_frame_ms: None,
@@ -335,6 +512,12 @@ impl RawTelemetry {
             battery_pct: None,
             odometry_left: None,
             odometry_right: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_pose: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_left: None,
+            #[cfg(feature = "waveshare-ugv")]
+            odometry_prev_right: None,
             source: "replay".to_string(),
             adapter_sample_sequence: 0,
             last_raw_frame_ms: None,
@@ -358,6 +541,7 @@ pub struct Harness {
     driver: Arc<dyn RobotDriver>,
     command_io: Arc<Mutex<CommandIoState>>,
     command: Arc<Mutex<CommandState>>,
+    action_evidence: Arc<Mutex<ActionEvidenceState>>,
     sessions: Arc<Mutex<HashMap<String, PilotSession>>>,
     raw: Arc<RwLock<RawTelemetry>>,
     telemetry_tx: broadcast::Sender<TelemetryFrame>,
@@ -381,6 +565,7 @@ pub struct Harness {
     physical_navigation_lease: Arc<Mutex<Option<PhysicalNavigationLease>>>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
+    cognition: CognitionRuntime,
 }
 
 impl Harness {
@@ -485,12 +670,18 @@ impl Harness {
 
         let (telemetry_tx, _) = broadcast::channel(128);
         let stream_transport = new_stream_transport(config.stream_transport);
+        let action_producer_epoch = now_ns().saturating_add(instance_id).max(1);
+        let cognition = CognitionRuntime::new(&accelerator, &config.role);
         let harness = Self {
             config,
             started_at: Instant::now(),
             driver,
             command_io: Arc::new(Mutex::new(CommandIoState::default())),
             command: Arc::new(Mutex::new(CommandState::default())),
+            action_evidence: Arc::new(Mutex::new(ActionEvidenceState::new(
+                action_producer_epoch,
+                SpeedMode::default().cap(),
+            ))),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             raw: Arc::new(RwLock::new(raw)),
             telemetry_tx,
@@ -514,18 +705,43 @@ impl Harness {
             physical_navigation_lease: Arc::new(Mutex::new(None)),
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
+            cognition,
         };
         harness.spawn_deadman();
+        harness.spawn_action_evidence_loop();
         harness.spawn_planner_loop();
         harness.spawn_patrol_loop();
         #[cfg(feature = "waveshare-ugv")]
         harness.spawn_waveshare_telemetry();
         harness.spawn_telemetry_loop();
+        harness.spawn_cognition_loop();
         Ok(harness)
     }
 
     pub fn config(&self) -> &HarnessConfig {
         &self.config
+    }
+
+    pub fn applied_action_evidence(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> Result<AppliedActionEvidencePage> {
+        self.action_evidence.lock().page(after_sequence, limit)
+    }
+
+    fn seal_action_evidence(&self, at_ns: u64) {
+        self.action_evidence.lock().seal(at_ns);
+    }
+
+    fn spawn_action_evidence_loop(&self) {
+        let harness = self.clone();
+        tokio::spawn(async move {
+            loop {
+                time::sleep(Duration::from_millis(ACTION_EVIDENCE_HEARTBEAT_MS)).await;
+                harness.seal_action_evidence(now_ns());
+            }
+        });
     }
 
     pub fn submit_localization_update(&self, update: LocalizationProviderUpdate) -> Result<()> {
@@ -544,6 +760,37 @@ impl Harness {
 
     pub fn localization_provider_status(&self) -> LocalizationProviderStatus {
         self.localization_provider.snapshot(now_ms()).status
+    }
+
+    pub fn cognition_status(&self) -> CognitionStatusV1 {
+        let command = self.command.lock();
+        let zero_motion = command.left_cmd.abs() <= f64::EPSILON
+            && command.right_cmd.abs() <= f64::EPSILON
+            && command.active_session_id.is_none();
+        self.cognition.status(now_ms(), zero_motion)
+    }
+
+    pub fn cognition_snapshots(&self) -> CognitionSnapshotsV1 {
+        CognitionSnapshotsV1 {
+            schema_version: COGNITION_CONTRACT_VERSION.to_string(),
+            layers: self.cognition.snapshots(now_ms()),
+        }
+    }
+
+    pub fn cognition_boundary(&self) -> CognitionBoundaryFrameV1 {
+        self.cognition.boundary(now_ms())
+    }
+
+    pub fn cognition_checkpoint(&self) -> Result<CognitionCheckpointV1> {
+        self.cognition.checkpoint()
+    }
+
+    pub fn submit_cognition_boundary(&self, frame: CognitionBoundaryFrameV1) -> Result<()> {
+        self.cognition.submit_boundary(frame, now_ms())
+    }
+
+    pub fn subscribe_cognition(&self) -> broadcast::Receiver<CognitionBoundaryFrameV1> {
+        self.cognition.subscribe()
     }
 
     pub fn update_range_scan_status(&self, status: RangeScanStatus) -> Result<()> {
@@ -1315,6 +1562,14 @@ impl Harness {
                 "GET /health".to_string(),
                 "GET /capabilities".to_string(),
                 "GET /telemetry".to_string(),
+                "GET /action-evidence".to_string(),
+                "GET /evidence/action/applied".to_string(),
+                "GET /telemetry/compact".to_string(),
+                "GET /cognition/status".to_string(),
+                "GET /cognition/snapshot".to_string(),
+                "GET /events/cognition".to_string(),
+                "POST /cognition/boundary".to_string(),
+                "POST /cognition/checkpoint".to_string(),
                 "GET /localization".to_string(),
                 "POST /localization/update".to_string(),
                 "GET /events/telemetry".to_string(),
@@ -1326,6 +1581,10 @@ impl Harness {
                 "GET /camera/snapshot".to_string(),
                 "GET /camera/stream.mjpg".to_string(),
                 "GET /agent".to_string(),
+                "GET /agent/state".to_string(),
+                "POST /agent/run".to_string(),
+                "POST /agent/capability".to_string(),
+                "POST /agent/tasks/:name/stop".to_string(),
                 "GET /agent/messages".to_string(),
                 "POST /agent/messages".to_string(),
                 "POST /pilot/authorize".to_string(),
@@ -1349,6 +1608,9 @@ impl Harness {
                 "estop".to_string(),
                 "capture".to_string(),
                 "modules".to_string(),
+                "cognition_status".to_string(),
+                "cognition_snapshot".to_string(),
+                "cognition_checkpoint".to_string(),
             ],
             speed_modes: vec![SpeedMode::Low, SpeedMode::Medium, SpeedMode::High],
             accelerator: self.accelerator.clone(),
@@ -1416,7 +1678,7 @@ impl Harness {
             right_cmd: command.right_cmd,
             odometry_left: raw.odometry_left,
             odometry_right: raw.odometry_right,
-            odometry_pose: None,
+            odometry_pose: relative_odometry_pose(&raw),
             session_id: command.active_session_id.as_deref().map(operator_owner_id),
             deadman_ok: !command.stopped_by_deadman,
             estop: command.estop,
@@ -1440,6 +1702,27 @@ impl Harness {
             source: raw.source,
         };
         self.telemetry_with_vision(telemetry)
+    }
+
+    /// Lightweight sensor and pose evidence for high-cadence Qualia ingest.
+    ///
+    /// This intentionally excludes occupancy and voxel projection. The full
+    /// telemetry route remains the source for visualization surfaces, while
+    /// this path cannot synchronously launch CUDA work on every sensor poll.
+    pub fn qualia_inputs(&self) -> Value {
+        let now = now_ms();
+        #[cfg(feature = "waveshare-ugv")]
+        self.refresh_waveshare_sensor_freshness();
+        let raw = self.raw.read().clone();
+        let localization = self.localization_provider.snapshot(now);
+        json!({
+            "schema_version": "leash.telemetry.qualia-inputs.v1",
+            "ts_ms": now,
+            "sensors": sensor_snapshot(&raw),
+            "localization": localization.localization,
+            "localization_provider": localization.status,
+            "odometry_pose": relative_odometry_pose(&raw),
+        })
     }
 
     #[cfg(feature = "waveshare-ugv")]
@@ -1529,6 +1812,7 @@ impl Harness {
                 });
             }
         }
+        self.cognition.ingest_telemetry(&telemetry);
         telemetry
     }
 
@@ -1577,9 +1861,15 @@ impl Harness {
             .pose
             .as_ref()
             .map(|localized| localized.pose.clone())
+            .or_else(|| {
+                telemetry
+                    .odometry_pose
+                    .as_ref()
+                    .map(|odom| odom.pose.clone())
+            })
             .unwrap_or(Pose2d {
                 ts_ms: telemetry.ts_ms,
-                frame_id: "map".to_string(),
+                frame_id: "odom".to_string(),
                 x_m,
                 y_m: 0.0,
                 yaw_rad,
@@ -1783,7 +2073,8 @@ impl Harness {
         if let Err(error) = validation {
             self.clear_calibration_lease();
             self.sessions.lock().clear();
-            let _ = self.write_stop_command();
+            let speed_scale = self.command.lock().speed_mode.cap();
+            let _ = self.write_stop_command(ActionCommandEvidence::stopped(speed_scale, 0));
             let mut command = self.command.lock();
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
@@ -1794,8 +2085,14 @@ impl Harness {
         Ok(())
     }
 
-    fn write_drive_command(&self, left: f64, right: f64) -> Result<u64> {
+    fn write_drive_command(
+        &self,
+        left: f64,
+        right: f64,
+        next: ActionCommandEvidence,
+    ) -> Result<u64> {
         let mut io = self.command_io.lock();
+        let mut evidence = self.action_evidence.lock();
         if io.verified_zero_in_progress && (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
         {
             return Err(anyhow!(
@@ -1804,13 +2101,16 @@ impl Harness {
         }
         self.driver.drive(left, right)?;
         io.sequence = io.sequence.saturating_add(1);
+        evidence.transition(now_ns(), next);
         Ok(io.sequence)
     }
 
-    fn write_stop_command(&self) -> Result<u64> {
+    fn write_stop_command(&self, next: ActionCommandEvidence) -> Result<u64> {
         let mut io = self.command_io.lock();
+        let mut evidence = self.action_evidence.lock();
         self.driver.stop()?;
         io.sequence = io.sequence.saturating_add(1);
+        evidence.transition(now_ns(), next);
         Ok(io.sequence)
     }
 
@@ -1832,6 +2132,7 @@ impl Harness {
         );
         self.sessions.lock().clear();
         self.command.lock().active_session_id = None;
+        let speed_scale = self.command.lock().speed_mode.cap();
 
         let previous_adapter_sequence = self.raw.read().adapter_sample_sequence;
         let write_result = {
@@ -1849,6 +2150,13 @@ impl Harness {
                     }
                     Ok(()) => {
                         io.sequence = io.sequence.saturating_add(1);
+                        self.action_evidence.lock().transition(
+                            now_ns(),
+                            ActionCommandEvidence::stopped(
+                                speed_scale,
+                                ACTION_SAFETY_VERIFIED_ZERO,
+                            ),
+                        );
                         let command_sequence = io.sequence;
                         let write_completed_at_ms = now_ms();
                         match self.driver.request_telemetry() {
@@ -1932,8 +2240,8 @@ impl Harness {
                 && (command.left_cmd != 0.0 || command.right_cmd != 0.0)
         };
         if should_stop_previous_owner {
-            self.write_stop_command()?;
             let mut command = self.command.lock();
+            self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))?;
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
             command.last_cmd_at = None;
@@ -1977,7 +2285,11 @@ impl Harness {
 
     pub fn set_speed_mode(&self, token: Option<&str>, speed_mode: SpeedMode) -> Result<()> {
         self.validate_session(token)?;
-        self.command.lock().speed_mode = speed_mode;
+        let mut command = self.command.lock();
+        self.action_evidence
+            .lock()
+            .set_speed_scale(now_ns(), speed_mode.cap());
+        command.speed_mode = speed_mode;
         Ok(())
     }
 
@@ -1988,6 +2300,8 @@ impl Harness {
         right: f64,
         speed_mode: Option<SpeedMode>,
     ) -> Result<DriveOutcome> {
+        let requested_left = left;
+        let requested_right = right;
         let session = self.validate_session(token)?;
         let speed_mode = speed_mode.or(session.map(|session| session.speed_mode));
         if let Some(speed_mode) = speed_mode {
@@ -1997,9 +2311,9 @@ impl Harness {
 
         #[cfg(feature = "waveshare-ugv")]
         if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
-            && self.obstacle_blocks_motion()
+            && self.obstacle_blocks_drive(left, right)
         {
-            self.stop_for_obstacle()?;
+            self.stop_for_obstacle(requested_left, requested_right)?;
             return Err(anyhow!(
                 "drive blocked by the configured lidar collision threshold"
             ));
@@ -2019,7 +2333,29 @@ impl Harness {
             right = 0.0;
         }
 
-        self.write_drive_command(left, right)?;
+        let safety_flags = if command.soft_odometry_limited {
+            ACTION_SAFETY_SOFT_ODOMETRY_LIMIT
+        } else {
+            0
+        };
+        self.write_drive_command(
+            left,
+            right,
+            ActionCommandEvidence {
+                requested_left,
+                requested_right,
+                clamped_left: left,
+                clamped_right: right,
+                applied_left: left,
+                applied_right: right,
+                speed_scale: max_speed,
+                safety_flags,
+                valid: true,
+                armed: token.is_some(),
+                deadman_active: false,
+                collision_clamped: false,
+            },
+        )?;
         command.left_cmd = left;
         command.right_cmd = right;
         command.last_cmd_at = Some(Instant::now());
@@ -2042,7 +2378,7 @@ impl Harness {
     }
 
     #[cfg(feature = "waveshare-ugv")]
-    fn obstacle_blocks_motion(&self) -> bool {
+    fn obstacle_blocks_drive(&self, left: f64, right: f64) -> bool {
         if self.config.profile != Profile::WaveshareUgv {
             return false;
         }
@@ -2056,30 +2392,43 @@ impl Harness {
             return false;
         };
         let status = with_freshness(self.raw.read().range_scan.clone(), now_ms(), stale_after_ms);
-        scan_blocks_motion(&status, threshold_m)
+        scan_blocks_drive(&status, threshold_m, left, right)
     }
 
     #[cfg(feature = "waveshare-ugv")]
     fn enforce_obstacle_stop(&self) {
-        if !self.obstacle_blocks_motion() {
+        let (left, right) = {
+            let command = self.command.lock();
+            (command.left_cmd, command.right_cmd)
+        };
+        if (left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON)
+            || !self.obstacle_blocks_drive(left, right)
+        {
             return;
         }
-        let moving = {
-            let command = self.command.lock();
-            command.left_cmd.abs() > f64::EPSILON || command.right_cmd.abs() > f64::EPSILON
-        };
-        if moving {
-            if let Err(error) = self.stop_for_obstacle() {
-                warn!(?error, "lidar collision stop failed");
-            }
+        if let Err(error) = self.stop_for_obstacle(0.0, 0.0) {
+            warn!(?error, "lidar collision stop failed");
         }
     }
 
     #[cfg(feature = "waveshare-ugv")]
-    fn stop_for_obstacle(&self) -> Result<()> {
-        self.write_stop_command()?;
+    fn stop_for_obstacle(&self, requested_left: f64, requested_right: f64) -> Result<()> {
         {
             let mut command = self.command.lock();
+            self.write_stop_command(ActionCommandEvidence {
+                requested_left,
+                requested_right,
+                clamped_left: 0.0,
+                clamped_right: 0.0,
+                applied_left: 0.0,
+                applied_right: 0.0,
+                speed_scale: command.speed_mode.cap(),
+                safety_flags: ACTION_SAFETY_COLLISION_CLAMP,
+                valid: true,
+                armed: command.active_session_id.is_some(),
+                deadman_active: false,
+                collision_clamped: true,
+            })?;
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
             command.last_cmd_at = Some(Instant::now());
@@ -2119,6 +2468,14 @@ impl Harness {
         let speed = speed.unwrap_or(0);
         let accel = accel.unwrap_or(0);
         self.driver.aim_camera(pan_deg, tilt_deg, speed, accel)?;
+        self.command.lock().camera_aim = Some(CameraAimState {
+            pan_deg,
+            tilt_deg,
+            speed,
+            accel,
+            updated_at_ms: now_ms(),
+            source: "last-commanded".to_string(),
+        });
         Ok(CameraAimOutcome {
             ok: true,
             pan_deg,
@@ -2126,6 +2483,10 @@ impl Harness {
             speed,
             accel,
         })
+    }
+
+    pub fn camera_aim_state(&self) -> Option<CameraAimState> {
+        self.command.lock().camera_aim.clone()
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
@@ -2137,8 +2498,8 @@ impl Harness {
     }
 
     fn stop_without_planner_cancel(&self) -> Result<DriveOutcome> {
-        self.write_stop_command()?;
         let mut command = self.command.lock();
+        self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))?;
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
         command.last_cmd_at = Some(Instant::now());
@@ -2159,8 +2520,11 @@ impl Harness {
         self.clear_physical_navigation_lease();
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
-        self.write_stop_command()?;
         let mut command = self.command.lock();
+        self.write_stop_command(ActionCommandEvidence::stopped(
+            command.speed_mode.cap(),
+            ACTION_SAFETY_ESTOP,
+        ))?;
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
         command.estop = true;
@@ -2352,12 +2716,17 @@ impl Harness {
     }
 
     fn fail_physical_navigation(&self, status: &str, message: &str) {
-        let _ = self.write_stop_command();
-        {
+        let stop_result = {
             let mut command = self.command.lock();
-            command.left_cmd = 0.0;
-            command.right_cmd = 0.0;
-            command.last_cmd_at = Some(Instant::now());
+            self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))
+                .map(|_| {
+                    command.left_cmd = 0.0;
+                    command.right_cmd = 0.0;
+                    command.last_cmd_at = Some(Instant::now());
+                })
+        };
+        if let Err(error) = stop_result {
+            warn!(?error, "physical navigation stop failed");
         }
         self.clear_physical_navigation_lease();
         self.cancel_planner_state(status, message);
@@ -2557,6 +2926,10 @@ impl Harness {
     pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
         self.validate_session(token)?;
         let mut command = self.command.lock();
+        self.action_evidence.lock().transition(
+            now_ns(),
+            ActionCommandEvidence::stopped(command.speed_mode.cap(), 0),
+        );
         command.estop = false;
         command.stopped_by_deadman = false;
         Ok(())
@@ -2751,14 +3124,21 @@ impl Harness {
                     }
                 };
                 if should_stop {
-                    if let Err(err) = harness.write_stop_command() {
-                        warn!(?err, "deadman stop failed");
-                    }
                     let mut command = harness.command.lock();
-                    command.left_cmd = 0.0;
-                    command.right_cmd = 0.0;
-                    command.stopped_by_deadman = true;
+                    let stop_result = harness.write_stop_command(ActionCommandEvidence::stopped(
+                        command.speed_mode.cap(),
+                        ACTION_SAFETY_DEADMAN,
+                    ));
+                    if stop_result.is_ok() {
+                        command.left_cmd = 0.0;
+                        command.right_cmd = 0.0;
+                        command.stopped_by_deadman = true;
+                    }
                     drop(command);
+                    if let Err(err) = stop_result {
+                        warn!(?err, "deadman stop failed");
+                        continue;
+                    }
                     harness.clear_physical_navigation_lease();
                     harness
                         .cancel_planner_state("deadman", "planner movement cancelled by deadman");
@@ -2863,6 +3243,33 @@ impl Harness {
             }
         });
     }
+
+    fn spawn_cognition_loop(&self) {
+        let cognition = self.cognition.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(5));
+            loop {
+                interval.tick().await;
+                cognition.tick(now_ms());
+            }
+        });
+
+        let mut boundary_rx = self.cognition.subscribe();
+        let transport = self.stream_transport.clone();
+        tokio::spawn(async move {
+            loop {
+                match boundary_rx.recv().await {
+                    Ok(frame) => {
+                        if let Ok(payload) = serde_json::to_value(frame) {
+                            let _ = transport.publish("cognition", payload);
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
 }
 
 fn operator_owner_id(token: &str) -> String {
@@ -2883,12 +3290,87 @@ fn apply_waveshare_update(raw: &Arc<RwLock<RawTelemetry>>, update: BaseTelemetry
     if let Some(right_m) = update.odometry_right_m {
         next.odometry_right = Some(round3(right_m));
     }
+    if let (Some(left_m), Some(right_m)) = (update.odometry_left_m, update.odometry_right_m) {
+        integrate_odometry_pose(&mut next, left_m, right_m);
+    }
     if let Some(imu) = update.imu {
         next.imu = imu;
     }
     next.adapter_sample_sequence = next.adapter_sample_sequence.saturating_add(1);
     next.last_raw_frame_ms = Some(now_ms());
     next.last_raw_payload = Some(update.raw);
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn integrate_odometry_pose(raw: &mut RawTelemetry, left_m: f64, right_m: f64) {
+    let track_width_m: f64 = std::env::var("LEASH_UGV_WHEEL_TRACK_M")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.20_f64)
+        .max(0.01_f64);
+    let ts_ms = now_ms();
+    if raw.odometry_prev_left.is_none() || raw.odometry_prev_right.is_none() {
+        raw.odometry_prev_left = Some(left_m);
+        raw.odometry_prev_right = Some(right_m);
+        raw.odometry_pose = Some(Pose2d {
+            ts_ms,
+            frame_id: "odom".to_string(),
+            x_m: 0.0,
+            y_m: 0.0,
+            yaw_rad: 0.0,
+        });
+        return;
+    }
+    let prev_left = raw.odometry_prev_left.unwrap();
+    let prev_right = raw.odometry_prev_right.unwrap();
+    let delta_left = left_m - prev_left;
+    let delta_right = right_m - prev_right;
+    let delta_linear = (delta_left + delta_right) / 2.0;
+    let delta_yaw = (delta_right - delta_left) / track_width_m;
+    if let Some(pose) = raw.odometry_pose.as_mut() {
+        let half_yaw = pose.yaw_rad + delta_yaw / 2.0;
+        pose.x_m += delta_linear * half_yaw.cos();
+        pose.y_m += delta_linear * half_yaw.sin();
+        pose.yaw_rad += delta_yaw;
+        // Keep yaw in [-π, π] so it stays human-readable and avoids drift.
+        let two_pi = 2.0 * std::f64::consts::PI;
+        pose.yaw_rad =
+            (pose.yaw_rad + std::f64::consts::PI).rem_euclid(two_pi) - std::f64::consts::PI;
+        pose.ts_ms = ts_ms;
+    }
+    raw.odometry_prev_left = Some(left_m);
+    raw.odometry_prev_right = Some(right_m);
+}
+
+#[cfg(feature = "waveshare-ugv")]
+fn relative_odometry_pose(raw: &RawTelemetry) -> Option<PoseWithCovariance2d> {
+    let pose = raw.odometry_pose.clone()?;
+    let distance_m = raw
+        .odometry_left
+        .zip(raw.odometry_right)
+        .map(|(left, right)| ((left.abs() + right.abs()) * 0.5).max(0.0))
+        .unwrap_or_default();
+    let linear_variance = 0.01 + distance_m * 0.02;
+    let yaw_variance = 0.02 + distance_m * 0.04;
+    Some(PoseWithCovariance2d {
+        pose,
+        covariance: vec![
+            linear_variance,
+            0.0,
+            0.0,
+            0.0,
+            linear_variance,
+            0.0,
+            0.0,
+            0.0,
+            yaw_variance,
+        ],
+    })
+}
+
+#[cfg(not(feature = "waveshare-ugv"))]
+fn relative_odometry_pose(_raw: &RawTelemetry) -> Option<PoseWithCovariance2d> {
+    None
 }
 
 fn battery_percent_from_voltage(voltage: f64) -> Option<f64> {
@@ -3563,6 +4045,14 @@ pub fn now_ms() -> u128 {
         .as_millis()
 }
 
+fn now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time after unix epoch")
+        .as_nanos()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3681,6 +4171,15 @@ mod tests {
         assert_eq!(evidence.adapter_sample_sequence, 42);
         assert_eq!(evidence.statement, "zero command confirmed");
         assert!(driver.telemetry_requests.load(Ordering::Relaxed) >= 1);
+
+        harness.seal_action_evidence(now_ns());
+        let action_page = harness.applied_action_evidence(0, 64).unwrap();
+        assert!(action_page.entries.iter().any(|entry| {
+            entry.safety_flags & ACTION_SAFETY_VERIFIED_ZERO != 0
+                && entry.applied_left == 0.0
+                && entry.applied_right == 0.0
+                && entry.valid
+        }));
     }
 
     #[cfg(feature = "waveshare-ugv")]
@@ -3937,7 +4436,7 @@ mod tests {
         harness.drive(None, 0.1, 0.1, Some(SpeedMode::Low)).unwrap();
 
         let mut blocked = simulated_range_scan(now_ms());
-        blocked.sample.as_mut().unwrap().ranges_m[0] = Some(0.2);
+        blocked.sample.as_mut().unwrap().ranges_m[2] = Some(0.2);
         harness.update_range_scan_status(blocked).unwrap();
         harness.enforce_obstacle_stop();
 
@@ -3949,6 +4448,39 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("lidar collision threshold"));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_collision_gate_allows_escape_away_from_a_rear_obstacle() {
+        let (harness, commands) = waveshare_sensor_harness();
+        let mut rear_blocked = simulated_range_scan(now_ms());
+        let scan = rear_blocked.sample.as_mut().unwrap();
+        scan.angle_min_rad = -std::f64::consts::PI;
+        scan.angle_max_rad = std::f64::consts::PI;
+        scan.angle_increment_rad = std::f64::consts::FRAC_PI_2;
+        scan.ranges_m = vec![Some(0.2), Some(1.0), Some(1.0), Some(1.0), Some(0.2)];
+        scan.intensities = vec![Some(1.0); 5];
+        harness.update_range_scan_status(rear_blocked).unwrap();
+
+        let outcome = harness
+            .drive(None, 0.1, 0.1, Some(SpeedMode::Low))
+            .expect("forward escape should remain available");
+        assert_eq!((outcome.left, outcome.right), (0.1, 0.1));
+
+        let reverse_error = harness
+            .drive(None, -0.1, -0.1, Some(SpeedMode::Low))
+            .unwrap_err()
+            .to_string();
+        assert!(reverse_error.contains("lidar collision threshold"));
+        assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
+
+        let rotation_error = harness
+            .drive(None, -0.1, 0.1, Some(SpeedMode::Low))
+            .unwrap_err()
+            .to_string();
+        assert!(rotation_error.contains("lidar collision threshold"));
         assert_eq!(commands.lock().last(), Some(&(0.0, 0.0)));
     }
 
@@ -3983,6 +4515,130 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "waveshare-ugv")]
+    #[test]
+    fn waveshare_odometry_integrates_differential_drive_pose() {
+        let mut raw = RawTelemetry::physical("test");
+        integrate_odometry_pose(&mut raw, 0.0, 0.0);
+        let pose0 = raw.odometry_pose.clone().unwrap();
+        assert_eq!(pose0.x_m, 0.0);
+        assert_eq!(pose0.y_m, 0.0);
+        assert_eq!(pose0.yaw_rad, 0.0);
+
+        // Drive straight 0.1 m.
+        integrate_odometry_pose(&mut raw, 0.1, 0.1);
+        let pose1 = raw.odometry_pose.clone().unwrap();
+        assert!(
+            (pose1.x_m - 0.1).abs() < 1e-6,
+            "x after straight drive: {}",
+            pose1.x_m
+        );
+        assert!(pose1.y_m.abs() < 1e-6);
+        assert!(pose1.yaw_rad.abs() < 1e-6);
+
+        // Pivot in place: left -0.05 m, right +0.05 m with 0.20 m track -> yaw += 0.5 rad.
+        integrate_odometry_pose(&mut raw, 0.05, 0.15);
+        let pose2 = raw.odometry_pose.clone().unwrap();
+        assert!(
+            (pose2.yaw_rad - 0.5).abs() < 1e-6,
+            "yaw after pivot: {}",
+            pose2.yaw_rad
+        );
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[test]
+    fn waveshare_odometry_yaw_wraps_to_pi_range() {
+        let mut raw = RawTelemetry::physical("test");
+        // Initialize.
+        integrate_odometry_pose(&mut raw, 0.0, 0.0);
+        // Spin clockwise enough to cross -PI.
+        // With track 0.20, each (0, +0.4 m) update adds delta_yaw = 0.4 / 0.20 = 2.0 rad.
+        // Pass cumulative odometry, so each right reading grows.
+        integrate_odometry_pose(&mut raw, 0.0, 0.4); // yaw =  2.0
+        integrate_odometry_pose(&mut raw, 0.0, 0.8); // yaw =  4.0 -> wraps to -2.283...
+        integrate_odometry_pose(&mut raw, 0.0, 1.2); // yaw = -0.283...
+        let pose = raw.odometry_pose.clone().unwrap();
+        assert!(
+            pose.yaw_rad <= std::f64::consts::PI && pose.yaw_rad >= -std::f64::consts::PI,
+            "yaw should be wrapped to [-PI, PI]: {}",
+            pose.yaw_rad
+        );
+        // Expected: 3 updates of +2.0 rad = +6.0 rad -> wrapped to 6.0 - 2*π.
+        let expected = 6.0 - 2.0 * std::f64::consts::PI;
+        assert!(
+            (pose.yaw_rad - expected).abs() < 1e-5,
+            "yaw mismatch: got {} expected {}",
+            pose.yaw_rad,
+            expected
+        );
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    #[tokio::test]
+    async fn waveshare_keeps_odometry_relative_when_localization_is_stale() {
+        let (harness, _) = waveshare_sensor_harness();
+        let stale_ts = now_ms().saturating_sub(10_000);
+
+        // Seed a coherent but stale global SLAM snapshot.
+        let raw = RawTelemetry::sim();
+        let stale_localization = simulated_localization_frame(stale_ts, &raw);
+        let (map, occupancy_grid, costmap) = simulated_map_frames(stale_ts);
+        let voxel_grid = projected_voxel_grid(&occupancy_grid, 0.25);
+        harness
+            .localization_provider
+            .apply_at(
+                LocalizationProviderUpdate {
+                    version: crate::localization::LOCALIZATION_PROVIDER_UPDATE_VERSION.to_string(),
+                    provider_instance_id: "leash-runtime".to_string(),
+                    sequence: 100,
+                    localization: stale_localization,
+                    map,
+                    occupancy_grid,
+                    costmap,
+                    path: VisualizationPath::default(),
+                    voxel_grid,
+                },
+                stale_ts,
+            )
+            .unwrap();
+
+        // Inject fresh odometry: pivot left (left wheel 0.05 m, right wheel 0.15 m).
+        {
+            let mut raw = harness.raw.write();
+            raw.odometry_left = Some(0.0);
+            raw.odometry_right = Some(0.0);
+            integrate_odometry_pose(&mut raw, 0.0, 0.0);
+            integrate_odometry_pose(&mut raw, 0.05, 0.15);
+            raw.odometry_left = Some(0.05);
+            raw.odometry_right = Some(0.15);
+        }
+
+        let telemetry = harness.telemetry();
+        let global_pose = telemetry
+            .localization
+            .pose
+            .as_ref()
+            .expect("stale global pose remains visible as stale evidence");
+        assert_eq!(global_pose.pose.ts_ms, stale_ts);
+        assert_eq!(telemetry.localization.map.frame_id, "map");
+        assert_eq!(
+            telemetry.localization_provider.state,
+            crate::localization::LocalizationProviderState::Stale
+        );
+
+        let odometry = telemetry
+            .odometry_pose
+            .expect("wheel odometry is published separately");
+        assert_eq!(odometry.pose.frame_id, "odom");
+        assert!(
+            (odometry.pose.yaw_rad - 0.5).abs() < 1e-6,
+            "yaw should reflect relative wheel odometry pivot: {}",
+            odometry.pose.yaw_rad
+        );
+        assert!(odometry.covariance[0] > 0.01);
+    }
+
     #[tokio::test]
     async fn sim_harness_drives_and_deadman_stops() {
         let config = HarnessConfig {
@@ -4000,6 +4656,55 @@ mod tests {
         assert_eq!(telemetry.left_cmd, 0.0);
         assert_eq!(telemetry.right_cmd, 0.0);
         assert!(telemetry.stopped_by_deadman);
+
+        harness.seal_action_evidence(now_ns());
+        let page = harness.applied_action_evidence(0, 64).unwrap();
+        assert!(page.entries.iter().any(|entry| entry.requested_left == 1.0
+            && entry.requested_right == 1.0
+            && entry.applied_left == SpeedMode::Low.cap()
+            && entry.applied_right == SpeedMode::Low.cap()));
+        assert!(page.entries.iter().any(|entry| entry.deadman_active
+            && entry.safety_flags & ACTION_SAFETY_DEADMAN != 0
+            && entry.applied_left == 0.0
+            && entry.applied_right == 0.0));
+    }
+
+    #[tokio::test]
+    async fn applied_action_heartbeats_continuously_cover_zero_motion() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+
+        time::sleep(Duration::from_millis(260)).await;
+        let page = harness.applied_action_evidence(0, 64).unwrap();
+
+        assert!(page.entries.len() >= 2);
+        assert!(page.entries.iter().all(|entry| {
+            entry.schema_version == APPLIED_ACTION_SCHEMA_VERSION
+                && entry.authority == "leash"
+                && entry.producer_epoch == page.producer_epoch
+                && entry.interval_end_ns > entry.interval_start_ns
+                && entry.applied_left == 0.0
+                && entry.applied_right == 0.0
+                && entry.valid
+        }));
+        assert!(page.entries.windows(2).all(|pair| {
+            pair[0].action_sequence + 1 == pair[1].action_sequence
+                && pair[0].interval_end_ns == pair[1].interval_start_ns
+        }));
+    }
+
+    #[test]
+    fn applied_action_history_reports_overrun_instead_of_skipping() {
+        let mut state = ActionEvidenceState::new(7, SpeedMode::Low.cap());
+        let start = state.interval_start_ns;
+        for offset in 1..=(ACTION_EVIDENCE_HISTORY_CAPACITY as u64 + 2) {
+            state.seal(start + offset);
+        }
+
+        let error = state.page(1, 64).unwrap_err().to_string();
+        assert!(error.contains("history overrun"));
+        let page = state.page(0, 64).unwrap();
+        assert_eq!(page.entries.len(), 64);
+        assert_eq!(page.oldest_sequence, 3);
     }
 
     #[test]
@@ -4338,6 +5043,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn camera_aim_state_is_unknown_until_a_successful_command() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        assert_eq!(harness.camera_aim_state(), None);
+
+        harness
+            .camera_aim(None, 37.5, -12.0, Some(8), Some(4))
+            .unwrap();
+
+        let state = harness.camera_aim_state().expect("last commanded aim");
+        assert_eq!(state.pan_deg, 37.5);
+        assert_eq!(state.tilt_deg, -12.0);
+        assert_eq!(state.speed, 8);
+        assert_eq!(state.accel, 4);
+        assert_eq!(state.source, "last-commanded");
+        assert!(state.updated_at_ms > 0);
+    }
+
+    #[tokio::test]
     async fn resource_samples_are_disabled_by_default() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
 
@@ -4476,6 +5199,28 @@ mod tests {
                 |probe| probe.backend == crate::config::AcceleratorBackend::Cuda
                     && !probe.available
             ));
+    }
+
+    #[tokio::test]
+    async fn qualia_observation_endpoints_coexist_with_applied_action_evidence() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let endpoints = harness.capabilities().endpoints;
+
+        for required in [
+            "GET /telemetry/compact",
+            "GET /cognition/status",
+            "GET /cognition/snapshot",
+            "GET /events/cognition",
+            "POST /cognition/boundary",
+            "POST /cognition/checkpoint",
+            "GET /action-evidence",
+            "GET /evidence/action/applied",
+        ] {
+            assert!(
+                endpoints.iter().any(|endpoint| endpoint == required),
+                "missing required Qualia endpoint {required}"
+            );
+        }
     }
 
     #[tokio::test]
