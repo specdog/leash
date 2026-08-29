@@ -1,0 +1,98 @@
+{
+  "schema_version": "leash.runtime-v2-rollout-nomotion-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "thresholds_commit": "2e470b2f33a02f702e1277ccd80a8fcecd5e2c03",
+  "source_commit": "be7ee6d7ed03b836b8fe90b3ab5c58e617fce8fd",
+  "source_archive_sha256": "6c0c6a6b98a9431f0ec4d33029e6b163715eac9ee705f52b471c1e091a4ef804",
+  "vendor_archive_sha256": "43196bc1b4cd31d6acb23fb12b2043199032a350412d94a462f678ea90dc5a08",
+  "target": {
+    "architecture": "aarch64",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "rustc": "1.94.0",
+    "cargo": "1.94.0"
+  },
+  "commands": {
+    "semantic_shadow": "LEASH_STATE_DIR=/tmp/leash-be7ee6d-state cargo test --offline --release --test runtime_v2_semantic_diff -- --nocapture",
+    "cpu_soak": "cargo run --offline --quiet --release -p leash-runtime --example control_loop_bench -- --ticks 10000",
+    "evidence_soak": "cargo run --offline --quiet --release -p leash-runtime --example evidence_bench -- --samples 1000 --journal /tmp/leash-be7ee6d/evidence.journal",
+    "cuda_soak": "20 repetitions of cargo run --offline --quiet --release -p leash-cuda --features cuda --example jetson_gate_probe",
+    "resources": "tegrastats --interval 100"
+  },
+  "semantic_shadow": {
+    "fixture": "examples/contracts/runtime-v1-v2-shadow.json",
+    "events": 10,
+    "matches": 10,
+    "mismatches": 0,
+    "v1_profile": "sim",
+    "physical_actuation_enabled": false
+  },
+  "cpu_soak": {
+    "frequency_hz": 100,
+    "ticks": 10000,
+    "deadline_ns": 10000000,
+    "missed_deadlines": 0,
+    "jitter_ns": { "p50": 4779, "p95": 23798, "p99": 224316, "max": 695805 },
+    "transition_latency_ns": { "p50": 34785, "p95": 48642, "p99": 58306, "max": 727092 },
+    "proposal_queue": { "capacity": 32, "high_watermark": 1, "rejected": 0, "depth_at_end": 0 },
+    "result_sha256": "0147a398e0a81250dba2a40bb50c39ef55403e803faa3a6361884f0be59b366f"
+  },
+  "evidence_soak": {
+    "decision_samples": 1000,
+    "stop_samples": 100,
+    "durable_records": 3202,
+    "records_per_second": 111502,
+    "normal_high_watermark": 262,
+    "priority_high_watermark": 152,
+    "saturated": false,
+    "storage_full": false,
+    "supervisor_evidence_failures": 0,
+    "stop_latency_without_evidence_ns": { "p50": 4032, "p95": 7136, "p99": 31233, "max": 122051 },
+    "stop_latency_with_evidence_ns": { "p50": 6241, "p95": 9761, "p99": 11648, "max": 12864 },
+    "result_sha256": "df132a1434f67acb562b3bea8e54f9a61bcdc82b33ef6a90b6cca613cf679b2d",
+    "journal_sha256": "46c5793508a18d0f4eb61e108c81af586f3487476d4cf03ed6bbba970067f39f",
+    "writer_stall_fault_deadline_ns": 50000000,
+    "writer_stall_proof": "current workspace test stalled_evidence_writer_fails_closed_without_delaying_estop plus jetson-orin-nx-evidence-20260829.json"
+  },
+  "cuda_soak": {
+    "iterations": 20,
+    "shadow_comparisons": 960,
+    "parity_failures": 0,
+    "maximum_absolute_error": 0.0000030994415,
+    "maximum_relative_error": 0.0024548422,
+    "injected_faults": 80,
+    "cpu_fallbacks": 80,
+    "compute_deadline_ns": 100000000,
+    "maximum_fallback_ns": 60918327,
+    "safety_deadline_ns": 10000000,
+    "maximum_safety_estop_ns": 205509,
+    "result_sha256": "bc239e014341629c4127c4f65112f2f59807c50b61db03f19138630e6a7b625f"
+  },
+  "resources": {
+    "tegrastats_samples": 457,
+    "maximum_ram_mb": 2074,
+    "maximum_gpu_celsius": 54.187,
+    "maximum_vdd_in_mw": 7747,
+    "tegrastats_sha256": "64988890f250ab1912c474ef6a9e40f3fd562e15278cc8f2f743970afa2c8388"
+  },
+  "threshold_result": {
+    "semantic_shadow": "pass",
+    "cpu_soak": "pass",
+    "evidence_soak": "pass",
+    "cuda_soak": "pass",
+    "resources": "pass"
+  },
+  "safety": {
+    "actuator": "in_process_fake",
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_binary_sha256_after": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294",
+    "live_service_after": "active",
+    "live_source_modified": false,
+    "live_binary_modified": false,
+    "live_service_modified": false,
+    "physical_stop_latency_claimed": false,
+    "deployed": false,
+    "rolled_back": false
+  }
+}

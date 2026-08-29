@@ -82,8 +82,19 @@ that archive and compares the restored binary byte-for-byte.
 - The checked semantic fixture and test are
   `examples/contracts/runtime-v1-v2-shadow.json` and
   `tests/runtime_v2_semantic_diff.rs`.
-- Prior target CPU, evidence, CUDA parity/fault, temperature, and RAM artifacts
-  remain valid component evidence, but the final 10,000-tick and 20-iteration
-  RV2-16 soaks are recorded separately.
+- Thresholds were frozen in commit `2e470b2` before measurement. The exact
+  `be7ee6d` source archive then passed the 10-event v1/v2 shadow, the
+  10,000-tick CPU soak, the 1,000-decision evidence soak, and 20 CUDA gate
+  iterations on the Orin NX. CUDA covered 960 shadow comparisons and 80
+  injected faults. There were zero deadline misses, parity failures, evidence
+  failures, saturations, or rejected proposals.
+- CPU p99 jitter was 224,316 ns, CPU p99 transition latency was 58,306 ns,
+  evidence-on p99 stop-request latency was 11,648 ns, maximum CUDA fallback was
+  60,918,327 ns, and maximum concurrent E-stop request latency was 205,509 ns.
+  Peak RAM was 2,074 MiB and peak GPU temperature was 54.187 C.
+- Exact hashes and unrounded results are checked in at
+  `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`.
+  The live binary hash remained the captured baseline and the service remained
+  active after the tests.
 - Supervised physical testing, deployment, and rollback are pending explicit
   operator authorization.
