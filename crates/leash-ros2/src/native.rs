@@ -11,10 +11,10 @@ use std::{
 };
 
 use leash_core::{
-    ActivityId, Base, BeliefId, DurationNanos, Effect, Map, MonotonicNanos, Odom, ProducerEpoch,
+    ActivityId, Base, BeliefId, DurationNanos, Effect, MonotonicNanos, Odom, ProducerEpoch,
     Proposal, ProposalId, Sequence,
 };
-use rclrs::IntoPrimitiveOptions;
+use rclrs::{CreateBasicExecutor, IntoPrimitiveOptions};
 use ros_env::{builtin_interfaces, geometry_msgs, nav_msgs, sensor_msgs, std_msgs, tf2_msgs};
 
 use crate::{
@@ -70,9 +70,9 @@ pub fn imu_from_generated(
     imu_from_ros(
         &ImuMessage {
             header: header_from_generated(&message.header),
-            orientation: quaternion_from_generated(message.orientation),
-            angular_velocity: vector_from_generated(message.angular_velocity),
-            linear_acceleration: vector_from_generated(message.linear_acceleration),
+            orientation: quaternion_from_generated(&message.orientation),
+            angular_velocity: vector_from_generated(&message.angular_velocity),
+            linear_acceleration: vector_from_generated(&message.linear_acceleration),
         },
         clock,
     )
@@ -100,9 +100,9 @@ pub fn odometry_from_generated(
         &OdometryMessage {
             header: header_from_generated(&message.header),
             child_frame_id: message.child_frame_id.clone(),
-            position: point_from_generated(message.pose.pose.position),
-            orientation: quaternion_from_generated(message.pose.pose.orientation),
-            twist: twist_from_generated(message.twist.twist),
+            position: point_from_generated(&message.pose.pose.position),
+            orientation: quaternion_from_generated(&message.pose.pose.orientation),
+            twist: twist_from_generated(&message.twist.twist),
         },
         clock,
     )
@@ -132,8 +132,8 @@ pub fn transform_from_generated(
         &TransformStampedMessage {
             header: header_from_generated(&message.header),
             child_frame_id: message.child_frame_id.clone(),
-            translation: vector_from_generated(message.transform.translation),
-            rotation: quaternion_from_generated(message.transform.rotation),
+            translation: vector_from_generated(&message.transform.translation),
+            rotation: quaternion_from_generated(&message.transform.rotation),
         },
         clock,
     )
@@ -164,8 +164,8 @@ pub fn map_from_generated(
             resolution: message.info.resolution,
             width: message.info.width,
             height: message.info.height,
-            origin: point_from_generated(message.info.origin.position),
-            origin_orientation: quaternion_from_generated(message.info.origin.orientation),
+            origin: point_from_generated(&message.info.origin.position),
+            origin_orientation: quaternion_from_generated(&message.info.origin.orientation),
             data: message.data.clone(),
         },
         clock,
@@ -197,8 +197,8 @@ pub fn localization_from_generated(
     let (pose, at) = localization_from_ros(
         &PoseStampedMessage {
             header: header_from_generated(&message.header),
-            position: point_from_generated(message.pose.pose.position),
-            orientation: quaternion_from_generated(message.pose.pose.orientation),
+            position: point_from_generated(&message.pose.pose.position),
+            orientation: quaternion_from_generated(&message.pose.pose.orientation),
         },
         clock,
     )?;
@@ -231,8 +231,8 @@ pub fn path_from_generated(
                 .iter()
                 .map(|pose| PoseStampedMessage {
                     header: header_from_generated(&pose.header),
-                    position: point_from_generated(pose.pose.position),
-                    orientation: quaternion_from_generated(pose.pose.orientation),
+                    position: point_from_generated(&pose.pose.position),
+                    orientation: quaternion_from_generated(&pose.pose.orientation),
                 })
                 .collect(),
         },
@@ -281,7 +281,7 @@ fn header_to_generated(header: Header) -> std_msgs::msg::Header {
     }
 }
 
-fn vector_from_generated(vector: geometry_msgs::msg::Vector3) -> Vector3 {
+fn vector_from_generated(vector: &geometry_msgs::msg::Vector3) -> Vector3 {
     Vector3 {
         x: vector.x,
         y: vector.y,
@@ -297,7 +297,7 @@ fn vector_to_generated(vector: Vector3) -> geometry_msgs::msg::Vector3 {
     }
 }
 
-fn point_from_generated(point: geometry_msgs::msg::Point) -> Vector3 {
+fn point_from_generated(point: &geometry_msgs::msg::Point) -> Vector3 {
     Vector3 {
         x: point.x,
         y: point.y,
@@ -313,7 +313,7 @@ fn point_to_generated(point: Vector3) -> geometry_msgs::msg::Point {
     }
 }
 
-fn quaternion_from_generated(quaternion: geometry_msgs::msg::Quaternion) -> Quaternion {
+fn quaternion_from_generated(quaternion: &geometry_msgs::msg::Quaternion) -> Quaternion {
     Quaternion {
         x: quaternion.x,
         y: quaternion.y,
@@ -331,10 +331,10 @@ fn quaternion_to_generated(quaternion: Quaternion) -> geometry_msgs::msg::Quater
     }
 }
 
-fn twist_from_generated(twist: geometry_msgs::msg::Twist) -> Twist {
+fn twist_from_generated(twist: &geometry_msgs::msg::Twist) -> Twist {
     Twist {
-        linear: vector_from_generated(twist.linear),
-        angular: vector_from_generated(twist.angular),
+        linear: vector_from_generated(&twist.linear),
+        angular: vector_from_generated(&twist.angular),
     }
 }
 
@@ -575,7 +575,7 @@ impl NativeRosExecutor {
             .create_subscription::<geometry_msgs::msg::Twist, _>(
                 config.topics.velocity_proposal.as_str().keep_last(8),
                 |state: &mut CallbackState, message: geometry_msgs::msg::Twist| {
-                    state.submit_velocity(twist_from_generated(message));
+                    state.submit_velocity(twist_from_generated(&message));
                 },
             )
             .map_err(|error| NativeRosStartError::Rclrs(error.to_string()))?;
@@ -799,11 +799,14 @@ impl CallbackState {
     fn submit_goal(&mut self, message: geometry_msgs::msg::PoseStamped) {
         let dto = PoseStampedMessage {
             header: header_from_generated(&message.header),
-            position: point_from_generated(message.pose.position),
-            orientation: quaternion_from_generated(message.pose.orientation),
+            position: point_from_generated(&message.pose.position),
+            orientation: quaternion_from_generated(&message.pose.orientation),
         };
         let goal = navigation_goal_from_ros(self.config.activity_id, &dto, self.config.clock);
-        let Ok(NavigationGoal { pose, received_at }) = self.converted(goal) else {
+        let Ok(NavigationGoal {
+            pose, received_at, ..
+        }) = self.converted(goal)
+        else {
             return;
         };
         let Some(sequence) = take_sequence(&mut self.next_proposal, &self.metrics) else {
