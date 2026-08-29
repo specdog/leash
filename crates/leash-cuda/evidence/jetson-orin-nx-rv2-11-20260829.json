@@ -1,0 +1,179 @@
+{
+  "schema_version": "leash.cuda-benchmark-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "956b667",
+  "source_crate_archive_sha256": "a62a9d6f81b557893adef4c661272b9a2be415ff9c6eeab0d37e459a6ba7f01f",
+  "result_sha256": "266762d2be3534a0accbac47ab080dd3f7c7eb8274d7ad317a51430169eed6f8",
+  "tegrastats_log_sha256": "4ef2f2354898ec12d761a2a0c84171471d87957cbd351ef674a7573e824cd384",
+  "command": "cargo run --offline --quiet --release -p leash-cuda --features cuda --example jetson_benchmark -- --iterations 100",
+  "host": {
+    "target": "aarch64-unknown-linux-gnu",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "online_processors": 6,
+    "cuda_sdk": "12.9.0",
+    "compute_capability": "8.7",
+    "rustc": "1.94.1",
+    "cudarc": "0.19.8"
+  },
+  "artifact": {
+    "source_sha256_lf": "f98093654a249453de49584fcdac4d7d53f763700e2514868f4e56149d2202b0",
+    "fatbin_sha256": "839ac2f50841565cb0f7a64aa206bd223a71bbe5a7f0b46430e6506dfb77540f",
+    "fatbin_bytes": 36032,
+    "rebuilds_compared": 2,
+    "byte_identical": true,
+    "exported_kernels": 5,
+    "driver_probe_passed": true
+  },
+  "parity": {
+    "release_unit_tests_passed": 15,
+    "artifact_contract_tests_passed": 3,
+    "executor_jobs_passed": 208,
+    "fixed_inputs": true,
+    "empty_inputs": true,
+    "maximum_test_elements": 1000000,
+    "randomized_rounds_per_kernel": 32,
+    "nan_and_infinity_inputs": true,
+    "malformed_and_overflow_host_contracts": true,
+    "active_backend": "cuda",
+    "circuit_open": false
+  },
+  "method": {
+    "iterations": 100,
+    "warmup_iterations": 10,
+    "sample_order": "alternating CPU and CUDA",
+    "first_use_recorded_separately": true,
+    "included": [
+      "executor queue",
+      "host-to-device transfer",
+      "kernel",
+      "synchronization",
+      "device-to-host readback"
+    ],
+    "parity_checked_before_timing": true
+  },
+  "workloads": [
+    {
+      "name": "voxel_small",
+      "elements": 204800,
+      "first_ns": { "cpu": 614321, "cuda": 1928819 },
+      "cpu_ns": { "p50": 163045, "p95": 184293, "p99": 195141, "max": 200517 },
+      "cuda_ns": { "p50": 1045468, "p95": 1171839, "p99": 1218177, "max": 1253698 },
+      "cpu_over_cuda_speedup_milli": 155,
+      "decision": "cpu"
+    },
+    {
+      "name": "voxel_large",
+      "elements": 2560000,
+      "first_ns": { "cpu": 5712088, "cuda": 9420955 },
+      "cpu_ns": { "p50": 1241345, "p95": 1853905, "p99": 1892882, "max": 1893395 },
+      "cuda_ns": { "p50": 5495986, "p95": 5767833, "p99": 5845692, "max": 5909405 },
+      "cpu_over_cuda_speedup_milli": 225,
+      "decision": "cpu"
+    },
+    {
+      "name": "lidar_small",
+      "elements": 720,
+      "first_ns": { "cpu": 111971, "cuda": 792277 },
+      "cpu_ns": { "p50": 44097, "p95": 52641, "p99": 64129, "max": 70274 },
+      "cuda_ns": { "p50": 138564, "p95": 164196, "p99": 181860, "max": 187397 },
+      "cpu_over_cuda_speedup_milli": 318,
+      "decision": "cpu"
+    },
+    {
+      "name": "lidar_large",
+      "elements": 10000,
+      "first_ns": { "cpu": 379338, "cuda": 409130 },
+      "cpu_ns": { "p50": 357961, "p95": 382762, "p99": 397707, "max": 416588 },
+      "cuda_ns": { "p50": 217670, "p95": 235942, "p99": 268679, "max": 365802 },
+      "cpu_over_cuda_speedup_milli": 1644,
+      "decision": "cuda_candidate_after_shadow_and_failure_gate"
+    },
+    {
+      "name": "collision_small",
+      "elements": 720,
+      "first_ns": { "cpu": 141220, "cuda": 134692 },
+      "cpu_ns": { "p50": 86370, "p95": 93859, "p99": 121635, "max": 158884 },
+      "cuda_ns": { "p50": 109667, "p95": 115716, "p99": 129251, "max": 143268 },
+      "cpu_over_cuda_speedup_milli": 787,
+      "decision": "cpu"
+    },
+    {
+      "name": "collision_large",
+      "elements": 10000,
+      "first_ns": { "cpu": 921305, "cuda": 124707 },
+      "cpu_ns": { "p50": 852982, "p95": 873815, "p99": 877688, "max": 878423 },
+      "cuda_ns": { "p50": 132931, "p95": 697651, "p99": 903096, "max": 918553 },
+      "cpu_over_cuda_speedup_milli": 6416,
+      "decision": "advisory_only_tail_regression_requires_shadow"
+    },
+    {
+      "name": "spatial_combined_large",
+      "elements": 10000,
+      "first_ns": { "cpu": 1103454, "cuda": 860023 },
+      "cpu_ns": { "p50": 970394, "p95": 1058524, "p99": 1192288, "max": 1218432 },
+      "cuda_ns": { "p50": 354409, "p95": 852566, "p99": 978522, "max": 1064092 },
+      "cpu_over_cuda_speedup_milli": 2738,
+      "decision": "cuda_candidate_after_shadow_and_failure_gate"
+    },
+    {
+      "name": "camera_small",
+      "elements": 230400,
+      "first_ns": { "cpu": 712115, "cuda": 1249761 },
+      "cpu_ns": { "p50": 760500, "p95": 1184799, "p99": 1187552, "max": 1191840 },
+      "cuda_ns": { "p50": 616080, "p95": 658226, "p99": 704818, "max": 992026 },
+      "cpu_over_cuda_speedup_milli": 1234,
+      "decision": "cuda_candidate_only_with_gpu_provider_and_shadow"
+    },
+    {
+      "name": "camera_large",
+      "elements": 921600,
+      "first_ns": { "cpu": 4606043, "cuda": 2896589 },
+      "cpu_ns": { "p50": 4580602, "p95": 4621980, "p99": 4655004, "max": 4858785 },
+      "cuda_ns": { "p50": 2182971, "p95": 2327646, "p99": 2627494, "max": 2864076 },
+      "cpu_over_cuda_speedup_milli": 2098,
+      "decision": "cuda_candidate_only_with_gpu_provider_and_shadow"
+    },
+    {
+      "name": "cognition_small",
+      "elements": 4096,
+      "first_ns": { "cpu": 58050, "cuda": 538063 },
+      "cpu_ns": { "p50": 47170, "p95": 57090, "p99": 61378, "max": 64193 },
+      "cuda_ns": { "p50": 203846, "p95": 261479, "p99": 271336, "max": 282952 },
+      "cpu_over_cuda_speedup_milli": 231,
+      "decision": "cpu_until_rv2_12_resident_state"
+    },
+    {
+      "name": "cognition_large",
+      "elements": 65536,
+      "first_ns": { "cpu": 429163, "cuda": 1055068 },
+      "cpu_ns": { "p50": 425836, "p95": 446412, "p99": 451212, "max": 466636 },
+      "cuda_ns": { "p50": 836822, "p95": 1130686, "p99": 1244577, "max": 1255233 },
+      "cpu_over_cuda_speedup_milli": 508,
+      "decision": "cpu_until_rv2_12_resident_state"
+    }
+  ],
+  "cuda_status": {
+    "active": "cuda",
+    "degraded": false,
+    "circuit_open": false,
+    "completed": 1210,
+    "failed": 0,
+    "queue_high_watermark": 1
+  },
+  "tegrastats": {
+    "interval_ms": 100,
+    "samples": 150,
+    "maximum_ram_mb": 2202,
+    "maximum_gr3d_percent": 76,
+    "maximum_gpu_celsius": 52.468,
+    "maximum_vdd_in_mw": 7707
+  },
+  "safety": {
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_service_modified": false,
+    "collision_cuda_result_authority": "advisory_only",
+    "final_collision_stop_authority": "cpu_safety_supervisor"
+  }
+}

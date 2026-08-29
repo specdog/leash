@@ -31,7 +31,7 @@
   },
   "target_validation": {
     "date": "2026-08-29",
-    "latest_validation_commit": "a18d454",
+    "latest_validation_commit": "956b667",
     "device": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
     "architecture": "aarch64",
     "compute_capability": "8.7",

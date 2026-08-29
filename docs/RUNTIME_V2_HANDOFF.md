@@ -94,12 +94,19 @@ This used an in-process fake actuator. It is not physical stop-latency proof.
 
 Production startup no longer has an NVRTC path. The checked fatbin contains
 native SM 8.7 code plus compute 8.7 PTX. The target Orin loaded it through
-`cudarc` 0.19.8 against CUDA 12.9, and all four kernels matched their CPU
+`cudarc` 0.19.8 against CUDA 12.9, and all five kernels matched their CPU
 references. Commit `a18d454` removed the legacy application's remaining inline
 voxel/cognition compilers, routed its probe through the single CUDA owner, and
 passed the release root selection test from isolated `/tmp` source. Source hash
 verification now canonicalizes LF/CRLF so the same artifact contract passes on
 Windows and aarch64 Linux.
+
+Commit `956b667` adds advisory collision-sector reduction and a combined
+spatial job that uploads one dense lidar scan once for both kernels. Its exact
+archive passed 15 release unit tests, 3 artifact tests, and 208 fixed, empty,
+one-million-element, and randomized CPU/CUDA jobs on the Orin with the circuit
+closed. Two CUDA 12.9 builds were byte-identical; the five-symbol fatbin is
+36,032 bytes with SHA-256 `839ac2f5...b77540f`.
 
 The bias-controlled end-to-end benchmark alternated 100 CPU and CUDA samples,
 recorded first-use buffer growth separately, and included queueing, transfer,
@@ -107,20 +114,24 @@ kernel, synchronization, and readback.
 
 | Workload | Current backend decision | Reason |
 | --- | --- | --- |
-| Voxel, 204,800 outputs | CPU | CUDA p50 was 3.67 times slower |
-| Voxel, 2,560,000 outputs | CPU | CUDA p50 was 4.63 times slower |
-| Lidar, 720 points | CPU | CUDA p50 was 3.10 times slower |
-| Lidar, 10,000 points | CUDA candidate | 1.68x p50 speedup and better p95 |
-| Camera, 320x240 RGB | CPU | CUDA p50 won but p95 did not |
-| Camera, 640x480 RGB | CUDA candidate | 1.78x p50 speedup and better p95 |
+| Voxel, 204,800 outputs | CPU | CUDA p50 was 6.41 times slower |
+| Voxel, 2,560,000 outputs | CPU | CUDA p50 was 4.43 times slower |
+| Lidar, 720 points | CPU | CUDA p50 was 3.14 times slower |
+| Lidar, 10,000 points | CUDA candidate | 1.64x p50 speedup and better p95 |
+| Collision, 720 points | CPU | CUDA p50 was slower |
+| Collision, 10,000 points | Advisory only | 6.42x p50 but CUDA p99 regressed |
+| Combined spatial, 10,000 points | CUDA candidate | 2.74x p50 and better p95/p99 |
+| Camera, 320x240 RGB | CUDA candidate | 1.23x p50 and better p95/p99 in this run |
+| Camera, 640x480 RGB | CUDA candidate | 2.10x p50 and better p95/p99 |
 | Cognition, 4,096 values | CPU | Upload/readback dominates |
 | Cognition, 65,536 values | CPU | Upload/readback dominates |
 
-During the measured run, maximum GPU load was 75%, maximum GPU temperature was
-52.687 C, and maximum board input was 7,695 mW in 10 W mode. Exact evidence is
-in `crates/leash-cuda/evidence/jetson-orin-nx-20260829.json`.
+During the measured RV2-11 run, maximum GPU load was 76%, maximum GPU
+temperature was 52.468 C, and maximum board input was 7,707 mW in 10 W mode.
+Exact evidence is in
+`crates/leash-cuda/evidence/jetson-orin-nx-rv2-11-20260829.json`.
 
-CUDA is not authoritative. Large lidar and camera are candidates only after a
+CUDA is not authoritative. Large spatial/lidar and camera are candidates only after a
 startup probe, shadow comparison, and injected-failure fallback proof. The
 current cognition implementation must remain CPU until canonical state remains
 resident on the device instead of being uploaded and read back every tick.
@@ -279,7 +290,7 @@ handoff.
 - Temporary benchmark directories include
   `/tmp/leash-runtime-bench-74a585f`,
   `/tmp/leash-cuda-bench-2392d53`, and
-  `/tmp/leash-cuda-bench-64f8dbd`.
+  `/tmp/leash-cuda-bench-64f8dbd`, plus `/tmp/leash-956b667`.
 - No runtime v2 test opened the base serial port, sent a motor command, changed
   the live service, or modified its configuration.
 - Do not remove or replace the live binary/service without an exact backup,
@@ -303,6 +314,7 @@ handoff.
 - `0de4962` records Orin CPU timing.
 - `64f8dbd` removes ordering bias from the CUDA benchmark.
 - `4de7d8c` records CUDA break-even and tegrastats evidence.
+- `956b667` adds collision reduction, dense spatial reuse, and randomized parity.
 
 Issue comments with implementation evidence were added to #195, #196, #205,
 #206, and #207. Leave the CUDA authority, ROS target, physical safety, and

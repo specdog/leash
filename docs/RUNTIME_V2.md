@@ -16,10 +16,10 @@ The baseline was captured on 2026-08-29 and is recorded in
 - The imported deployed source passes 221 library tests and 4 CLI tests with all
   features enabled.
 - The checked-in external JSON schema is generated and current.
-- CUDA is present in the code, but it is not the live compute plane. Voxel
-  projection JIT-compiles one inline kernel with NVRTC and performs synchronous
-  allocation, upload, launch, and readback. Cognition runs the CPU update first,
-  then launches a GPU update whose state is not read back into canonical state.
+- CUDA is present in the code, but it is not the live compute plane. Production
+  startup loads one checked fatbin through a bounded single-owner executor; it
+  has no inline NVRTC path. Measured voxel projection and cognition remain
+  CPU-selected while large spatial and camera jobs await shadow/failure gates.
 - The live UGV reports `accelerator.active = none` and cognition `backend = cpu`,
   even though CUDA support is compiled and the Jetson exposes a GPU.
 - The target is an aarch64 Jetson Orin NX with CUDA 12.9 and compute capability
@@ -34,28 +34,33 @@ The first CUDA gate is now implemented in `leash-cuda`: production code loads a
 checked-in SM 8.7 fatbin with a compute 8.7 PTX fallback, and a bounded
 single-owner executor keeps its context and persistent device buffers private.
 On 2026-08-29, both the CUDA Driver API probe and the Rust `cudarc` executor
-probe passed all four kernels on the target Orin NX without opening the compute
-circuit or touching motion hardware. Artifact hashes, compiler flags, and the
-target result are recorded in the CUDA artifact manifest. CUDA remains
+probe passed all five kernels on the target Orin NX without opening the compute
+circuit or touching motion hardware. The exact RV2-11 commit then passed 208
+fixed, empty, maximum-size, and randomized CPU/CUDA parity jobs. Artifact
+hashes, compiler flags, and the target result are recorded in the CUDA artifact
+manifest. CUDA remains
 non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
 are complete.
 
-As of `a18d454`, `leash-cuda` is also the root application's only CUDA owner.
+As of `956b667`, `leash-cuda` is also the root application's only CUDA owner.
 The legacy inline voxel and cognition NVRTC paths were removed. The root startup
 probe and explicit parity projection use the same bounded prebuilt-fatbin
 executor, while measured voxel projection and cognition remain CPU-selected.
-The release crate tests, four-job executor probe, and root CUDA-selection test
-passed again on the Orin from an isolated `/tmp` source archive.
+The release crate tests, 208-job executor probe, and root CUDA-selection test
+passed on the Orin from isolated `/tmp` source archives.
 
 The first bias-controlled end-to-end Orin benchmark is now checked in. It
 alternates 100 CPU and CUDA samples after parity and warm-up, measures first-use
 buffer growth separately, and includes queueing, both transfers,
-synchronization, and readback. CUDA wins p50 and p95 for 10,000-point lidar
-(1.68x p50) and 640x480 camera normalization (1.78x p50). Voxel projection,
-720-point lidar, and both cognition sizes remain faster on CPU; the small camera
-case loses at p95 and also stays on CPU. Cognition cannot move until state is
-resident instead of uploaded and read back every tick. During the run the GPU
-reached 75%, 52.687 C, and 7.695 W maximum board input in 10 W mode. These are
+synchronization, and readback. At `956b667`, CUDA wins p50 and p95 for the
+combined 10,000-point lidar plus advisory collision job (2.74x p50),
+10,000-point lidar alone (1.64x p50), and both camera sizes. Voxel projection,
+720-point lidar, 720-point collision reduction, and both cognition sizes remain
+CPU-selected. Collision CUDA output is advisory and its standalone large p99
+regressed slightly, so it receives no safety authority. Cognition cannot move
+until state is resident instead of uploaded and read back every tick. During
+the run the GPU reached 76%, 52.468 C, and 7.707 W maximum board input in 10 W
+mode. These are
 selection inputs, not permission to make CUDA authoritative; startup probes,
 shadow comparison, and injected-failure fallback remain required.
 
@@ -388,6 +393,15 @@ Done when:
   handled without undefined behavior;
 - end-to-end benchmarks include transfers and synchronization;
 - the CPU safety supervisor independently computes the final collision stop.
+
+Result at `956b667`: the fifth prebuilt kernel performs advisory circular-sector
+minimum reduction; the combined spatial job uploads one dense scan once for
+both lidar transform and collision reduction. Scalar contracts define empty,
+non-finite, malformed, launch-limit, and overflow behavior. An exact-commit
+Orin probe passed 208 fixed/randomized parity jobs, including one-million-value
+cases. The measured result is in
+`crates/leash-cuda/evidence/jetson-orin-nx-rv2-11-20260829.json`. The existing
+CPU collision gate remains the only final collision-stop authority.
 
 ### RV2-12 - Make CUDA cognition authoritative
 
