@@ -30,6 +30,7 @@ macro_rules! finite_unit {
 
 finite_unit!(Meters, "meters");
 finite_unit!(MetersPerSecond, "meters per second");
+finite_unit!(MetersPerSecondSquared, "meters per second squared");
 finite_unit!(Radians, "radians");
 finite_unit!(RadiansPerSecond, "radians per second");
 

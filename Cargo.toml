@@ -5,6 +5,7 @@ members = [
   "crates/leash-runtime",
   "crates/leash-cuda",
   "crates/leash-gateway",
+  "crates/leash-ros2",
   "crates/leash-waveshare",
 ]
 resolver = "2"

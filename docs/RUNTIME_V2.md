@@ -76,6 +76,19 @@ enter that normal proposal lane; they acknowledge acceptance by the atomic
 safety mailbox immediately. The legacy surfaces retain their frozen wire
 contracts until they are switched to this service behind compatibility tests.
 
+The ROS-independent half of RV2-14 now lives in `leash-ros2`. It provides
+checked, bidirectional conversions for scans, IMU, planar odometry and
+transforms, occupancy maps, localization, and paths; explicit ROS/monotonic
+clock correlation; declared QoS; latest-value sensor queues; and bounded
+reject-newest proposal queues. Nav2 goals, feedback, cancellation, paths, and
+velocity commands have typed adapters. Velocity never becomes a motor command
+inside the ROS boundary: a dispatcher rechecks proposal time and Nav2 source
+freshness, then submits to the CPU safety supervisor. A host integration test
+proves the path from ROS velocity proposal through safety to the single
+Waveshare owner, and proves a disconnected Nav2 source requests verified zero.
+The actual `rclrs` executor and rosbag equivalence fixture still require a
+sourced ROS 2 target environment, so RV2-14 and RV2-15 remain open.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed

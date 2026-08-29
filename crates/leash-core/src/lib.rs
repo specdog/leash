@@ -37,4 +37,4 @@ pub use kernel::{
     ControlKernelConfig, KernelError, OperatorId, StopReason,
 };
 pub use time::{DurationNanos, MonotonicNanos, ProducerEpoch, Sequence, Stamped};
-pub use units::{Meters, MetersPerSecond, Radians, RadiansPerSecond};
+pub use units::{Meters, MetersPerSecond, MetersPerSecondSquared, Radians, RadiansPerSecond};

@@ -1432,6 +1432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "leash-ros2"
+version = "0.1.0"
+dependencies = [
+ "leash-core",
+ "leash-runtime",
+]
+
+[[package]]
 name = "leash-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1443,6 +1451,7 @@ name = "leash-waveshare"
 version = "0.1.0"
 dependencies = [
  "leash-core",
+ "leash-ros2",
  "leash-runtime",
  "serde_json",
  "serialport",

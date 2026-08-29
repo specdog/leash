@@ -1066,8 +1066,13 @@ mod tests {
     use std::collections::VecDeque;
 
     use leash_core::{
-        Candidate, ControlInput, ControlKernel, ControlKernelConfig, DurationNanos,
-        NormalizedDrive, OperatorId, ProducerEpoch, SafetyGate, SafetyState,
+        ActivityId, BeliefId, Candidate, ControlInput, ControlKernel, ControlKernelConfig,
+        DurationNanos, Meters, MetersPerSecond, NormalizedDrive, OperatorId, ProducerEpoch,
+        ProposalId, SafetyGate, SafetyState,
+    };
+    use leash_ros2::{
+        cmd_vel_to_proposal, Nav2DispatchAcceptance, Nav2Kinematics, Nav2ProposalDispatcher,
+        Nav2SourceState, Nav2StopReason, Nav2Unavailable, Twist, Vector3,
     };
     use leash_runtime::{CpuSafetySupervisor, SupervisorConfig};
 
@@ -1435,21 +1440,105 @@ mod tests {
             .unwrap()
             .wait()
             .unwrap();
-        let speed = NormalizedDrive::new(0.2).unwrap();
-        safety
-            .submit(ControlInput::Drive {
-                command: DifferentialDrive::new(speed, speed),
-                deadline: MonotonicNanos::new(1_000_000),
-            })
-            .unwrap()
-            .wait()
+        let ros_proposal = cmd_vel_to_proposal(
+            Twist {
+                linear: Vector3 {
+                    x: 0.2,
+                    ..Vector3::default()
+                },
+                ..Twist::default()
+            },
+            Nav2Kinematics::new(
+                Meters::new(0.4).unwrap(),
+                MetersPerSecond::new(1.0).unwrap(),
+            )
+            .unwrap(),
+            ProposalId::new(ProducerEpoch::new(51).unwrap(), Sequence::new(1).unwrap()),
+            ActivityId::new(ProducerEpoch::new(52).unwrap(), Sequence::new(1).unwrap()),
+            MonotonicNanos::new(100),
+            MonotonicNanos::new(1_000_000),
+            10,
+            Box::new([BeliefId::new(
+                ProducerEpoch::new(53).unwrap(),
+                Sequence::new(1).unwrap(),
+            )]) as Box<[BeliefId]>,
+        )
+        .unwrap();
+        let dispatcher = Nav2ProposalDispatcher::new(safety.clone());
+        let dispatch = dispatcher
+            .dispatch(
+                ros_proposal,
+                Nav2SourceState {
+                    connected: true,
+                    goal_active: true,
+                    last_localization: MonotonicNanos::new(100),
+                    last_scan: MonotonicNanos::new(100),
+                    maximum_age: DurationNanos::from_millis(100).unwrap(),
+                },
+                MonotonicNanos::new(100),
+            )
             .unwrap();
+        let Nav2DispatchAcceptance::Transition(ticket) = dispatch else {
+            panic!("fresh ROS velocity must enter the CPU safety transition lane")
+        };
+        ticket.wait().unwrap();
         for _ in 0..100 {
             if controller.status().metrics.writes >= 2 {
                 break;
             }
             thread::sleep(Duration::from_millis(1));
         }
+        let disconnected_proposal = cmd_vel_to_proposal(
+            Twist {
+                linear: Vector3 {
+                    x: 0.4,
+                    ..Vector3::default()
+                },
+                ..Twist::default()
+            },
+            Nav2Kinematics::new(
+                Meters::new(0.4).unwrap(),
+                MetersPerSecond::new(1.0).unwrap(),
+            )
+            .unwrap(),
+            ProposalId::new(ProducerEpoch::new(51).unwrap(), Sequence::new(2).unwrap()),
+            ActivityId::new(ProducerEpoch::new(52).unwrap(), Sequence::new(1).unwrap()),
+            MonotonicNanos::new(101),
+            MonotonicNanos::new(1_000_000),
+            10,
+            Box::new([BeliefId::new(
+                ProducerEpoch::new(53).unwrap(),
+                Sequence::new(2).unwrap(),
+            )]) as Box<[BeliefId]>,
+        )
+        .unwrap();
+        let disconnected = dispatcher
+            .dispatch(
+                disconnected_proposal,
+                Nav2SourceState {
+                    connected: false,
+                    goal_active: true,
+                    last_localization: MonotonicNanos::new(101),
+                    last_scan: MonotonicNanos::new(101),
+                    maximum_age: DurationNanos::from_millis(100).unwrap(),
+                },
+                MonotonicNanos::new(101),
+            )
+            .unwrap();
+        assert!(matches!(
+            disconnected,
+            Nav2DispatchAcceptance::SafetyStop {
+                reason: Nav2StopReason::SourceUnavailable(Nav2Unavailable::Disconnected),
+                ..
+            }
+        ));
+        for _ in 0..100 {
+            if controller.status().last_stop_receipt.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(controller.status().last_stop_receipt.unwrap().verified_zero);
         safety.estop().unwrap();
         for _ in 0..100 {
             if controller.status().last_estop_receipt.is_some() {

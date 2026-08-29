@@ -1,0 +1,14 @@
+[package]
+name = "leash-ros2"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ROS 2 conversion and bounded callback boundary for Leash"
+repository = "https://github.com/specdog/leash"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+leash-core = { path = "../leash-core", version = "0.1.0" }
+leash-runtime = { path = "../leash-runtime", version = "0.1.0" }
