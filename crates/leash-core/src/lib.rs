@@ -10,6 +10,7 @@ mod control;
 mod drive;
 mod error;
 mod frame;
+mod kernel;
 mod time;
 mod units;
 
@@ -23,5 +24,9 @@ pub use drive::{
 };
 pub use error::DomainError;
 pub use frame::{Base, Frame, FrameName, Map, Odom, Pose2, Sensor};
+pub use kernel::{
+    ActuationReason, ControlDenial, ControlEffect, ControlInput, ControlKernel,
+    ControlKernelConfig, KernelError, OperatorId, StopReason,
+};
 pub use time::{DurationNanos, MonotonicNanos, ProducerEpoch, Sequence, Stamped};
 pub use units::{Meters, MetersPerSecond, Radians, RadiansPerSecond};

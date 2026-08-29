@@ -156,6 +156,14 @@ impl SafetyGate {
         self.state
     }
 
+    pub const fn evidence_epoch(&self) -> ProducerEpoch {
+        self.evidence_epoch
+    }
+
+    pub const fn next_evidence_sequence(&self) -> Sequence {
+        self.next_evidence
+    }
+
     pub fn set_state(&mut self, state: SafetyState) {
         self.state = state;
     }
@@ -177,6 +185,29 @@ impl SafetyGate {
         if candidate.deadline < now {
             return Err(SafetyDenial::Expired);
         }
+        let evidence_id = self.next_evidence_id()?;
+        Ok(Authorized {
+            command_id: candidate.id,
+            evidence_id,
+            authorized_at: now,
+            command: candidate.command,
+        })
+    }
+
+    pub fn authorize_stop(
+        &mut self,
+        command_id: CommandId,
+        now: MonotonicNanos,
+    ) -> Result<Authorized<DifferentialDrive>, SafetyDenial> {
+        Ok(Authorized {
+            command_id,
+            evidence_id: self.next_evidence_id()?,
+            authorized_at: now,
+            command: DifferentialDrive::STOP,
+        })
+    }
+
+    fn next_evidence_id(&mut self) -> Result<EvidenceId, SafetyDenial> {
         let evidence_id = EvidenceId {
             producer_epoch: self.evidence_epoch,
             sequence: self.next_evidence,
@@ -185,12 +216,7 @@ impl SafetyGate {
             .next_evidence
             .next()
             .map_err(|_| SafetyDenial::SequenceExhausted)?;
-        Ok(Authorized {
-            command_id: candidate.id,
-            evidence_id,
-            authorized_at: now,
-            command: candidate.command,
-        })
+        Ok(evidence_id)
     }
 }
 
@@ -256,5 +282,15 @@ mod tests {
             .unwrap();
         assert!(authorized.command().is_stop());
         assert_eq!(authorized.evidence_id().sequence.get(), 1);
+
+        gate.set_state(SafetyState::EStopped);
+        let stop = gate
+            .authorize_stop(
+                CommandId::new(ProducerEpoch::new(7).unwrap(), Sequence::new(2).unwrap()),
+                MonotonicNanos::new(16),
+            )
+            .unwrap();
+        assert!(stop.command().is_stop());
+        assert_eq!(stop.evidence_id().sequence.get(), 2);
     }
 }

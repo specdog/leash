@@ -19,3 +19,9 @@ Deliberate exclusions:
 
 Those facilities belong to orchestration and gateway crates. This crate remains
 portable, replayable, and suitable for virtual-time tests.
+
+`ControlKernel` is the first v2 transition engine. Every call supplies a
+monotonic timestamp and increasing sequence. It returns at most eight effects
+in an inline array and performs no I/O. Its golden scenario fixes both state and
+event digests while exercising authorization, drive, obstacle stop, stale
+evidence, deadman, e-stop/reset, planner cancellation, and lease expiry.
