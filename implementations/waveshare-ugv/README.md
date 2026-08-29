@@ -84,8 +84,15 @@ implementations/waveshare-ugv/deployment-baseline.sh deploy \
   /tmp/leash-runtime-v2-candidate \
   ~/.local/state/leash/waveshare-ugv-baselines/<timestamp> \
   --accelerator cpu \
+  --drive-invert true \
+  --drive-swap false \
   --confirm
 ```
+
+Wheel direction and left/right swapping are explicit candidate choices when
+the baseline wiring map is not correct. The Waveshare target observation for
+this rollout requires `--drive-invert true --drive-swap false`; retain the
+candidate configuration hash in the deployment proof.
 
 The successful deployment proof is private under the baseline directory as
 `deploy-<timestamp>/`. Preserve it together with the subsequent rollback

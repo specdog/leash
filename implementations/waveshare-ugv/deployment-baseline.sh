@@ -20,6 +20,8 @@ Options:
   --source-revision TEXT  git revision plus local patch identity; required by capture
   --build-features LIST   exact Cargo feature list; required by capture
   --accelerator BACKEND   required active backend for deploy: cpu or cuda
+  --drive-invert BOOL     explicitly set candidate wheel-direction inversion
+  --drive-swap BOOL       explicitly set candidate left/right wheel swapping
   --output PATH           capture destination (default: private state directory)
   --confirm               required for deploy and rollback
   -h, --help              show this help
@@ -53,6 +55,8 @@ archive=""
 candidate=""
 env_files=()
 accelerator=""
+drive_invert=""
+drive_swap=""
 
 if [[ "$action" == "deploy" ]]; then
   candidate="${1:-}"
@@ -90,6 +94,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --accelerator)
       accelerator="${2:?--accelerator requires a value}"
+      shift 2
+      ;;
+    --drive-invert)
+      drive_invert="${2:?--drive-invert requires true or false}"
+      shift 2
+      ;;
+    --drive-swap)
+      drive_swap="${2:?--drive-swap requires true or false}"
       shift 2
       ;;
     --output)
@@ -344,6 +356,10 @@ rollback() {
 deploy() {
   [[ "$confirm" == "true" ]] || die "deploy requires --confirm"
   [[ "$accelerator" =~ ^(cpu|cuda)$ ]] || die "deploy requires --accelerator cpu|cuda"
+  [[ -z "$drive_invert" || "$drive_invert" =~ ^(true|false)$ ]] \
+    || die "--drive-invert must be true or false"
+  [[ -z "$drive_swap" || "$drive_swap" =~ ^(true|false)$ ]] \
+    || die "--drive-swap must be true or false"
   candidate="$(readlink -f "$candidate")"
   archive="$(readlink -f "$archive")"
   [[ -x "$candidate" ]] || die "candidate binary is not executable"
@@ -359,6 +375,12 @@ deploy() {
     if grep -Eq '^(LEASH_ACCELERATOR|LEASH_REQUIRE_ACCELERATOR)=' "$configured_env"; then
       die "accelerator selection is overridden by a later service environment file"
     fi
+    if [[ -n "$drive_invert" ]] && grep -Eq '^LEASH_DRIVE_INVERT=' "$configured_env"; then
+      die "drive inversion is overridden by a later service environment file"
+    fi
+    if [[ -n "$drive_swap" ]] && grep -Eq '^LEASH_DRIVE_SWAP=' "$configured_env"; then
+      die "drive swapping is overridden by a later service environment file"
+    fi
   done
 
   local proof rollback_on_exit=0
@@ -369,8 +391,8 @@ deploy() {
   sha256sum "$candidate" >"$proof/candidate.sha256"
   sha256sum "$binary" "$service_file" "$env_file" >"$proof/before.sha256"
   "$candidate" --version >"$proof/candidate-version.txt"
-  awk -v backend="$accelerator" '
-    BEGIN { accelerator_seen=0; required_seen=0 }
+  awk -v backend="$accelerator" -v drive_invert="$drive_invert" -v drive_swap="$drive_swap" '
+    BEGIN { accelerator_seen=0; required_seen=0; invert_seen=0; swap_seen=0 }
     /^LEASH_ACCELERATOR=/ {
       if (!accelerator_seen) print "LEASH_ACCELERATOR=" backend
       accelerator_seen=1
@@ -381,10 +403,24 @@ deploy() {
       required_seen=1
       next
     }
+    /^LEASH_DRIVE_INVERT=/ {
+      if (drive_invert != "" && !invert_seen) print "LEASH_DRIVE_INVERT=" drive_invert
+      else if (drive_invert == "") print
+      invert_seen=1
+      next
+    }
+    /^LEASH_DRIVE_SWAP=/ {
+      if (drive_swap != "" && !swap_seen) print "LEASH_DRIVE_SWAP=" drive_swap
+      else if (drive_swap == "") print
+      swap_seen=1
+      next
+    }
     { print }
     END {
       if (!accelerator_seen) print "LEASH_ACCELERATOR=" backend
       if (!required_seen) print "LEASH_REQUIRE_ACCELERATOR=true"
+      if (drive_invert != "" && !invert_seen) print "LEASH_DRIVE_INVERT=" drive_invert
+      if (drive_swap != "" && !swap_seen) print "LEASH_DRIVE_SWAP=" drive_swap
     }
   ' "$env_file" >"$proof/leash.env.candidate"
   chmod 0600 "$proof/leash.env.candidate"

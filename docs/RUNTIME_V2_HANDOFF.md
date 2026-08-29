@@ -160,6 +160,13 @@ restores the baseline if any gate fails. The rollback command restores the
 binary, unit, and environment byte-for-byte and reruns health, camera, sensor,
 zero-motion, ownership, and checksum checks.
 
+The first supervised direction observation established that this chassis maps
+positive logical drive backward when the baseline's
+`LEASH_DRIVE_INVERT=false` is retained. That attempt was stopped and rolled
+back. Candidate deployments must explicitly use `--drive-invert true
+--drive-swap false`, verify one short forward pulse under operator observation,
+and retain the resulting candidate configuration hash.
+
 ## Jetson and safety state
 
 - The target is reached over its USB gadget connection. Credentials were

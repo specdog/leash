@@ -70,7 +70,8 @@ directory created on the target; it must never be committed.
 implementations/waveshare-ugv/deployment-baseline.sh verify
 
 implementations/waveshare-ugv/deployment-baseline.sh deploy \
-  /tmp/leash-runtime-v2-candidate ARCHIVE --accelerator cpu --confirm
+  /tmp/leash-runtime-v2-candidate ARCHIVE --accelerator cpu \
+  --drive-invert true --drive-swap false --confirm
 
 implementations/waveshare-ugv/deployment-baseline.sh rollback \
   ARCHIVE --confirm
@@ -80,6 +81,12 @@ The deployment step captures candidate, active binary, service, and private
 configuration hashes and reuses the verified baseline archive. If startup or
 health fails it automatically restores that baseline. Rollback writes its proof
 under the archive and compares the restored binary byte-for-byte.
+
+Wheel direction and swapping are explicit candidate configuration choices.
+The supervised target observation established that this chassis requires
+`LEASH_DRIVE_INVERT=true` and `LEASH_DRIVE_SWAP=false` for positive logical
+commands to mean forward; the rejected false-inversion attempt is not rollout
+evidence.
 
 ## Current execution state
 
