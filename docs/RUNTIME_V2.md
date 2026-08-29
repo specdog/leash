@@ -68,6 +68,14 @@ precision, expiry, and non-empty evidence lineage; competing proposals resolve
 deterministically by freshness, priority, then typed ID. Drive remains only a
 proposal until the safety kernel produces the unforgeable `Authorized` wrapper.
 
+`leash-replay` now supplies the standalone deterministic oracle. Its strict,
+versioned JSON scenario converts to owned core inputs and runs without I/O,
+threads, sleeps, wall-clock access, ROS, hardware, or CUDA. The checked-in
+safety scenario covers authorization, planning, drive, obstacle stop, deadman,
+stale evidence, e-stop, rejected and approved reset, explicit stop, and lease
+expiry. Every run verifies the final state digest, ordered effect digest, and
+per-event effect counts; the frozen digests match the core oracle exactly.
+
 `leash-gateway` now provides the common edge service for future HTTP, MCP, and
 CLI adapters. It strictly decodes owned DTOs, validates operator IDs and drive
 ranges before constructing domain commands, waits on typed transition tickets

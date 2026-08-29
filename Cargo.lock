@@ -1432,6 +1432,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "leash-replay"
+version = "0.1.0"
+dependencies = [
+ "leash-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "leash-ros2"
 version = "0.1.0"
 dependencies = [

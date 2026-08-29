@@ -1,0 +1,173 @@
+{
+  "schema_version": "leash.control-replay.v1",
+  "config": {
+    "command_epoch": 11,
+    "evidence_epoch": 12,
+    "deadman_ns": 50000000
+  },
+  "events": [
+    {
+      "at_ns": 0,
+      "sequence": 1,
+      "input": {
+        "kind": "update_evidence",
+        "obstacle_blocked": false,
+        "lidar_fresh": true,
+        "localization_fresh": true
+      }
+    },
+    {
+      "at_ns": 1,
+      "sequence": 2,
+      "input": {
+        "kind": "authorize",
+        "operator": "operator-a",
+        "expires_at_ns": 1000000000
+      }
+    },
+    {
+      "at_ns": 2,
+      "sequence": 3,
+      "input": { "kind": "set_planner_active", "active": true }
+    },
+    {
+      "at_ns": 10000000,
+      "sequence": 4,
+      "input": {
+        "kind": "drive",
+        "left": 0.5,
+        "right": 0.5,
+        "deadline_ns": 20000000
+      }
+    },
+    {
+      "at_ns": 20000000,
+      "sequence": 5,
+      "input": {
+        "kind": "update_evidence",
+        "obstacle_blocked": true,
+        "lidar_fresh": true,
+        "localization_fresh": true
+      }
+    },
+    {
+      "at_ns": 30000000,
+      "sequence": 6,
+      "input": {
+        "kind": "update_evidence",
+        "obstacle_blocked": false,
+        "lidar_fresh": true,
+        "localization_fresh": true
+      }
+    },
+    {
+      "at_ns": 31000000,
+      "sequence": 7,
+      "input": {
+        "kind": "drive",
+        "left": 0.25,
+        "right": 0.25,
+        "deadline_ns": 40000000
+      }
+    },
+    {
+      "at_ns": 90000001,
+      "sequence": 8,
+      "input": { "kind": "idle" }
+    },
+    {
+      "at_ns": 91000000,
+      "sequence": 9,
+      "input": {
+        "kind": "update_evidence",
+        "obstacle_blocked": false,
+        "lidar_fresh": false,
+        "localization_fresh": true
+      }
+    },
+    {
+      "at_ns": 92000000,
+      "sequence": 10,
+      "input": {
+        "kind": "drive",
+        "left": 0.1,
+        "right": 0.1,
+        "deadline_ns": 100000000
+      }
+    },
+    {
+      "at_ns": 93000000,
+      "sequence": 11,
+      "input": { "kind": "e_stop" }
+    },
+    {
+      "at_ns": 94000000,
+      "sequence": 12,
+      "input": {
+        "kind": "drive",
+        "left": 0.1,
+        "right": 0.1,
+        "deadline_ns": 100000000
+      }
+    },
+    {
+      "at_ns": 95000000,
+      "sequence": 13,
+      "input": { "kind": "reset_e_stop", "approved": false }
+    },
+    {
+      "at_ns": 96000000,
+      "sequence": 14,
+      "input": { "kind": "reset_e_stop", "approved": true }
+    },
+    {
+      "at_ns": 97000000,
+      "sequence": 15,
+      "input": { "kind": "stop", "reason": "operator" }
+    },
+    {
+      "at_ns": 98000000,
+      "sequence": 16,
+      "input": {
+        "kind": "update_evidence",
+        "obstacle_blocked": false,
+        "lidar_fresh": true,
+        "localization_fresh": true
+      }
+    },
+    {
+      "at_ns": 99000000,
+      "sequence": 17,
+      "input": {
+        "kind": "authorize",
+        "operator": "operator-b",
+        "expires_at_ns": 110000000
+      }
+    },
+    {
+      "at_ns": 100000000,
+      "sequence": 18,
+      "input": { "kind": "set_planner_active", "active": true }
+    },
+    {
+      "at_ns": 101000000,
+      "sequence": 19,
+      "input": {
+        "kind": "drive",
+        "left": 0.2,
+        "right": 0.2,
+        "deadline_ns": 105000000
+      }
+    },
+    {
+      "at_ns": 111000000,
+      "sequence": 20,
+      "input": { "kind": "idle" }
+    }
+  ],
+  "expected": {
+    "final_state_digest": 14161983491101435343,
+    "event_digest": 922937285294098901,
+    "effect_counts": [0, 2, 1, 1, 2, 0, 1, 1, 0, 1, 2, 1, 1, 1, 1, 0, 2, 1, 1, 3]
+  }
+}
