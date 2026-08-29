@@ -504,7 +504,7 @@ mod tests {
         loop {
             supervisor.poll(name).unwrap();
             let status = supervisor.status(name).unwrap();
-            if predicate(&status) {
+            if predicate(status) {
                 return status.clone();
             }
             assert!(

@@ -130,6 +130,7 @@ pub struct AgentRuntimeSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct AgentTaskStopOutput {
     pub ok: bool,
     pub outcome: StopOutcome,

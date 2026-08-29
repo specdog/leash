@@ -32,6 +32,7 @@ pub struct RunRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum StopOutcome {
     NotRunning,

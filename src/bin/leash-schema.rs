@@ -5,10 +5,20 @@ use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Value};
 
 use leash_harness::{
+    agent_runtime::{
+        AgentConsoleCapability, AgentConsoleHealth, AgentRunOutput, AgentRuntimeSnapshot,
+        AgentSession, AgentSessionSummary, AgentTaskRecord, AgentTaskSnapshot, AgentTaskState,
+        AgentTaskStopOutput, AgentTurn, CapabilityPermissions,
+    },
     calibration::{
         CalibrationEnterRequest, CalibrationEnterResult, CalibrationPhase, CalibrationStatus,
     },
     capability::{CapabilityDescriptor, InvocationOrigin, SafetyClass},
+    cognition::{
+        CognitionBoundaryFrameV1, CognitionCapabilitiesV1, CognitionCheckpointV1,
+        CognitionLayerSnapshotV1, CognitionSnapshotsV1, CognitionStatusV1, SemanticPriorV1,
+    },
+    daemon::StopOutcome,
     localization::{
         LocalizationProviderSnapshot, LocalizationProviderState, LocalizationProviderStatus,
         LocalizationProviderUpdate,
@@ -21,24 +31,26 @@ use leash_harness::{
         ModuleGraph, ModuleHealth, ModuleInfo, ModuleState, StackBlueprintMetadata,
         StreamDescriptor, StreamDirection,
     },
+    replay::{ReplayEvent, ReplayEventKind},
     stack::{AdapterCategory, AdapterMaturity, AdapterProfile},
     transport::NetworkStreamFrame,
     types::{
-        AgentMessage, AgentMessageAck, AgentMessageList, AgentModelResponse, AutonomyOverlay,
-        BatteryStatus, CameraRecoveryResponse, CameraStatus, CameraStreamFailure,
-        CameraStreamHealth, Capabilities, CaptureResult, CommandOverlay, CommandStreamState,
-        CostmapFrame, DetectionFrame, DriveOutcome, DroneCommandStatus, Health, ImageObservation,
-        ImuSample, ImuStatus, LocalizationFrame, LocalizationHealth, LocalizationStatus,
-        ManipulatorCommandStatus, ManipulatorJoint, ManipulatorJointState, MapIdentity,
-        MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus,
-        OperatorSessionEvent, OperatorSessionEventKind, OperatorSessionRecording,
-        OperatorSessionRobot, OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZone,
-        PatrolZoneList, PlanarRangeScan, PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d,
-        PoseWithCovariance2d, Quaternion, RangeScanStatus, RawFrameStatus, ResourceSample,
-        RunLogEntry, SafetyStreamState, SavedWaypoint, SavedWaypointList, SensorDataStatus,
-        SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind, SpatialMemoryStatus, SpeedMode,
-        TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si, VerifiedZeroEvidence,
-        VisionResult, VisualizationFrame, VisualizationPath, ZeroCommandReason, ZoneBoundaryPoint,
+        AgentMessage, AgentMessageAck, AgentMessageList, AgentModelResponse, AppliedActionEvidence,
+        AppliedActionEvidencePage, AutonomyOverlay, BatteryStatus, CameraRecoveryResponse,
+        CameraStatus, CameraStreamFailure, CameraStreamHealth, Capabilities, CaptureResult,
+        CommandOverlay, CommandStreamState, CostmapFrame, DetectionFrame, DriveOutcome,
+        DroneCommandStatus, Health, ImageObservation, ImuSample, ImuStatus, LocalizationFrame,
+        LocalizationHealth, LocalizationStatus, ManipulatorCommandStatus, ManipulatorJoint,
+        ManipulatorJointState, MapIdentity, MapMetadata, MotionEvent, MotionEventKind,
+        OccupancyGridFrame, OdometryStatus, OperatorSessionEvent, OperatorSessionEventKind,
+        OperatorSessionRecording, OperatorSessionRobot, OperatorTokenStatus, PatrolStatus,
+        PatrolStrategy, PatrolZone, PatrolZoneList, PlanarRangeScan, PlannerGoal, PlannerStatus,
+        PointCloudMetadata, Pose2d, PoseWithCovariance2d, Quaternion, RangeScanStatus,
+        RawFrameStatus, ResourceSample, RunLogEntry, SafetyStreamState, SavedWaypoint,
+        SavedWaypointList, SensorDataStatus, SensorSnapshot, SpatialMemoryEntry, SpatialMemoryKind,
+        SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d, Vector3Si,
+        VerifiedZeroEvidence, VisionResult, VisualizationFrame, VisualizationPath,
+        ZeroCommandReason, ZoneBoundaryPoint,
     },
     worker::{
         ExternalWorkerState, ExternalWorkerStatus, WorkerInputFrame, WorkerInputPayload,
@@ -154,6 +166,28 @@ fn schema_document() -> Result<Value> {
     insert::<AgentMessageAck>(&mut schemas, "AgentMessageAck")?;
     insert::<AgentMessageList>(&mut schemas, "AgentMessageList")?;
     insert::<AgentModelResponse>(&mut schemas, "AgentModelResponse")?;
+    insert::<AgentTurn>(&mut schemas, "AgentTurn")?;
+    insert::<AgentSession>(&mut schemas, "AgentSession")?;
+    insert::<AgentSessionSummary>(&mut schemas, "AgentSessionSummary")?;
+    insert::<AgentRunOutput>(&mut schemas, "AgentRunOutput")?;
+    insert::<AgentConsoleHealth>(&mut schemas, "AgentConsoleHealth")?;
+    insert::<AgentConsoleCapability>(&mut schemas, "AgentConsoleCapability")?;
+    insert::<AgentTaskSnapshot>(&mut schemas, "AgentTaskSnapshot")?;
+    insert::<AgentRuntimeSnapshot>(&mut schemas, "AgentRuntimeSnapshot")?;
+    insert::<CapabilityPermissions>(&mut schemas, "CapabilityPermissions")?;
+    insert::<AgentTaskState>(&mut schemas, "AgentTaskState")?;
+    insert::<AgentTaskRecord>(&mut schemas, "AgentTaskRecord")?;
+    insert::<AgentTaskStopOutput>(&mut schemas, "AgentTaskStopOutput")?;
+    insert::<StopOutcome>(&mut schemas, "StopOutcome")?;
+    insert::<AppliedActionEvidence>(&mut schemas, "AppliedActionEvidence")?;
+    insert::<AppliedActionEvidencePage>(&mut schemas, "AppliedActionEvidencePage")?;
+    insert::<CognitionCapabilitiesV1>(&mut schemas, "CognitionCapabilitiesV1")?;
+    insert::<CognitionLayerSnapshotV1>(&mut schemas, "CognitionLayerSnapshotV1")?;
+    insert::<CognitionSnapshotsV1>(&mut schemas, "CognitionSnapshotsV1")?;
+    insert::<CognitionBoundaryFrameV1>(&mut schemas, "CognitionBoundaryFrameV1")?;
+    insert::<SemanticPriorV1>(&mut schemas, "SemanticPriorV1")?;
+    insert::<CognitionCheckpointV1>(&mut schemas, "CognitionCheckpointV1")?;
+    insert::<CognitionStatusV1>(&mut schemas, "CognitionStatusV1")?;
     insert::<ModuleGraph>(&mut schemas, "ModuleGraph")?;
     insert::<StackBlueprintMetadata>(&mut schemas, "StackBlueprintMetadata")?;
     insert::<ModuleInfo>(&mut schemas, "ModuleInfo")?;
@@ -183,6 +217,8 @@ fn schema_document() -> Result<Value> {
     insert::<OperatorSessionRobot>(&mut schemas, "OperatorSessionRobot")?;
     insert::<OperatorSessionEvent>(&mut schemas, "OperatorSessionEvent")?;
     insert::<OperatorSessionRecording>(&mut schemas, "OperatorSessionRecording")?;
+    insert::<ReplayEventKind>(&mut schemas, "ReplayEventKind")?;
+    insert::<ReplayEvent>(&mut schemas, "ReplayEvent")?;
     insert::<SpatialMemoryKind>(&mut schemas, "SpatialMemoryKind")?;
     insert::<SpatialMemoryEntry>(&mut schemas, "SpatialMemoryEntry")?;
     insert::<SpatialMemoryStatus>(&mut schemas, "SpatialMemoryStatus")?;

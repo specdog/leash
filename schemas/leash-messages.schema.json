@@ -94,6 +94,86 @@
       "title": "AdapterProfile",
       "type": "object"
     },
+    "AgentConsoleCapability": {
+      "$defs": {
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "safety": {
+          "$ref": "#/$defs/SafetyClass"
+        }
+      },
+      "required": [
+        "name",
+        "module",
+        "safety"
+      ],
+      "title": "AgentConsoleCapability",
+      "type": "object"
+    },
+    "AgentConsoleHealth": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deadman_ok": {
+          "type": "boolean"
+        },
+        "estop": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "physical_actuation_enabled": {
+          "type": "boolean"
+        },
+        "physical_navigation_enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "uptime_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "role",
+        "profile",
+        "mode",
+        "uptime_ms",
+        "estop",
+        "deadman_ok",
+        "physical_actuation_enabled",
+        "physical_navigation_enabled"
+      ],
+      "title": "AgentConsoleHealth",
+      "type": "object"
+    },
     "AgentMessage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -282,6 +362,1319 @@
         "text"
       ],
       "title": "AgentModelResponse",
+      "type": "object"
+    },
+    "AgentRunOutput": {
+      "$defs": {
+        "AgentModelResponse": {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "provider",
+            "model",
+            "prompt",
+            "text"
+          ],
+          "type": "object"
+        },
+        "AgentSessionSummary": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "turns": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "provider",
+            "model",
+            "created_at_ms",
+            "updated_at_ms",
+            "turns"
+          ],
+          "type": "object"
+        },
+        "AgentTurn": {
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/$defs/AgentModelResponse"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "started_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "sequence",
+            "started_at_ms",
+            "prompt",
+            "response"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "session": {
+          "$ref": "#/$defs/AgentSessionSummary"
+        },
+        "turn": {
+          "$ref": "#/$defs/AgentTurn"
+        }
+      },
+      "required": [
+        "ok",
+        "session",
+        "turn"
+      ],
+      "title": "AgentRunOutput",
+      "type": "object"
+    },
+    "AgentRuntimeSnapshot": {
+      "$defs": {
+        "AgentConsoleCapability": {
+          "properties": {
+            "module": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "safety": {
+              "$ref": "#/$defs/SafetyClass"
+            }
+          },
+          "required": [
+            "name",
+            "module",
+            "safety"
+          ],
+          "type": "object"
+        },
+        "AgentConsoleHealth": {
+          "properties": {
+            "deadman_ok": {
+              "type": "boolean"
+            },
+            "estop": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "physical_actuation_enabled": {
+              "type": "boolean"
+            },
+            "physical_navigation_enabled": {
+              "type": "boolean"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "uptime_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "role",
+            "profile",
+            "mode",
+            "uptime_ms",
+            "estop",
+            "deadman_ok",
+            "physical_actuation_enabled",
+            "physical_navigation_enabled"
+          ],
+          "type": "object"
+        },
+        "AgentModelResponse": {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "provider",
+            "model",
+            "prompt",
+            "text"
+          ],
+          "type": "object"
+        },
+        "AgentSession": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "format": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "turns": {
+              "items": {
+                "$ref": "#/$defs/AgentTurn"
+              },
+              "type": "array"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "format",
+            "id",
+            "provider",
+            "model",
+            "created_at_ms",
+            "updated_at_ms",
+            "turns"
+          ],
+          "type": "object"
+        },
+        "AgentSessionSummary": {
+          "properties": {
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "turns": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "provider",
+            "model",
+            "created_at_ms",
+            "updated_at_ms",
+            "turns"
+          ],
+          "type": "object"
+        },
+        "AgentTaskSnapshot": {
+          "properties": {
+            "args": true,
+            "capability": {
+              "type": "string"
+            },
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "interval_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "max_runs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "permissions": {
+              "$ref": "#/$defs/CapabilityPermissions"
+            },
+            "pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "recent_events": {
+              "items": true,
+              "type": "array"
+            },
+            "running": {
+              "type": "boolean"
+            },
+            "runs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "pid",
+            "running",
+            "state",
+            "capability",
+            "args",
+            "interval_ms",
+            "max_runs",
+            "runs",
+            "permissions",
+            "profile",
+            "created_at_ms",
+            "updated_at_ms",
+            "recent_events"
+          ],
+          "type": "object"
+        },
+        "AgentTaskState": {
+          "enum": [
+            "starting",
+            "running",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "AgentTurn": {
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/$defs/AgentModelResponse"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "started_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "sequence",
+            "started_at_ms",
+            "prompt",
+            "response"
+          ],
+          "type": "object"
+        },
+        "CapabilityPermissions": {
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "deny": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "allow",
+            "deny"
+          ],
+          "type": "object"
+        },
+        "SafetyClass": {
+          "enum": [
+            "observe-only",
+            "sim-control",
+            "physical-stop",
+            "physical-motion",
+            "physical-high-risk"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/AgentConsoleCapability"
+          },
+          "type": "array"
+        },
+        "health": {
+          "$ref": "#/$defs/AgentConsoleHealth"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "permissions": {
+          "$ref": "#/$defs/CapabilityPermissions"
+        },
+        "selected_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentSession"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/AgentSessionSummary"
+          },
+          "type": "array"
+        },
+        "state_dir": {
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/AgentTaskSnapshot"
+          },
+          "type": "array"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "ts_ms",
+        "state_dir",
+        "health",
+        "permissions",
+        "sessions",
+        "tasks",
+        "capabilities"
+      ],
+      "title": "AgentRuntimeSnapshot",
+      "type": "object"
+    },
+    "AgentSession": {
+      "$defs": {
+        "AgentModelResponse": {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "provider",
+            "model",
+            "prompt",
+            "text"
+          ],
+          "type": "object"
+        },
+        "AgentTurn": {
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/$defs/AgentModelResponse"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "started_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "sequence",
+            "started_at_ms",
+            "prompt",
+            "response"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "format": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/AgentTurn"
+          },
+          "type": "array"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "id",
+        "provider",
+        "model",
+        "created_at_ms",
+        "updated_at_ms",
+        "turns"
+      ],
+      "title": "AgentSession",
+      "type": "object"
+    },
+    "AgentSessionSummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "turns": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model",
+        "created_at_ms",
+        "updated_at_ms",
+        "turns"
+      ],
+      "title": "AgentSessionSummary",
+      "type": "object"
+    },
+    "AgentTaskRecord": {
+      "$defs": {
+        "AgentTaskState": {
+          "enum": [
+            "starting",
+            "running",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "CapabilityPermissions": {
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "deny": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "allow",
+            "deny"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "args": true,
+        "capability": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "format": {
+          "type": "string"
+        },
+        "interval_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_result": true,
+        "log_path": {
+          "type": "string"
+        },
+        "max_runs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/$defs/CapabilityPermissions"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "runs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentTaskState"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "name",
+        "pid",
+        "capability",
+        "args",
+        "interval_ms",
+        "max_runs",
+        "runs",
+        "state",
+        "permissions",
+        "profile",
+        "log_path",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "AgentTaskRecord",
+      "type": "object"
+    },
+    "AgentTaskSnapshot": {
+      "$defs": {
+        "AgentTaskState": {
+          "enum": [
+            "starting",
+            "running",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "CapabilityPermissions": {
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "deny": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "allow",
+            "deny"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "args": true,
+        "capability": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "interval_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_runs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/$defs/CapabilityPermissions"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "recent_events": {
+          "items": true,
+          "type": "array"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "runs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentTaskState"
+        },
+        "updated_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "pid",
+        "running",
+        "state",
+        "capability",
+        "args",
+        "interval_ms",
+        "max_runs",
+        "runs",
+        "permissions",
+        "profile",
+        "created_at_ms",
+        "updated_at_ms",
+        "recent_events"
+      ],
+      "title": "AgentTaskSnapshot",
+      "type": "object"
+    },
+    "AgentTaskState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "starting",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "AgentTaskState",
+      "type": "string"
+    },
+    "AgentTaskStopOutput": {
+      "$defs": {
+        "AgentTaskRecord": {
+          "properties": {
+            "args": true,
+            "capability": {
+              "type": "string"
+            },
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "format": {
+              "type": "string"
+            },
+            "interval_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_result": true,
+            "log_path": {
+              "type": "string"
+            },
+            "max_runs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "permissions": {
+              "$ref": "#/$defs/CapabilityPermissions"
+            },
+            "pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "runs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "updated_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "format",
+            "name",
+            "pid",
+            "capability",
+            "args",
+            "interval_ms",
+            "max_runs",
+            "runs",
+            "state",
+            "permissions",
+            "profile",
+            "log_path",
+            "created_at_ms",
+            "updated_at_ms"
+          ],
+          "type": "object"
+        },
+        "AgentTaskState": {
+          "enum": [
+            "starting",
+            "running",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "CapabilityPermissions": {
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "deny": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "allow",
+            "deny"
+          ],
+          "type": "object"
+        },
+        "StopOutcome": {
+          "enum": [
+            "not-running",
+            "stopped-gracefully",
+            "killed"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "$ref": "#/$defs/StopOutcome"
+        },
+        "task": {
+          "$ref": "#/$defs/AgentTaskRecord"
+        }
+      },
+      "required": [
+        "ok",
+        "outcome",
+        "task"
+      ],
+      "title": "AgentTaskStopOutput",
+      "type": "object"
+    },
+    "AgentTurn": {
+      "$defs": {
+        "AgentModelResponse": {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "provider",
+            "model",
+            "prompt",
+            "text"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/$defs/AgentModelResponse"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "started_at_ms",
+        "prompt",
+        "response"
+      ],
+      "title": "AgentTurn",
+      "type": "object"
+    },
+    "AppliedActionEvidence": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "One completed interval of post-safety differential-drive authority.\n\nThese values are produced inside Leash after the physical adapter accepts\nthe command. Consumers must never reconstruct this contract from requested\nUI or planner commands.",
+      "properties": {
+        "action_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "applied_left": {
+          "format": "double",
+          "type": "number"
+        },
+        "applied_right": {
+          "format": "double",
+          "type": "number"
+        },
+        "armed": {
+          "type": "boolean"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "clamped_left": {
+          "format": "double",
+          "type": "number"
+        },
+        "clamped_right": {
+          "format": "double",
+          "type": "number"
+        },
+        "collision_clamped": {
+          "type": "boolean"
+        },
+        "deadman_active": {
+          "type": "boolean"
+        },
+        "interval_end_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "interval_start_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "producer_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requested_left": {
+          "format": "double",
+          "type": "number"
+        },
+        "requested_right": {
+          "format": "double",
+          "type": "number"
+        },
+        "safety_flags": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "speed_scale": {
+          "format": "double",
+          "type": "number"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "authority",
+        "producer_epoch",
+        "action_sequence",
+        "interval_start_ns",
+        "interval_end_ns",
+        "requested_left",
+        "requested_right",
+        "clamped_left",
+        "clamped_right",
+        "applied_left",
+        "applied_right",
+        "speed_scale",
+        "safety_flags",
+        "valid",
+        "armed",
+        "deadman_active",
+        "collision_clamped"
+      ],
+      "title": "AppliedActionEvidence",
+      "type": "object"
+    },
+    "AppliedActionEvidencePage": {
+      "$defs": {
+        "AppliedActionEvidence": {
+          "description": "One completed interval of post-safety differential-drive authority.\n\nThese values are produced inside Leash after the physical adapter accepts\nthe command. Consumers must never reconstruct this contract from requested\nUI or planner commands.",
+          "properties": {
+            "action_sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "applied_left": {
+              "format": "double",
+              "type": "number"
+            },
+            "applied_right": {
+              "format": "double",
+              "type": "number"
+            },
+            "armed": {
+              "type": "boolean"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "clamped_left": {
+              "format": "double",
+              "type": "number"
+            },
+            "clamped_right": {
+              "format": "double",
+              "type": "number"
+            },
+            "collision_clamped": {
+              "type": "boolean"
+            },
+            "deadman_active": {
+              "type": "boolean"
+            },
+            "interval_end_ns": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "interval_start_ns": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "producer_epoch": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "requested_left": {
+              "format": "double",
+              "type": "number"
+            },
+            "requested_right": {
+              "format": "double",
+              "type": "number"
+            },
+            "safety_flags": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "speed_scale": {
+              "format": "double",
+              "type": "number"
+            },
+            "valid": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema_version",
+            "authority",
+            "producer_epoch",
+            "action_sequence",
+            "interval_start_ns",
+            "interval_end_ns",
+            "requested_left",
+            "requested_right",
+            "clamped_left",
+            "clamped_right",
+            "applied_left",
+            "applied_right",
+            "speed_scale",
+            "safety_flags",
+            "valid",
+            "armed",
+            "deadman_active",
+            "collision_clamped"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/AppliedActionEvidence"
+          },
+          "type": "array"
+        },
+        "latest_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "oldest_sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "producer_epoch": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "producer_epoch",
+        "oldest_sequence",
+        "latest_sequence",
+        "entries"
+      ],
+      "title": "AppliedActionEvidencePage",
       "type": "object"
     },
     "AutonomyOverlay": {
@@ -1297,6 +2690,29 @@
       "title": "CapabilityDescriptor",
       "type": "object"
     },
+    "CapabilityPermissions": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "allow",
+        "deny"
+      ],
+      "title": "CapabilityPermissions",
+      "type": "object"
+    },
     "CaptureResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -1332,6 +2748,687 @@
         "sha256"
       ],
       "title": "CaptureResult",
+      "type": "object"
+    },
+    "CognitionBoundaryFrameV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "destination": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latent": {
+          "description": "A 1024-value latent state (4 KiB as f32), never model weights.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "layer": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "precision": {
+          "format": "float",
+          "type": "number"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "state_digest": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "ts_ms",
+        "expires_at_ms",
+        "source",
+        "destination",
+        "layer",
+        "sequence",
+        "precision",
+        "state_digest",
+        "latent"
+      ],
+      "title": "CognitionBoundaryFrameV1",
+      "type": "object"
+    },
+    "CognitionCapabilitiesV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "cadences_hz": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "checkpoint_interval_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cross_boundary_timeout_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "motor_authority": {
+          "type": "boolean"
+        },
+        "owned_layers": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "semantic_prior_target_layer": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sensor_plane": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_dim": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "runtime",
+        "owner",
+        "state_dim",
+        "owned_layers",
+        "sensor_plane",
+        "backend",
+        "cadences_hz",
+        "cross_boundary_timeout_ms",
+        "checkpoint_interval_ms",
+        "semantic_prior_target_layer",
+        "motor_authority"
+      ],
+      "title": "CognitionCapabilitiesV1",
+      "type": "object"
+    },
+    "CognitionCheckpointV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "layer_sequences": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "state_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "checkpoint_id",
+        "created_at_ms",
+        "runtime",
+        "backend",
+        "layer_sequences",
+        "state_digest",
+        "path"
+      ],
+      "title": "CognitionCheckpointV1",
+      "type": "object"
+    },
+    "CognitionLayerSnapshotV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "activation_mean": {
+          "format": "float",
+          "type": "number"
+        },
+        "activation_rms": {
+          "format": "float",
+          "type": "number"
+        },
+        "cadence_hz": {
+          "format": "float",
+          "type": "number"
+        },
+        "fresh": {
+          "type": "boolean"
+        },
+        "layer": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "precision": {
+          "format": "float",
+          "type": "number"
+        },
+        "prediction_error_l2": {
+          "format": "float",
+          "type": "number"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_age_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source_ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "ts_ms",
+        "layer",
+        "owner",
+        "cadence_hz",
+        "sequence",
+        "precision",
+        "prediction_error_l2",
+        "activation_mean",
+        "activation_rms",
+        "fresh"
+      ],
+      "title": "CognitionLayerSnapshotV1",
+      "type": "object"
+    },
+    "CognitionSnapshotsV1": {
+      "$defs": {
+        "CognitionLayerSnapshotV1": {
+          "properties": {
+            "activation_mean": {
+              "format": "float",
+              "type": "number"
+            },
+            "activation_rms": {
+              "format": "float",
+              "type": "number"
+            },
+            "cadence_hz": {
+              "format": "float",
+              "type": "number"
+            },
+            "fresh": {
+              "type": "boolean"
+            },
+            "layer": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "precision": {
+              "format": "float",
+              "type": "number"
+            },
+            "prediction_error_l2": {
+              "format": "float",
+              "type": "number"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source_age_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source_ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "ts_ms",
+            "layer",
+            "owner",
+            "cadence_hz",
+            "sequence",
+            "precision",
+            "prediction_error_l2",
+            "activation_mean",
+            "activation_rms",
+            "fresh"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/CognitionLayerSnapshotV1"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "layers"
+      ],
+      "title": "CognitionSnapshotsV1",
+      "type": "object"
+    },
+    "CognitionStatusV1": {
+      "$defs": {
+        "CognitionBoundaryFrameV1": {
+          "properties": {
+            "destination": {
+              "type": "string"
+            },
+            "expires_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "latent": {
+              "description": "A 1024-value latent state (4 KiB as f32), never model weights.",
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "layer": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "precision": {
+              "format": "float",
+              "type": "number"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "state_digest": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "ts_ms",
+            "expires_at_ms",
+            "source",
+            "destination",
+            "layer",
+            "sequence",
+            "precision",
+            "state_digest",
+            "latent"
+          ],
+          "type": "object"
+        },
+        "CognitionCapabilitiesV1": {
+          "properties": {
+            "backend": {
+              "type": "string"
+            },
+            "cadences_hz": {
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "checkpoint_interval_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cross_boundary_timeout_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "motor_authority": {
+              "type": "boolean"
+            },
+            "owned_layers": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "runtime": {
+              "type": "string"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "semantic_prior_target_layer": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sensor_plane": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state_dim": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "runtime",
+            "owner",
+            "state_dim",
+            "owned_layers",
+            "sensor_plane",
+            "backend",
+            "cadences_hz",
+            "cross_boundary_timeout_ms",
+            "checkpoint_interval_ms",
+            "semantic_prior_target_layer",
+            "motor_authority"
+          ],
+          "type": "object"
+        },
+        "CognitionCheckpointV1": {
+          "properties": {
+            "backend": {
+              "type": "string"
+            },
+            "checkpoint_id": {
+              "type": "string"
+            },
+            "created_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "layer_sequences": {
+              "items": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "path": {
+              "type": "string"
+            },
+            "runtime": {
+              "type": "string"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "state_digest": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema_version",
+            "checkpoint_id",
+            "created_at_ms",
+            "runtime",
+            "backend",
+            "layer_sequences",
+            "state_digest",
+            "path"
+          ],
+          "type": "object"
+        },
+        "CognitionLayerSnapshotV1": {
+          "properties": {
+            "activation_mean": {
+              "format": "float",
+              "type": "number"
+            },
+            "activation_rms": {
+              "format": "float",
+              "type": "number"
+            },
+            "cadence_hz": {
+              "format": "float",
+              "type": "number"
+            },
+            "fresh": {
+              "type": "boolean"
+            },
+            "layer": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "precision": {
+              "format": "float",
+              "type": "number"
+            },
+            "prediction_error_l2": {
+              "format": "float",
+              "type": "number"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source_age_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source_ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ts_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "ts_ms",
+            "layer",
+            "owner",
+            "cadence_hz",
+            "sequence",
+            "precision",
+            "prediction_error_l2",
+            "activation_mean",
+            "activation_rms",
+            "fresh"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "boundary": {
+          "$ref": "#/$defs/CognitionBoundaryFrameV1"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CognitionCapabilitiesV1"
+        },
+        "last_checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CognitionCheckpointV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/CognitionLayerSnapshotV1"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "zero_motion": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "capabilities",
+        "layers",
+        "boundary",
+        "zero_motion"
+      ],
+      "title": "CognitionStatusV1",
       "type": "object"
     },
     "CommandOverlay": {
@@ -6419,6 +8516,61 @@
       "title": "RawFrameStatus",
       "type": "object"
     },
+    "ReplayEvent": {
+      "$defs": {
+        "ReplayEventKind": {
+          "enum": [
+            "telemetry",
+            "sensors",
+            "camera",
+            "command",
+            "raw_frame"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "data": true,
+        "format": {
+          "default": "leash-replay-v1",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ReplayEventKind"
+        },
+        "seq": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ts_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ts_ms",
+        "kind",
+        "data"
+      ],
+      "title": "ReplayEvent",
+      "type": "object"
+    },
+    "ReplayEventKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "telemetry",
+        "sensors",
+        "camera",
+        "command",
+        "raw_frame"
+      ],
+      "title": "ReplayEventKind",
+      "type": "string"
+    },
     "ResourceSample": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -6728,6 +8880,62 @@
         "waypoints"
       ],
       "title": "SavedWaypointList",
+      "type": "object"
+    },
+    "SemanticPriorV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "confidence": {
+          "format": "float",
+          "type": "number"
+        },
+        "created_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expires_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prior_id": {
+          "type": "string"
+        },
+        "proposition": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target_layer": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "prior_id",
+        "proposition",
+        "evidence_refs",
+        "confidence",
+        "created_at_ms",
+        "expires_at_ms",
+        "target_layer",
+        "source"
+      ],
+      "title": "SemanticPriorV1",
       "type": "object"
     },
     "SensorDataStatus": {
@@ -7446,6 +9654,16 @@
       ],
       "title": "StackBlueprintMetadata",
       "type": "object"
+    },
+    "StopOutcome": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "not-running",
+        "stopped-gracefully",
+        "killed"
+      ],
+      "title": "StopOutcome",
+      "type": "string"
     },
     "StreamDescriptor": {
       "$defs": {
