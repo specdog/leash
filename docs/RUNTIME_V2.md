@@ -75,6 +75,15 @@ host provenance, and unrounded values are checked into
 `crates/leash-runtime/evidence/host-windows-x86_64-20260829.json`. This result
 does not substitute for the required Jetson Gate C record.
 
+The identical committed source was then built and run from `/tmp` on the
+six-core Jetson Orin NX in 10 W mode, using an in-process fake actuator: 1,000
+ticks, no 10 ms misses, 0.129 ms p99 jitter, 0.059 ms p99 transition latency,
+and queue high-water 1/32. No serial port was opened and the live service was
+not changed. Source-archive hash, target provenance, unrounded values, and
+safety scope are recorded in
+`crates/leash-runtime/evidence/jetson-orin-nx-20260829.json`. Physical
+fault-injection and supervised actuation evidence are still required for Gate C.
+
 The DIMOS-style domain vocabulary now lives in `leash-core`, not in transport
 JSON: versioned owned activities, states, intents, observations, framed beliefs,
 proposals, effects, and outcomes. Activity transitions are total and distinguish

@@ -1,0 +1,48 @@
+{
+  "schema_version": "leash.control-loop-benchmark-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "74a585f",
+  "source_archive_sha256": "96ea24964f45114bad23cbc739d6ee6a8796d503a2981cf439d5e9c229209d23",
+  "command": "cargo run --offline --quiet --release --manifest-path /tmp/leash-runtime-bench-74a585f/crates/leash-runtime/Cargo.toml --example control_loop_bench -- --ticks 1000",
+  "host": {
+    "target": "aarch64-unknown-linux-gnu",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "kernel": "Linux 5.15.148-tegra",
+    "online_processors": 6,
+    "power_mode": "10W (mode 0)",
+    "rustc": "1.94.1 (e408947bf 2026-03-25)",
+    "llvm": "21.1.8"
+  },
+  "result": {
+    "schema_version": "leash.control-loop-benchmark.v1",
+    "frequency_hz": 100,
+    "ticks": 1000,
+    "deadline_ns": 10000000,
+    "missed_deadlines": 0,
+    "jitter_ns": {
+      "p50": 4117,
+      "p95": 24342,
+      "p99": 129390,
+      "max": 352116
+    },
+    "transition_latency_ns": {
+      "p50": 33089,
+      "p95": 49185,
+      "p99": 59202,
+      "max": 390058
+    },
+    "proposal_queue": {
+      "capacity": 32,
+      "high_watermark": 1,
+      "rejected": 0,
+      "depth_at_end": 0
+    }
+  },
+  "safety": {
+    "actuator": "in-process fake actuator",
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_service_modified": false
+  },
+  "scope": "Jetson CPU timing evidence for the isolated control lane. Physical fault injection and supervised actuation remain Gate C requirements."
+}
