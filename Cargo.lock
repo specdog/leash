@@ -1389,6 +1389,14 @@ name = "leash-core"
 version = "0.1.0"
 
 [[package]]
+name = "leash-cuda"
+version = "0.1.0"
+dependencies = [
+ "cudarc",
+ "sha2",
+]
+
+[[package]]
 name = "leash-harness"
 version = "0.1.1"
 dependencies = [

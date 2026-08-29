@@ -1,0 +1,31 @@
+{
+  "schema_version": "leash.cuda-artifact.v1",
+  "source": "kernels/leash_kernels.cu",
+  "source_sha256": "5a1830b81d0eb3d805ed0069c677ea8d28c5eabd26b23a29443eefa6bfedb05e",
+  "artifact": "leash_kernels.fatbin",
+  "artifact_sha256": "cbe6b07f918812d895c6bf881ac6eaa5ae10e9601b5a4e433a5ba354b09d604f",
+  "artifact_bytes": 23360,
+  "cuda_sdk": "12.9.0",
+  "nvcc": "Build cuda_12.9.r12.9/compiler.35813241_0",
+  "target": {
+    "native": "sm_87",
+    "ptx": "compute_87"
+  },
+  "flags": [
+    "--fatbin",
+    "-O3",
+    "-std=c++14",
+    "-gencode=arch=compute_87,code=sm_87",
+    "-gencode=arch=compute_87,code=compute_87"
+  ],
+  "symbols": [
+    "project_occupancy",
+    "lidar_transform",
+    "normalize_rgb_u8",
+    "predictive_step"
+  ],
+  "reproducibility": {
+    "builds_compared": 2,
+    "byte_identical": true
+  }
+}

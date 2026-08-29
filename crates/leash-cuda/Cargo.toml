@@ -1,0 +1,21 @@
+[package]
+name = "leash-cuda"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Precompiled CUDA kernels and compute backend for Leash on Jetson"
+repository = "https://github.com/specdog/leash"
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+cuda = ["dep:cudarc"]
+
+[dependencies]
+cudarc = { version = "0.19.8", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12090"] }
+
+[dev-dependencies]
+sha2 = "0.10"

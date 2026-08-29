@@ -23,6 +23,7 @@ jobs:
       - run: cargo run --features mcp --bin leash-schema -- --check
       - run: cargo package --locked
       - run: cargo package -p leash-core --locked
+      - run: cargo package -p leash-cuda --locked
       - run: scripts/smoke-all.sh
 
   feature-matrix:
