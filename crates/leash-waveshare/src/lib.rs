@@ -1174,7 +1174,10 @@ mod tests {
         cmd_vel_to_proposal, Nav2DispatchAcceptance, Nav2Kinematics, Nav2ProposalDispatcher,
         Nav2SourceState, Nav2StopReason, Nav2Unavailable, Twist, Vector3,
     };
-    use leash_runtime::{CpuSafetySupervisor, SupervisorConfig};
+    use leash_runtime::{
+        read_evidence_records, CpuSafetySupervisor, EvidenceDecision, EvidenceJournal,
+        EvidenceJournalConfig, SupervisorConfig,
+    };
 
     use super::*;
 
@@ -1538,11 +1541,23 @@ mod tests {
 
     #[test]
     fn cpu_supervisor_is_the_only_motion_path_into_the_owner() {
+        let evidence_path = std::env::temp_dir().join(format!(
+            "leash-nav2-evidence-{}-{}.journal",
+            std::process::id(),
+            command_id(1).sequence.get()
+        ));
+        let journal = EvidenceJournal::open(EvidenceJournalConfig {
+            path: evidence_path.clone(),
+            normal_capacity: 64,
+            priority_capacity: 16,
+            maximum_records: None,
+        })
+        .unwrap();
         let transcript = Arc::new(Mutex::new(Transcript::default()));
         let owner = owner(Arc::clone(&transcript));
         let controller = owner.handle();
         wait_connected(&controller);
-        let supervisor = CpuSafetySupervisor::spawn(
+        let supervisor = CpuSafetySupervisor::spawn_with_evidence(
             ControlKernel::new(ControlKernelConfig {
                 command_epoch: ProducerEpoch::new(41).unwrap(),
                 evidence_epoch: ProducerEpoch::new(42).unwrap(),
@@ -1554,6 +1569,7 @@ mod tests {
                 proposal_capacity: 4,
                 tick_period: Duration::from_millis(1),
             },
+            journal.producer(),
         )
         .unwrap();
         let safety = supervisor.handle();
@@ -1692,5 +1708,38 @@ mod tests {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
             value["L"] == 0.2 && value["R"] == 0.2
         }));
+        supervisor.shutdown();
+        let journal_status = journal.shutdown();
+        assert!(journal_status.writer_fault.is_none());
+        let records = read_evidence_records(&evidence_path).unwrap();
+        let decisions = records
+            .iter()
+            .map(|record| record.decision)
+            .collect::<Vec<_>>();
+        for required in [
+            EvidenceDecision::ProposalAccepted,
+            EvidenceDecision::CommandAccepted,
+            EvidenceDecision::AcknowledgementApplied,
+            EvidenceDecision::ZeroRequested,
+            EvidenceDecision::ZeroVerified,
+        ] {
+            assert!(
+                decisions.contains(&required),
+                "durable Nav2 chain is missing {required:?}: {decisions:?}"
+            );
+        }
+        assert!(records.iter().any(|record| {
+            record.decision == EvidenceDecision::CommandAccepted
+                && record.proposal_sequence.is_some()
+                && record.command_id.is_some()
+                && record.evidence_id.is_some()
+        }));
+        assert!(records.iter().any(|record| {
+            record.decision == EvidenceDecision::ZeroVerified
+                && record.acknowledgement.is_some_and(|acknowledgement| {
+                    acknowledgement.through_request_sequence.is_some()
+                })
+        }));
+        std::fs::remove_file(evidence_path).unwrap();
     }
 }

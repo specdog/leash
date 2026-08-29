@@ -62,11 +62,23 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
+          # Build and source the pinned generator first. Humble also installs an
+          # older generator Python module; a single parallel colcon invocation
+          # can otherwise combine that module with these pinned templates.
+          colcon --log-base target/ros2-ws/log-generator build \
+            --merge-install \
+            --build-base target/ros2-ws/build-generator \
+            --install-base target/ros2-ws/install \
+            --base-paths target/ros2-ws/src \
+            --packages-select rosidl_generator_rs \
+            --event-handlers console_direct+
+          source target/ros2-ws/install/local_setup.bash
           colcon --log-base target/ros2-ws/log build \
             --merge-install \
             --build-base target/ros2-ws/build \
             --install-base target/ros2-ws/install \
             --base-paths target/ros2-ws/src implementations/waveshare-ugv/ros2-native \
+            --packages-skip rosidl_generator_rs \
             --event-handlers console_direct+
 
       - name: Exercise generated messages and bounded callbacks
@@ -108,3 +120,4 @@ jobs:
           path: |
             target/ros2-native-smoke.json
             target/ros2-ws/log
+            target/ros2-ws/log-generator
