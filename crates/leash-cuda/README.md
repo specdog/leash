@@ -51,4 +51,17 @@ Resident cognition profiles keep activations, weights, and biases on device;
 steady ticks transfer sensor/top-down inputs and fixed-size metrics only. Full
 state is read back only for the versioned checkpoint gate.
 The latest measured Orin NX result and conservative backend decisions are
-recorded in `evidence/jetson-orin-nx-rv2-12-20260829.json`.
+recorded in `evidence/jetson-orin-nx-rv2-13-20260829.json`.
+
+Exercise the authority gate, randomized shadow parity, deterministic CUDA
+fault injection, bounded CPU fallback, and concurrent CPU safety deadline:
+
+```bash
+cargo run --release --features cuda --example jetson_gate_probe
+```
+
+The gate starts with CPU authority. CUDA becomes active only for a measured
+eligible workload after its startup probe and all required shadow samples
+pass. Any mismatch, context/launch failure, deadline miss, or worker panic
+opens the CUDA circuit and leaves CPU active. Workloads measured slower or
+with worse tail latency stay on CPU.

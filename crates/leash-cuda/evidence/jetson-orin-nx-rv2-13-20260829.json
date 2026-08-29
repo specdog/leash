@@ -1,0 +1,164 @@
+{
+  "schema_version": "leash.cuda-authority-gate-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "4d82898",
+  "source_archive_sha256": "130dce14fd1899968a5ee2cb7638dba4ab8278a28e721df273f0dbfea9cd8cac",
+  "commands": {
+    "tests": "cargo test --offline --release -p leash-cuda --features cuda",
+    "executor_probe": "cargo run --offline --quiet --release -p leash-cuda --features cuda --example jetson_executor_probe",
+    "gate_probe": "cargo run --offline --quiet --release -p leash-cuda --features cuda --example jetson_gate_probe",
+    "nsight_profile": "nsys profile --trace=cuda,osrt --sample=none --cpuctxsw=none --output=/tmp/leash-4d82898-nsys target/release/examples/jetson_benchmark --iterations 20",
+    "nsight_stats": "nsys stats --report cuda_gpu_kern_sum,cuda_api_sum,cuda_gpu_mem_time_sum,cuda_gpu_mem_size_sum --format csv /tmp/leash-4d82898-nsys.nsys-rep"
+  },
+  "host": {
+    "target": "aarch64-unknown-linux-gnu",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "online_processors": 6,
+    "cuda_sdk": "12.9.0",
+    "compute_capability": "8.7",
+    "rustc": "1.94.0",
+    "cudarc": "0.19.8"
+  },
+  "tests": {
+    "release_unit_tests_passed": 21,
+    "artifact_contract_tests_passed": 3,
+    "executor_probe_jobs_passed": 312,
+    "executor_probe_result_sha256": "dd1a097b01d763323b0e3b40bce5ba54e308135d41f6ec96ffbcf00c51a0d36c",
+    "executor_probe_active_backend": "cuda",
+    "executor_probe_circuit_open": false
+  },
+  "authority_gate": {
+    "absolute_tolerance": 0.00001,
+    "relative_tolerance": 0.00001,
+    "match_rule": "absolute_error <= absolute_tolerance OR relative_error <= relative_tolerance",
+    "compute_deadline_ns": 100000000,
+    "fallback_reserve_ns": 40000000,
+    "safety_deadline_ns": 10000000,
+    "shadow_samples_required": 16,
+    "shadow_cpu_authoritative": true,
+    "randomized_shadow_comparisons": 48,
+    "post_shadow_cuda_authority_jobs": 3,
+    "result_sha256": "e0698af53a4039c1ad49e832b4c78b4d96c3849b8c2faf15b6f1954bbbe39050",
+    "workloads": [
+      {
+        "name": "lidar_large",
+        "samples": 16,
+        "max_absolute_error": 0.0000030994415,
+        "max_relative_error": 0.0024548422,
+        "authority_during_shadow": "cpu",
+        "authority_after_shadow": "cuda"
+      },
+      {
+        "name": "spatial_combined_large",
+        "samples": 16,
+        "max_absolute_error": 0.0000030994415,
+        "max_relative_error": 0.0024548422,
+        "authority_during_shadow": "cpu",
+        "authority_after_shadow": "cuda"
+      },
+      {
+        "name": "camera_large",
+        "samples": 16,
+        "max_absolute_error": 0.0,
+        "max_relative_error": 0.0,
+        "authority_during_shadow": "cpu",
+        "authority_after_shadow": "cuda"
+      }
+    ],
+    "faults": [
+      {
+        "fault": "context_loss",
+        "fallback_authority": "cpu",
+        "fallback_ns": 385770,
+        "safety_estop_ns": 15072,
+        "gate_degraded": true
+      },
+      {
+        "fault": "launch_error",
+        "fallback_authority": "cpu",
+        "fallback_ns": 337417,
+        "safety_estop_ns": 13760,
+        "gate_degraded": true
+      },
+      {
+        "fault": "timeout",
+        "injected_stall_ns": 200000000,
+        "fallback_authority": "cpu",
+        "fallback_ns": 60633327,
+        "safety_estop_ns": 11233,
+        "gate_degraded": true
+      },
+      {
+        "fault": "executor_panic",
+        "fallback_authority": "cpu",
+        "fallback_ns": 478221,
+        "safety_estop_ns": 12609,
+        "gate_degraded": true
+      }
+    ]
+  },
+  "break_even": {
+    "method": "20 alternating CPU/CUDA samples under Nsight after 10 warmups; queueing, transfers, kernel, synchronization, and readback included",
+    "profiled_result_sha256": "d244e7e53cdf3488784c7df02ad614dd0c7a3e62315aff7856f0b47dc7ab802e",
+    "workloads": [
+      { "name": "voxel_small", "cpu_p50_ns": 200870, "cuda_p50_ns": 617265, "decision": "cpu" },
+      { "name": "voxel_large", "cpu_p50_ns": 1298531, "cuda_p50_ns": 5895613, "decision": "cpu" },
+      { "name": "lidar_small", "cpu_p50_ns": 83522, "cuda_p50_ns": 293735, "decision": "cpu" },
+      { "name": "lidar_large", "cpu_p50_ns": 449100, "cuda_p50_ns": 384970, "decision": "cuda_after_shadow" },
+      { "name": "collision_small", "cpu_p50_ns": 167813, "cuda_p50_ns": 264359, "decision": "cpu" },
+      { "name": "collision_large", "cpu_p50_ns": 1143678, "cuda_p50_ns": 284296, "decision": "cpu_advisory_only" },
+      { "name": "spatial_combined_large", "cpu_p50_ns": 1519688, "cuda_p50_ns": 534158, "decision": "cuda_after_shadow" },
+      { "name": "camera_small", "cpu_p50_ns": 1222593, "cuda_p50_ns": 907000, "cpu_p95_ns": 1290370, "cuda_p95_ns": 1456934, "decision": "cpu_tail_regression" },
+      { "name": "camera_large", "cpu_p50_ns": 4646620, "cuda_p50_ns": 3047217, "decision": "cuda_after_shadow_with_gpu_consumer" },
+      { "name": "cognition_small", "cpu_p50_ns": 76514, "cuda_p50_ns": 360169, "decision": "cpu" },
+      { "name": "cognition_large", "cpu_p50_ns": 498253, "cuda_p50_ns": 1321475, "decision": "cpu" },
+      { "name": "cognition_resident_small", "cpu_p50_ns": 385482, "cuda_p50_ns": 925689, "decision": "cpu" },
+      { "name": "cognition_resident_large", "cpu_p50_ns": 5352526, "cuda_p50_ns": 6821494, "decision": "cpu" }
+    ]
+  },
+  "nsight": {
+    "version": "2024.5.4.34-245434855735v0",
+    "package_sha256": "404b1d921366d94f60a027298523e295c5484ee6f6e3b8a27da304ad4fd92bad",
+    "package_mode": "verified package extracted under /tmp because target DNS was unavailable; no system package was installed",
+    "trace_sha256": "be38df6dffd0bcb9333f65bbdba769a15c23f0ce3b273f728f1ff6896a2e7a08",
+    "stats_sha256": "14cf01b880c8afc0df536aafd94e520ca4d0188b89bbb2cdb4bc95d344f53081",
+    "kernel_launches": 540,
+    "kernel_time_ns": 308505408,
+    "host_to_device": { "copies": 1072, "total_mb": 105.458, "gpu_time_ns": 16652128 },
+    "device_to_host": { "copies": 952, "total_mb": 503.745, "gpu_time_ns": 106308480 },
+    "device_memset": { "operations": 64, "total_mb": 29.357, "gpu_time_ns": 1617088 },
+    "device_allocations": { "calls": 64, "api_time_ns": 25423904 },
+    "kernel_instances": {
+      "project_occupancy": 60,
+      "lidar_transform": 90,
+      "collision_sector_reduce": 90,
+      "normalize_rgb_u8": 60,
+      "predictive_step": 60,
+      "predictive_step_metrics": 180
+    }
+  },
+  "tegrastats": {
+    "interval_ms": 100,
+    "samples": 41,
+    "log_sha256": "f1222d4f96c9cc7e7ce8a9ae8c251c59b1e88d84bdae18bf9eb8b90741600461",
+    "maximum_ram_mb": 1743,
+    "maximum_gr3d_percent": 61,
+    "average_gr3d_percent": 10.44,
+    "maximum_single_cpu_percent": 100,
+    "maximum_mean_cpu_percent": 29.83,
+    "average_mean_cpu_percent": 15.92,
+    "maximum_gpu_celsius": 52.718,
+    "maximum_vdd_in_mw": 5296,
+    "average_vdd_in_mw": 4975.34
+  },
+  "safety": {
+    "actuator": "in_process_fake",
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "live_source_modified": false,
+    "live_binary_modified": false,
+    "live_service_modified": false,
+    "physical_stop_latency_claimed": false
+  }
+}

@@ -446,6 +446,26 @@ Done when:
 - injected GPU failure falls back within one compute deadline while the CPU
   safety lane continues meeting its deadline.
 
+Result at `4d82898`: a workload gate keeps CPU authority for 16 shadow
+comparisons and advertises CUDA active only after the real CUDA startup probe
+and every comparison pass. Matching uses the declared `1e-5` absolute or
+`1e-5` relative tolerance. The exact Orin archive passed 312 fixed,
+maximum-size, and randomized executor jobs plus 48 randomized gate
+comparisons. Context loss, launch failure, a 200 ms stall, and executor panic
+all degraded to CPU; the slowest fallback completed in 60.64 ms against the
+100 ms compute deadline while the independent CPU e-stop path took at most
+15.1 us against its 10 ms deadline.
+
+Nsight Systems 2024.5.4 recorded 540 kernel launches, 1,072 host-to-device
+copies (105.458 MB), and 952 device-to-host copies (503.745 MB). Concurrent
+100 ms `tegrastats` sampling observed at most 61% GPU load, 1,743 MB RAM,
+52.718 C GPU temperature, and 5,296 mW board input in 10 W mode. The profiled
+break-even run leaves voxel, small lidar/camera, advisory collision, and all
+cognition profiles on CPU; only large lidar, combined spatial, and large
+camera-with-GPU-consumer become CUDA-eligible after shadow. Exact hashes,
+unrounded timings, transfer totals, and conservative decisions are in
+`crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json`.
+
 ### RV2-14 - Add a native Rust ROS 2 boundary
 
 Goal: replace the implementation-owned Python bridge with a feature-gated Rust
