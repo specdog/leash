@@ -43,6 +43,49 @@ pub struct PredictiveState {
     pub bias: Vec<f32>,
 }
 
+pub const RESIDENT_COGNITION_SCHEMA_VERSION: &str = "leash.cuda-cognition.v1";
+const MAX_COGNITION_LAYERS: usize = 16;
+const MAX_COGNITION_STATE_DIM: usize = 1_048_576;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResidentCognitionLayer {
+    pub activation: Vec<f32>,
+    pub weights: Vec<f32>,
+    pub bias: Vec<f32>,
+    pub sequence: u64,
+    pub precision: f32,
+    pub prediction_error_l2: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResidentCognitionCheckpoint {
+    pub schema_version: String,
+    pub sensor: Vec<f32>,
+    pub top_down: Vec<f32>,
+    pub layers: Vec<ResidentCognitionLayer>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CognitionLayerMetrics {
+    pub sequence: u64,
+    pub precision: f32,
+    pub prediction_error_l2: f32,
+    pub activation_mean: f32,
+    pub activation_rms: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CognitionLayerSnapshot {
+    pub layer: usize,
+    pub activation: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CognitionStep {
+    pub layers: Vec<CognitionLayerMetrics>,
+    pub snapshot: Option<CognitionLayerSnapshot>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComputeJob {
     ProjectOccupancy {
@@ -90,6 +133,18 @@ pub enum ComputeJob {
         source_precision: f32,
         top_precision: f32,
     },
+    CognitionLoad {
+        checkpoint: ResidentCognitionCheckpoint,
+    },
+    CognitionAdvance {
+        sensor: Vec<f32>,
+        sensor_precision: f32,
+        top_down: Vec<f32>,
+        top_precision: f32,
+        due_layers: Vec<bool>,
+        snapshot_layer: Option<usize>,
+    },
+    CognitionCheckpoint,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +158,9 @@ pub enum ComputeResult {
     },
     NormalizedRgb(Vec<f32>),
     Predictive(PredictiveState),
+    CognitionLoaded,
+    CognitionAdvanced(CognitionStep),
+    CognitionCheckpoint(ResidentCognitionCheckpoint),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -354,7 +412,10 @@ pub(crate) trait Backend {
     fn execute(&mut self, job: ComputeJob) -> Result<ComputeResult, WorkError>;
 }
 
-struct CpuBackend;
+#[derive(Default)]
+struct CpuBackend {
+    cognition: Option<ResidentCognitionCheckpoint>,
+}
 
 impl Backend for CpuBackend {
     fn execute(&mut self, job: ComputeJob) -> Result<ComputeResult, WorkError> {
@@ -453,8 +514,207 @@ impl Backend for CpuBackend {
                 )?;
                 Ok(ComputeResult::Predictive(state))
             }
+            ComputeJob::CognitionLoad { checkpoint } => {
+                validate_cognition_checkpoint(&checkpoint)?;
+                self.cognition = Some(checkpoint);
+                Ok(ComputeResult::CognitionLoaded)
+            }
+            ComputeJob::CognitionAdvance {
+                sensor,
+                sensor_precision,
+                top_down,
+                top_precision,
+                due_layers,
+                snapshot_layer,
+            } => {
+                let cognition = self.cognition.as_mut().ok_or(WorkError::InvalidInput(
+                    ComputeInputError::InvalidCognitionState,
+                ))?;
+                advance_resident_cognition_cpu(
+                    cognition,
+                    sensor,
+                    sensor_precision,
+                    top_down,
+                    top_precision,
+                    &due_layers,
+                )?;
+                Ok(ComputeResult::CognitionAdvanced(cognition_step(
+                    cognition,
+                    snapshot_layer,
+                )?))
+            }
+            ComputeJob::CognitionCheckpoint => self
+                .cognition
+                .clone()
+                .map(ComputeResult::CognitionCheckpoint)
+                .ok_or(WorkError::InvalidInput(
+                    ComputeInputError::InvalidCognitionState,
+                )),
         }
     }
+}
+
+pub(crate) fn validate_cognition_checkpoint(
+    checkpoint: &ResidentCognitionCheckpoint,
+) -> Result<(), ComputeInputError> {
+    let dimension = checkpoint.sensor.len();
+    if checkpoint.schema_version != RESIDENT_COGNITION_SCHEMA_VERSION
+        || dimension == 0
+        || dimension > MAX_COGNITION_STATE_DIM
+        || checkpoint.top_down.len() != dimension
+        || checkpoint.layers.is_empty()
+        || checkpoint.layers.len() > MAX_COGNITION_LAYERS
+        || checkpoint
+            .sensor
+            .iter()
+            .chain(&checkpoint.top_down)
+            .any(|value| !value.is_finite())
+    {
+        return Err(ComputeInputError::InvalidCognitionState);
+    }
+    for layer in &checkpoint.layers {
+        if layer.activation.len() != dimension
+            || layer.weights.len() != dimension
+            || layer.bias.len() != dimension
+            || !layer.precision.is_finite()
+            || !(0.0..=1.0).contains(&layer.precision)
+            || !layer.prediction_error_l2.is_finite()
+            || layer.prediction_error_l2 < 0.0
+            || layer
+                .activation
+                .iter()
+                .chain(&layer.weights)
+                .chain(&layer.bias)
+                .any(|value| !value.is_finite())
+        {
+            return Err(ComputeInputError::InvalidCognitionState);
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn advance_resident_cognition_cpu(
+    checkpoint: &mut ResidentCognitionCheckpoint,
+    sensor: Vec<f32>,
+    sensor_precision: f32,
+    top_down: Vec<f32>,
+    top_precision: f32,
+    due_layers: &[bool],
+) -> Result<(), ComputeInputError> {
+    validate_cognition_checkpoint(checkpoint)?;
+    let dimension = checkpoint.sensor.len();
+    if sensor.len() != dimension
+        || top_down.len() != dimension
+        || due_layers.len() != checkpoint.layers.len()
+        || sensor
+            .iter()
+            .chain(&top_down)
+            .any(|value| !value.is_finite())
+        || !valid_precision(sensor_precision)
+        || !valid_precision(top_precision)
+    {
+        return Err(ComputeInputError::InvalidCognitionSchedule);
+    }
+    checkpoint.sensor = sensor;
+    checkpoint.top_down = top_down;
+    for (layer_index, due) in due_layers.iter().copied().enumerate() {
+        if !due {
+            continue;
+        }
+        let lower = if layer_index == 0 {
+            checkpoint.sensor.clone()
+        } else {
+            checkpoint.layers[layer_index - 1].activation.clone()
+        };
+        let source_precision = if layer_index == 0 {
+            sensor_precision
+        } else {
+            checkpoint.layers[layer_index - 1].precision
+        };
+        let (upper, upper_precision) = if layer_index + 1 < checkpoint.layers.len() {
+            (
+                checkpoint.layers[layer_index + 1].activation.clone(),
+                checkpoint.layers[layer_index + 1].precision,
+            )
+        } else {
+            (checkpoint.top_down.clone(), top_precision)
+        };
+        let error_l2 = prediction_error_l2(&checkpoint.layers[layer_index], &lower);
+        let layer = &mut checkpoint.layers[layer_index];
+        predictive_step_cpu(
+            &lower,
+            &mut layer.activation,
+            &upper,
+            &mut layer.weights,
+            &mut layer.bias,
+            source_precision,
+            upper_precision,
+        )?;
+        layer.prediction_error_l2 = error_l2;
+        layer.precision = (source_precision / (1.0 + error_l2)).clamp(0.0, 1.0);
+        layer.sequence = layer.sequence.saturating_add(1);
+    }
+    Ok(())
+}
+
+fn prediction_error_l2(layer: &ResidentCognitionLayer, lower: &[f32]) -> f32 {
+    let error_sum = lower
+        .iter()
+        .zip(&layer.activation)
+        .zip(&layer.weights)
+        .zip(&layer.bias)
+        .map(|(((lower, activation), weight), bias)| {
+            let error = lower - (weight * activation + bias);
+            error * error
+        })
+        .sum::<f32>();
+    (error_sum / lower.len() as f32).sqrt()
+}
+
+pub(crate) fn cognition_step(
+    checkpoint: &ResidentCognitionCheckpoint,
+    snapshot_layer: Option<usize>,
+) -> Result<CognitionStep, ComputeInputError> {
+    let snapshot = snapshot_layer
+        .map(|layer| {
+            checkpoint
+                .layers
+                .get(layer)
+                .map(|state| CognitionLayerSnapshot {
+                    layer,
+                    activation: state.activation.clone(),
+                })
+                .ok_or(ComputeInputError::InvalidCognitionSchedule)
+        })
+        .transpose()?;
+    let dimension = checkpoint.sensor.len() as f32;
+    let layers = checkpoint
+        .layers
+        .iter()
+        .map(|layer| {
+            let mean = layer.activation.iter().sum::<f32>() / dimension;
+            let rms = (layer
+                .activation
+                .iter()
+                .map(|value| value * value)
+                .sum::<f32>()
+                / dimension)
+                .sqrt();
+            CognitionLayerMetrics {
+                sequence: layer.sequence,
+                precision: layer.precision,
+                prediction_error_l2: layer.prediction_error_l2,
+                activation_mean: mean,
+                activation_rms: rms,
+            }
+        })
+        .collect();
+    Ok(CognitionStep { layers, snapshot })
+}
+
+fn valid_precision(value: f32) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 pub struct ComputeExecutor {
@@ -471,7 +731,7 @@ pub struct ComputeExecutor {
 impl ComputeExecutor {
     pub fn start_cpu(config: ExecutorConfig) -> Result<Self, StartError> {
         Self::start_with(config, BackendKind::Cpu, BackendKind::Cpu, None, || {
-            Ok(Box::new(CpuBackend))
+            Ok(Box::new(CpuBackend::default()))
         })
     }
 
@@ -493,7 +753,7 @@ impl ComputeExecutor {
                 BackendKind::Cuda,
                 BackendKind::Cpu,
                 Some(reason),
-                || Ok(Box::new(CpuBackend)),
+                || Ok(Box::new(CpuBackend::default())),
             ),
             Err(error) => Err(error),
         }
@@ -914,5 +1174,133 @@ mod tests {
             ),
             Err(StartError::Backend(reason)) if reason == "compute backend initialization panicked"
         ));
+    }
+
+    #[test]
+    fn resident_cognition_advances_only_due_layers_and_round_trips_checkpoint() {
+        let executor = ComputeExecutor::start_cpu(ExecutorConfig::default()).unwrap();
+        let initial = cognition_checkpoint_fixture(16, 3);
+        assert_eq!(
+            executor
+                .submit(
+                    JobPriority::Interactive,
+                    None,
+                    ComputeJob::CognitionLoad {
+                        checkpoint: initial.clone(),
+                    },
+                )
+                .unwrap()
+                .wait(),
+            Ok(ComputeResult::CognitionLoaded)
+        );
+        let result = executor
+            .submit(
+                JobPriority::Interactive,
+                None,
+                ComputeJob::CognitionAdvance {
+                    sensor: vec![1.0; 16],
+                    sensor_precision: 1.0,
+                    top_down: vec![0.25; 16],
+                    top_precision: 0.5,
+                    due_layers: vec![true, false, true],
+                    snapshot_layer: Some(2),
+                },
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        let ComputeResult::CognitionAdvanced(step) = result else {
+            panic!("unexpected cognition result")
+        };
+        assert_eq!(step.layers[0].sequence, 1);
+        assert_eq!(step.layers[1].sequence, 0);
+        assert_eq!(step.layers[2].sequence, 1);
+        assert_eq!(step.snapshot.unwrap().activation.len(), 16);
+
+        let checkpoint = executor
+            .submit(
+                JobPriority::Interactive,
+                None,
+                ComputeJob::CognitionCheckpoint,
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        let ComputeResult::CognitionCheckpoint(checkpoint) = checkpoint else {
+            panic!("unexpected checkpoint result")
+        };
+        assert_ne!(checkpoint, initial);
+        validate_cognition_checkpoint(&checkpoint).unwrap();
+
+        let restored = ComputeExecutor::start_cpu(ExecutorConfig::default()).unwrap();
+        restored
+            .submit(
+                JobPriority::Interactive,
+                None,
+                ComputeJob::CognitionLoad {
+                    checkpoint: checkpoint.clone(),
+                },
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        let restored_checkpoint = restored
+            .submit(
+                JobPriority::Interactive,
+                None,
+                ComputeJob::CognitionCheckpoint,
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert_eq!(
+            restored_checkpoint,
+            ComputeResult::CognitionCheckpoint(checkpoint)
+        );
+    }
+
+    #[test]
+    fn resident_cognition_rejects_malformed_state_and_schedule() {
+        let executor = ComputeExecutor::start_cpu(ExecutorConfig::default()).unwrap();
+        let mut malformed = cognition_checkpoint_fixture(4, 3);
+        malformed.layers[1].bias.pop();
+        let result = executor
+            .submit(
+                JobPriority::Interactive,
+                None,
+                ComputeJob::CognitionLoad {
+                    checkpoint: malformed,
+                },
+            )
+            .unwrap()
+            .wait();
+        assert_eq!(
+            result,
+            Err(WorkError::InvalidInput(
+                ComputeInputError::InvalidCognitionState
+            ))
+        );
+        assert!(!executor.status().circuit_open);
+    }
+
+    fn cognition_checkpoint_fixture(
+        dimension: usize,
+        layers: usize,
+    ) -> ResidentCognitionCheckpoint {
+        ResidentCognitionCheckpoint {
+            schema_version: RESIDENT_COGNITION_SCHEMA_VERSION.to_string(),
+            sensor: vec![0.0; dimension],
+            top_down: vec![0.0; dimension],
+            layers: (0..layers)
+                .map(|index| ResidentCognitionLayer {
+                    activation: vec![0.0; dimension],
+                    weights: vec![0.75 + index as f32 * 0.05; dimension],
+                    bias: vec![0.0; dimension],
+                    sequence: 0,
+                    precision: 0.0,
+                    prediction_error_l2: 0.0,
+                })
+                .collect(),
+        }
     }
 }

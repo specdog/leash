@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use crate::{accelerator::AcceleratorStatus, config::AcceleratorBackend, types::TelemetryFrame};
 
 pub const COGNITION_CONTRACT_VERSION: &str = "qualia.cognition.v1";
+pub const COGNITION_STATE_VERSION: &str = "qualia.cognition-state.v1";
 pub const COGNITION_STATE_DIM: usize = 1_024;
 pub const COGNITION_BOUNDARY_TIMEOUT_MS: u128 = 500;
 pub const COGNITION_CHECKPOINT_INTERVAL_MS: u128 = 60_000;
@@ -143,14 +144,47 @@ pub struct CognitionStatusV1 {
     pub layers: Vec<CognitionLayerSnapshotV1>,
     pub boundary: CognitionBoundaryFrameV1,
     pub last_checkpoint: Option<CognitionCheckpointV1>,
+    pub backend_status: CognitionBackendStatusV1,
     pub zero_motion: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CognitionBackendStatusV1 {
+    pub selected: String,
+    pub active: String,
+    pub degraded: bool,
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CheckpointPayload {
     contract: CognitionCheckpointV1,
-    layer_weights: Vec<Vec<f32>>,
-    layer_biases: Vec<Vec<f32>>,
+    state: CognitionCheckpointStateV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct CognitionCheckpointLayerV1 {
+    activation: Vec<f32>,
+    weights: Vec<f32>,
+    bias: Vec<f32>,
+    sequence: u64,
+    precision: f32,
+    prediction_error_l2: f32,
+    activation_mean: f32,
+    activation_rms: f32,
+    last_tick_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct CognitionCheckpointStateV1 {
+    schema_version: String,
+    sensor: Vec<f32>,
+    sensor_ts_ms: Option<u128>,
+    layers: Vec<CognitionCheckpointLayerV1>,
+    top_down: Vec<f32>,
+    top_down_precision: f32,
+    top_down_expires_at_ms: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +195,8 @@ struct LayerState {
     sequence: u64,
     precision: f32,
     prediction_error_l2: f32,
+    activation_mean: f32,
+    activation_rms: f32,
     last_tick_ms: u128,
 }
 
@@ -173,6 +209,8 @@ impl LayerState {
             sequence: 0,
             precision: 0.0,
             prediction_error_l2: 0.0,
+            activation_mean: 0.0,
+            activation_rms: 0.0,
             last_tick_ms: 0,
         }
     }
@@ -208,7 +246,8 @@ impl Default for CognitionState {
 #[derive(Clone)]
 pub struct CognitionRuntime {
     state: Arc<Mutex<CognitionState>>,
-    backend: Arc<str>,
+    backend_status: Arc<Mutex<CognitionBackendStatusV1>>,
+    compute_lock: Arc<Mutex<()>>,
     owner: Arc<str>,
     checkpoint_dir: Arc<PathBuf>,
     boundary_tx: broadcast::Sender<CognitionBoundaryFrameV1>,
@@ -216,25 +255,51 @@ pub struct CognitionRuntime {
 
 impl CognitionRuntime {
     pub fn new(accelerator: &AcceleratorStatus, owner: &str) -> Self {
-        let backend = match accelerator.active {
-            AcceleratorBackend::Cuda => "cpu-workload-policy",
-            _ => "cpu",
-        };
         let (boundary_tx, _) = broadcast::channel(32);
         let state = CognitionState {
             last_checkpoint_at_ms: now_ms(),
             ..CognitionState::default()
         };
-        Self {
+        let selected = if accelerator.requested == AcceleratorBackend::Cuda {
+            "cuda"
+        } else {
+            "cpu"
+        };
+        let mut backend_status = CognitionBackendStatusV1 {
+            selected: selected.to_string(),
+            active: "cpu".to_string(),
+            degraded: accelerator.requested == AcceleratorBackend::Cuda
+                && accelerator.active != AcceleratorBackend::Cuda,
+            fallback_reason: (accelerator.requested == AcceleratorBackend::Cuda
+                && accelerator.active != AcceleratorBackend::Cuda)
+                .then(|| accelerator.message.clone()),
+        };
+        if accelerator.active == AcceleratorBackend::Cuda {
+            backend_status.active = "cuda".to_string();
+        }
+        let runtime = Self {
             state: Arc::new(Mutex::new(state)),
-            backend: Arc::from(backend),
+            backend_status: Arc::new(Mutex::new(backend_status)),
+            compute_lock: Arc::new(Mutex::new(())),
             owner: Arc::from(owner.trim()),
             checkpoint_dir: Arc::new(default_checkpoint_dir()),
             boundary_tx,
+        };
+        if accelerator.active == AcceleratorBackend::Cuda {
+            #[cfg(feature = "cuda")]
+            if let Err(error) = runtime.load_cuda_from_host() {
+                runtime.fallback_to_cpu(format!("initialize resident CUDA cognition: {error}"));
+            }
+            #[cfg(not(feature = "cuda"))]
+            runtime.fallback_to_cpu(
+                "CUDA was selected but the cognition CUDA feature is not compiled".to_string(),
+            );
         }
+        runtime
     }
 
     pub fn capabilities(&self) -> CognitionCapabilitiesV1 {
+        let backend = self.backend_status.lock().active.clone();
         CognitionCapabilitiesV1 {
             schema_version: COGNITION_CONTRACT_VERSION.to_string(),
             runtime: "leash".to_string(),
@@ -242,7 +307,7 @@ impl CognitionRuntime {
             state_dim: COGNITION_STATE_DIM,
             owned_layers: vec![0, 1, 2],
             sensor_plane: SENSOR_LAYER,
-            backend: self.backend.to_string(),
+            backend,
             cadences_hz: LAYER_CADENCE_HZ.to_vec(),
             cross_boundary_timeout_ms: COGNITION_BOUNDARY_TIMEOUT_MS,
             checkpoint_interval_ms: COGNITION_CHECKPOINT_INTERVAL_MS,
@@ -259,56 +324,25 @@ impl CognitionRuntime {
     }
 
     pub fn tick(&self, now_ms: u128) {
-        let mut publish_boundary = false;
-        let should_checkpoint;
-        {
-            let mut state = self.state.lock();
-            let sensor_precision = freshness_precision(state.sensor_ts_ms, now_ms);
-            let external_precision = if now_ms <= state.top_down_expires_at_ms {
-                state.top_down_precision
-            } else {
-                0.0
-            };
-
-            for (layer_index, interval_ms) in LAYER_INTERVAL_MS.iter().copied().enumerate() {
-                if state.layers[layer_index].last_tick_ms != 0
-                    && now_ms.saturating_sub(state.layers[layer_index].last_tick_ms) < interval_ms
-                {
-                    continue;
-                }
-                let lower = if layer_index == 0 {
-                    state.sensor.clone()
-                } else {
-                    state.layers[layer_index - 1].activation.clone()
-                };
-                let lower_precision = if layer_index == 0 {
-                    sensor_precision
-                } else {
-                    state.layers[layer_index - 1].precision
-                };
-                let (top_down, top_precision) = if layer_index + 1 < LEASH_LAYER_COUNT {
-                    (
-                        state.layers[layer_index + 1].activation.clone(),
-                        state.layers[layer_index + 1].precision,
-                    )
-                } else {
-                    (state.top_down.clone(), external_precision)
-                };
-                update_layer(
-                    &mut state.layers[layer_index],
-                    &lower,
-                    &top_down,
-                    lower_precision,
-                    top_precision,
-                    now_ms,
-                );
-                if layer_index == 2 {
-                    publish_boundary = true;
-                }
+        let outcome: Result<(bool, bool)> = if self.backend_status.lock().active == "cuda" {
+            #[cfg(feature = "cuda")]
+            {
+                self.tick_cuda(now_ms)
             }
-            should_checkpoint = now_ms.saturating_sub(state.last_checkpoint_at_ms)
-                >= COGNITION_CHECKPOINT_INTERVAL_MS;
-        }
+            #[cfg(not(feature = "cuda"))]
+            {
+                unreachable!("CUDA cognition cannot be active without the CUDA feature")
+            }
+        } else {
+            Ok(self.tick_cpu(now_ms))
+        };
+        let (publish_boundary, should_checkpoint) = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.mark_cuda_failed(error.to_string());
+                return;
+            }
+        };
 
         if publish_boundary {
             let _ = self.boundary_tx.send(self.boundary(now_ms));
@@ -318,6 +352,124 @@ impl CognitionRuntime {
                 tracing::warn!(?error, "cognition checkpoint failed");
             }
         }
+    }
+
+    fn tick_cpu(&self, now_ms: u128) -> (bool, bool) {
+        let mut publish_boundary = false;
+        let mut state = self.state.lock();
+        let sensor_precision = freshness_precision(state.sensor_ts_ms, now_ms);
+        let external_precision = if now_ms <= state.top_down_expires_at_ms {
+            state.top_down_precision
+        } else {
+            0.0
+        };
+
+        for (layer_index, interval_ms) in LAYER_INTERVAL_MS.iter().copied().enumerate() {
+            if state.layers[layer_index].last_tick_ms != 0
+                && now_ms.saturating_sub(state.layers[layer_index].last_tick_ms) < interval_ms
+            {
+                continue;
+            }
+            let lower = if layer_index == 0 {
+                state.sensor.clone()
+            } else {
+                state.layers[layer_index - 1].activation.clone()
+            };
+            let lower_precision = if layer_index == 0 {
+                sensor_precision
+            } else {
+                state.layers[layer_index - 1].precision
+            };
+            let (top_down, top_precision) = if layer_index + 1 < LEASH_LAYER_COUNT {
+                (
+                    state.layers[layer_index + 1].activation.clone(),
+                    state.layers[layer_index + 1].precision,
+                )
+            } else {
+                (state.top_down.clone(), external_precision)
+            };
+            update_layer(
+                &mut state.layers[layer_index],
+                &lower,
+                &top_down,
+                lower_precision,
+                top_precision,
+                now_ms,
+            );
+            if layer_index == 2 {
+                publish_boundary = true;
+            }
+        }
+        let should_checkpoint =
+            now_ms.saturating_sub(state.last_checkpoint_at_ms) >= COGNITION_CHECKPOINT_INTERVAL_MS;
+        (publish_boundary, should_checkpoint)
+    }
+
+    #[cfg(feature = "cuda")]
+    fn tick_cuda(&self, now_ms: u128) -> Result<(bool, bool)> {
+        let _compute = self.compute_lock.lock();
+        let (sensor, sensor_precision, top_down, top_precision, due_layers, should_checkpoint) = {
+            let state = self.state.lock();
+            let sensor_precision = freshness_precision(state.sensor_ts_ms, now_ms);
+            let top_precision = if now_ms <= state.top_down_expires_at_ms {
+                state.top_down_precision
+            } else {
+                0.0
+            };
+            let due_layers = LAYER_INTERVAL_MS
+                .iter()
+                .enumerate()
+                .map(|(index, interval_ms)| {
+                    state.layers[index].last_tick_ms == 0
+                        || now_ms.saturating_sub(state.layers[index].last_tick_ms) >= *interval_ms
+                })
+                .collect::<Vec<_>>();
+            (
+                state.sensor.clone(),
+                sensor_precision,
+                state.top_down.clone(),
+                top_precision,
+                due_layers,
+                now_ms.saturating_sub(state.last_checkpoint_at_ms)
+                    >= COGNITION_CHECKPOINT_INTERVAL_MS,
+            )
+        };
+        let publish_boundary = due_layers[2];
+        let result = crate::cuda_voxel::execute(leash_cuda::ComputeJob::CognitionAdvance {
+            sensor,
+            sensor_precision,
+            top_down,
+            top_precision,
+            due_layers: due_layers.clone(),
+            snapshot_layer: publish_boundary.then_some(2),
+        })?;
+        let leash_cuda::ComputeResult::CognitionAdvanced(step) = result else {
+            bail!("CUDA cognition returned the wrong result variant");
+        };
+        if step.layers.len() != LEASH_LAYER_COUNT {
+            bail!("CUDA cognition returned the wrong layer count");
+        }
+        let mut state = self.state.lock();
+        for (index, metrics) in step.layers.into_iter().enumerate() {
+            let layer = &mut state.layers[index];
+            layer.sequence = metrics.sequence;
+            layer.precision = metrics.precision;
+            layer.prediction_error_l2 = metrics.prediction_error_l2;
+            layer.activation_mean = metrics.activation_mean;
+            layer.activation_rms = metrics.activation_rms;
+            if due_layers[index] {
+                layer.last_tick_ms = now_ms;
+            }
+        }
+        if let Some(snapshot) = step.snapshot {
+            if snapshot.layer != 2 || snapshot.activation.len() != COGNITION_STATE_DIM {
+                bail!("CUDA cognition returned a malformed layer snapshot");
+            }
+            state.layers[2].activation = snapshot.activation;
+        } else if publish_boundary {
+            bail!("CUDA cognition omitted the declared layer-2 snapshot");
+        }
+        Ok((publish_boundary, should_checkpoint))
     }
 
     pub fn snapshots(&self, now_ms: u128) -> Vec<CognitionLayerSnapshotV1> {
@@ -340,12 +492,14 @@ impl CognitionRuntime {
     }
 
     pub fn status(&self, now_ms: u128, zero_motion: bool) -> CognitionStatusV1 {
+        let backend_status = self.backend_status.lock().clone();
         CognitionStatusV1 {
-            ok: true,
+            ok: !backend_status.degraded,
             capabilities: self.capabilities(),
             layers: self.snapshots(now_ms),
             boundary: self.boundary(now_ms),
             last_checkpoint: self.state.lock().last_checkpoint.clone(),
+            backend_status,
             zero_motion,
         }
     }
@@ -369,6 +523,29 @@ impl CognitionRuntime {
         self.checkpoint_at(now_ms())
     }
 
+    pub fn restore_from_checkpoint(
+        accelerator: &AcceleratorStatus,
+        owner: &str,
+        path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let path = path.as_ref();
+        let bytes = fs::read(path)
+            .with_context(|| format!("read cognition checkpoint {}", path.display()))?;
+        let payload: CheckpointPayload =
+            serde_json::from_slice(&bytes).context("decode cognition checkpoint")?;
+        validate_checkpoint_payload(&payload)?;
+        let runtime = Self::new(accelerator, owner);
+        let restored = runtime_state_from_checkpoint(&payload.state, &payload.contract)?;
+        *runtime.state.lock() = restored;
+        if runtime.backend_status.lock().active == "cuda" {
+            #[cfg(feature = "cuda")]
+            if let Err(error) = runtime.load_cuda_from_host() {
+                runtime.fallback_to_cpu(format!("restore resident CUDA cognition: {error}"));
+            }
+        }
+        Ok(runtime)
+    }
+
     fn checkpoint_at(&self, created_at_ms: u128) -> Result<CognitionCheckpointV1> {
         fs::create_dir_all(self.checkpoint_dir.as_ref()).with_context(|| {
             format!(
@@ -376,8 +553,27 @@ impl CognitionRuntime {
                 self.checkpoint_dir.display()
             )
         })?;
+        let _compute = self.compute_lock.lock();
+        let active_backend = self.backend_status.lock().active.clone();
+        #[cfg(feature = "cuda")]
+        let resident = if active_backend == "cuda" {
+            let result = crate::cuda_voxel::execute(leash_cuda::ComputeJob::CognitionCheckpoint)?;
+            let leash_cuda::ComputeResult::CognitionCheckpoint(checkpoint) = result else {
+                bail!("CUDA cognition returned the wrong checkpoint variant");
+            };
+            Some(checkpoint)
+        } else {
+            None
+        };
         let mut state = self.state.lock();
-        let digest = state_digest(&state.layers[2].activation);
+        #[cfg(feature = "cuda")]
+        let checkpoint_state = resident.as_ref().map_or_else(
+            || checkpoint_state_from_host(&state),
+            |resident| checkpoint_state_from_resident(&state, resident),
+        );
+        #[cfg(not(feature = "cuda"))]
+        let checkpoint_state = checkpoint_state_from_host(&state);
+        let digest = checkpoint_state_digest(&checkpoint_state);
         let checkpoint_id = format!("leash-{created_at_ms}-{}", &digest[..12]);
         let path = self.checkpoint_dir.join(format!("{checkpoint_id}.json"));
         let contract = CognitionCheckpointV1 {
@@ -385,23 +581,18 @@ impl CognitionRuntime {
             checkpoint_id,
             created_at_ms,
             runtime: "leash".to_string(),
-            backend: self.backend.to_string(),
-            layer_sequences: state.layers.iter().map(|layer| layer.sequence).collect(),
+            backend: active_backend,
+            layer_sequences: checkpoint_state
+                .layers
+                .iter()
+                .map(|layer| layer.sequence)
+                .collect(),
             state_digest: digest,
             path: path.display().to_string(),
         };
         let payload = CheckpointPayload {
             contract: contract.clone(),
-            layer_weights: state
-                .layers
-                .iter()
-                .map(|layer| layer.weights.clone())
-                .collect(),
-            layer_biases: state
-                .layers
-                .iter()
-                .map(|layer| layer.bias.clone())
-                .collect(),
+            state: checkpoint_state,
         };
         let bytes = serde_json::to_vec(&payload).context("serialize cognition checkpoint")?;
         fs::write(&path, bytes)
@@ -410,6 +601,209 @@ impl CognitionRuntime {
         state.last_checkpoint = Some(contract.clone());
         Ok(contract)
     }
+
+    #[cfg(feature = "cuda")]
+    fn load_cuda_from_host(&self) -> Result<()> {
+        let _compute = self.compute_lock.lock();
+        let checkpoint = resident_checkpoint_from_host(&self.state.lock());
+        let result =
+            crate::cuda_voxel::execute(leash_cuda::ComputeJob::CognitionLoad { checkpoint })?;
+        if !matches!(result, leash_cuda::ComputeResult::CognitionLoaded) {
+            bail!("CUDA cognition returned the wrong load result");
+        }
+        let status = crate::cuda_voxel::backend_status()?;
+        if status.active != leash_cuda::BackendKind::Cuda || status.degraded || status.circuit_open
+        {
+            bail!("CUDA executor is not healthy after cognition load");
+        }
+        Ok(())
+    }
+
+    fn fallback_to_cpu(&self, reason: String) {
+        let mut status = self.backend_status.lock();
+        status.active = "cpu".to_string();
+        status.degraded = true;
+        status.fallback_reason = Some(reason);
+    }
+
+    fn mark_cuda_failed(&self, reason: String) {
+        let mut status = self.backend_status.lock();
+        status.degraded = true;
+        status.fallback_reason = Some(reason);
+    }
+}
+
+fn checkpoint_state_from_host(state: &CognitionState) -> CognitionCheckpointStateV1 {
+    CognitionCheckpointStateV1 {
+        schema_version: COGNITION_STATE_VERSION.to_string(),
+        sensor: state.sensor.clone(),
+        sensor_ts_ms: state.sensor_ts_ms,
+        layers: state
+            .layers
+            .iter()
+            .map(|layer| CognitionCheckpointLayerV1 {
+                activation: layer.activation.clone(),
+                weights: layer.weights.clone(),
+                bias: layer.bias.clone(),
+                sequence: layer.sequence,
+                precision: layer.precision,
+                prediction_error_l2: layer.prediction_error_l2,
+                activation_mean: layer.activation_mean,
+                activation_rms: layer.activation_rms,
+                last_tick_ms: layer.last_tick_ms,
+            })
+            .collect(),
+        top_down: state.top_down.clone(),
+        top_down_precision: state.top_down_precision,
+        top_down_expires_at_ms: state.top_down_expires_at_ms,
+    }
+}
+
+#[cfg(feature = "cuda")]
+fn resident_checkpoint_from_host(
+    state: &CognitionState,
+) -> leash_cuda::ResidentCognitionCheckpoint {
+    leash_cuda::ResidentCognitionCheckpoint {
+        schema_version: leash_cuda::RESIDENT_COGNITION_SCHEMA_VERSION.to_string(),
+        sensor: state.sensor.clone(),
+        top_down: state.top_down.clone(),
+        layers: state
+            .layers
+            .iter()
+            .map(|layer| leash_cuda::ResidentCognitionLayer {
+                activation: layer.activation.clone(),
+                weights: layer.weights.clone(),
+                bias: layer.bias.clone(),
+                sequence: layer.sequence,
+                precision: layer.precision,
+                prediction_error_l2: layer.prediction_error_l2,
+            })
+            .collect(),
+    }
+}
+
+#[cfg(feature = "cuda")]
+fn checkpoint_state_from_resident(
+    host: &CognitionState,
+    resident: &leash_cuda::ResidentCognitionCheckpoint,
+) -> CognitionCheckpointStateV1 {
+    CognitionCheckpointStateV1 {
+        schema_version: COGNITION_STATE_VERSION.to_string(),
+        sensor: resident.sensor.clone(),
+        sensor_ts_ms: host.sensor_ts_ms,
+        layers: resident
+            .layers
+            .iter()
+            .zip(&host.layers)
+            .map(|(resident, host)| {
+                let (activation_mean, activation_rms) = activation_metrics(&resident.activation);
+                CognitionCheckpointLayerV1 {
+                    activation: resident.activation.clone(),
+                    weights: resident.weights.clone(),
+                    bias: resident.bias.clone(),
+                    sequence: resident.sequence,
+                    precision: resident.precision,
+                    prediction_error_l2: resident.prediction_error_l2,
+                    activation_mean,
+                    activation_rms,
+                    last_tick_ms: host.last_tick_ms,
+                }
+            })
+            .collect(),
+        top_down: resident.top_down.clone(),
+        top_down_precision: host.top_down_precision,
+        top_down_expires_at_ms: host.top_down_expires_at_ms,
+    }
+}
+
+fn validate_checkpoint_payload(payload: &CheckpointPayload) -> Result<()> {
+    if payload.contract.schema_version != COGNITION_CONTRACT_VERSION
+        || payload.contract.runtime != "leash"
+        || payload.state.schema_version != COGNITION_STATE_VERSION
+        || payload.state.sensor.len() != COGNITION_STATE_DIM
+        || payload.state.top_down.len() != COGNITION_STATE_DIM
+        || payload.state.layers.len() != LEASH_LAYER_COUNT
+        || payload
+            .state
+            .sensor
+            .iter()
+            .chain(&payload.state.top_down)
+            .any(|value| !value.is_finite())
+        || !valid_precision(payload.state.top_down_precision)
+    {
+        bail!("cognition checkpoint state contract is invalid");
+    }
+    for layer in &payload.state.layers {
+        if layer.activation.len() != COGNITION_STATE_DIM
+            || layer.weights.len() != COGNITION_STATE_DIM
+            || layer.bias.len() != COGNITION_STATE_DIM
+            || layer
+                .activation
+                .iter()
+                .chain(&layer.weights)
+                .chain(&layer.bias)
+                .any(|value| !value.is_finite())
+            || !valid_precision(layer.precision)
+            || !layer.prediction_error_l2.is_finite()
+            || layer.prediction_error_l2 < 0.0
+            || !layer.activation_mean.is_finite()
+            || !layer.activation_rms.is_finite()
+            || layer.activation_rms < 0.0
+        {
+            bail!("cognition checkpoint layer is invalid");
+        }
+    }
+    let layer_sequences = payload
+        .state
+        .layers
+        .iter()
+        .map(|layer| layer.sequence)
+        .collect::<Vec<_>>();
+    if payload.contract.layer_sequences != layer_sequences
+        || payload.contract.state_digest != checkpoint_state_digest(&payload.state)
+    {
+        bail!("cognition checkpoint identity does not match its state");
+    }
+    Ok(())
+}
+
+fn runtime_state_from_checkpoint(
+    checkpoint: &CognitionCheckpointStateV1,
+    contract: &CognitionCheckpointV1,
+) -> Result<CognitionState> {
+    let payload = CheckpointPayload {
+        contract: contract.clone(),
+        state: checkpoint.clone(),
+    };
+    validate_checkpoint_payload(&payload)?;
+    Ok(CognitionState {
+        sensor: checkpoint.sensor.clone(),
+        sensor_ts_ms: checkpoint.sensor_ts_ms,
+        layers: checkpoint
+            .layers
+            .iter()
+            .map(|layer| LayerState {
+                activation: layer.activation.clone(),
+                weights: layer.weights.clone(),
+                bias: layer.bias.clone(),
+                sequence: layer.sequence,
+                precision: layer.precision,
+                prediction_error_l2: layer.prediction_error_l2,
+                activation_mean: layer.activation_mean,
+                activation_rms: layer.activation_rms,
+                last_tick_ms: layer.last_tick_ms,
+            })
+            .collect(),
+        top_down: checkpoint.top_down.clone(),
+        top_down_precision: checkpoint.top_down_precision,
+        top_down_expires_at_ms: checkpoint.top_down_expires_at_ms,
+        last_checkpoint_at_ms: contract.created_at_ms,
+        last_checkpoint: Some(contract.clone()),
+    })
+}
+
+fn valid_precision(value: f32) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 pub fn validate_boundary(
@@ -568,6 +962,7 @@ fn update_layer(
     }
     layer.prediction_error_l2 = (error_sum / COGNITION_STATE_DIM as f32).sqrt();
     layer.precision = (source_precision / (1.0 + layer.prediction_error_l2)).clamp(0.0, 1.0);
+    (layer.activation_mean, layer.activation_rms) = activation_metrics(&layer.activation);
     layer.sequence = layer.sequence.saturating_add(1);
     layer.last_tick_ms = now_ms;
 }
@@ -579,14 +974,6 @@ fn layer_snapshot(
     source_age_ms: Option<u128>,
     now_ms: u128,
 ) -> CognitionLayerSnapshotV1 {
-    let mean = layer.activation.iter().copied().sum::<f32>() / COGNITION_STATE_DIM as f32;
-    let rms = (layer
-        .activation
-        .iter()
-        .map(|value| value * value)
-        .sum::<f32>()
-        / COGNITION_STATE_DIM as f32)
-        .sqrt();
     CognitionLayerSnapshotV1 {
         schema_version: COGNITION_CONTRACT_VERSION.to_string(),
         ts_ms: now_ms,
@@ -596,12 +983,19 @@ fn layer_snapshot(
         sequence: layer.sequence,
         precision: layer.precision,
         prediction_error_l2: layer.prediction_error_l2,
-        activation_mean: mean,
-        activation_rms: rms,
+        activation_mean: layer.activation_mean,
+        activation_rms: layer.activation_rms,
         fresh: source_age_ms.is_some_and(|age| age <= COGNITION_BOUNDARY_TIMEOUT_MS),
         source_ts_ms,
         source_age_ms,
     }
+}
+
+fn activation_metrics(activation: &[f32]) -> (f32, f32) {
+    let dimension = activation.len() as f32;
+    let mean = activation.iter().copied().sum::<f32>() / dimension;
+    let rms = (activation.iter().map(|value| value * value).sum::<f32>() / dimension).sqrt();
+    (mean, rms)
 }
 
 fn boundary_from_layer(layer: &LayerState, now_ms: u128) -> CognitionBoundaryFrameV1 {
@@ -632,6 +1026,34 @@ fn state_digest(values: &[f32]) -> String {
     for value in values {
         digest.update(value.to_le_bytes());
     }
+    format!("{:x}", digest.finalize())
+}
+
+fn checkpoint_state_digest(state: &CognitionCheckpointStateV1) -> String {
+    let mut digest = Sha256::new();
+    digest.update(state.schema_version.as_bytes());
+    for value in &state.sensor {
+        digest.update(value.to_le_bytes());
+    }
+    digest.update(state.sensor_ts_ms.unwrap_or_default().to_le_bytes());
+    for layer in &state.layers {
+        for values in [&layer.activation, &layer.weights, &layer.bias] {
+            for value in values {
+                digest.update(value.to_le_bytes());
+            }
+        }
+        digest.update(layer.sequence.to_le_bytes());
+        digest.update(layer.precision.to_le_bytes());
+        digest.update(layer.prediction_error_l2.to_le_bytes());
+        digest.update(layer.activation_mean.to_le_bytes());
+        digest.update(layer.activation_rms.to_le_bytes());
+        digest.update(layer.last_tick_ms.to_le_bytes());
+    }
+    for value in &state.top_down {
+        digest.update(value.to_le_bytes());
+    }
+    digest.update(state.top_down_precision.to_le_bytes());
+    digest.update(state.top_down_expires_at_ms.to_le_bytes());
     format!("{:x}", digest.finalize())
 }
 
@@ -716,5 +1138,65 @@ mod tests {
         let mut invalid = prior.clone();
         invalid.target_layer = 5;
         assert!(invalid.validate(now).is_err());
+    }
+
+    #[test]
+    fn versioned_checkpoint_restores_canonical_cpu_state_without_duplicate_tick() {
+        let accelerator =
+            crate::accelerator::resolve_accelerator(AcceleratorBackend::Cpu, false).unwrap();
+        let mut runtime = CognitionRuntime::new(&accelerator, "checkpoint-source");
+        let checkpoint_dir = std::env::temp_dir().join(format!(
+            "leash-cognition-checkpoint-test-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        runtime.checkpoint_dir = Arc::new(checkpoint_dir.clone());
+        let tick_ms = now_ms();
+        runtime.state.lock().sensor_ts_ms = Some(tick_ms);
+        runtime.tick(tick_ms);
+        let before = runtime.boundary(tick_ms);
+        let checkpoint = runtime.checkpoint_at(tick_ms + 1).unwrap();
+        assert_eq!(checkpoint.layer_sequences, vec![1, 1, 1]);
+        let mut tampered: CheckpointPayload =
+            serde_json::from_slice(&fs::read(&checkpoint.path).unwrap()).unwrap();
+        tampered.state.layers[0].bias[0] += 0.25;
+        assert!(validate_checkpoint_payload(&tampered).is_err());
+
+        let restored =
+            CognitionRuntime::restore_from_checkpoint(&accelerator, "restored", &checkpoint.path)
+                .unwrap();
+        let after = restored.boundary(tick_ms + 1);
+        assert_eq!(after.sequence, before.sequence);
+        assert_eq!(after.state_digest, before.state_digest);
+        assert_eq!(
+            restored.status(tick_ms + 1, true).backend_status.active,
+            "cpu"
+        );
+        restored.tick(tick_ms + LAYER_INTERVAL_MS[2]);
+        assert_eq!(restored.boundary(tick_ms + 50).sequence, 2);
+        fs::remove_dir_all(&checkpoint_dir).unwrap();
+    }
+
+    #[test]
+    fn cognition_health_reports_cuda_selection_and_cpu_fallback_reason() {
+        let accelerator = AcceleratorStatus {
+            requested: AcceleratorBackend::Cuda,
+            active: AcceleratorBackend::Cpu,
+            available: false,
+            required: false,
+            message: "injected CUDA startup failure".to_string(),
+            probes: Vec::new(),
+        };
+        let runtime = CognitionRuntime::new(&accelerator, "fallback-test");
+        let status = runtime.status(now_ms(), true);
+        assert_eq!(status.backend_status.selected, "cuda");
+        assert_eq!(status.backend_status.active, "cpu");
+        assert!(status.backend_status.degraded);
+        assert_eq!(
+            status.backend_status.fallback_reason.as_deref(),
+            Some("injected CUDA startup failure")
+        );
+        assert_eq!(status.capabilities.backend, "cpu");
+        assert!(!status.ok);
     }
 }

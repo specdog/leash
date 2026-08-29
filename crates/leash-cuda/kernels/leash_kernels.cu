@@ -136,3 +136,45 @@ extern "C" __global__ void predictive_step(
         fmaxf(-1.0f, bias[index] + 0.0001f * bottom_up_error)
     );
 }
+
+extern "C" __global__ void predictive_step_metrics(
+    const float* lower,
+    float* state,
+    const float* top_down,
+    float* weights,
+    float* bias,
+    float source_precision,
+    float top_precision,
+    uint32_t count,
+    float* reductions
+) {
+    const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= count) {
+        return;
+    }
+    const float previous = state[index];
+    const float prediction = weights[index] * previous + bias[index];
+    const float bottom_up_error = lower[index] - prediction;
+    const float top_down_error = previous - top_down[index];
+    const float next = fminf(
+        4.0f,
+        fmaxf(
+            -4.0f,
+            previous
+                + 0.12f * source_precision * weights[index] * bottom_up_error
+                - 0.05f * top_precision * top_down_error
+        )
+    );
+    state[index] = next;
+    weights[index] = fminf(
+        1.8f,
+        fmaxf(0.2f, weights[index] + 0.0005f * bottom_up_error * previous)
+    );
+    bias[index] = fminf(
+        1.0f,
+        fmaxf(-1.0f, bias[index] + 0.0001f * bottom_up_error)
+    );
+    atomicAdd(&reductions[0], bottom_up_error * bottom_up_error);
+    atomicAdd(&reductions[1], next);
+    atomicAdd(&reductions[2], next * next);
+}

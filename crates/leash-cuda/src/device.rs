@@ -9,12 +9,34 @@ use cudarc::{
 };
 
 use crate::{
-    executor::{Backend, ComputeJob, ComputeResult, PredictiveState, WorkError},
+    executor::{
+        validate_cognition_checkpoint, Backend, CognitionLayerMetrics, CognitionLayerSnapshot,
+        CognitionStep, ComputeJob, ComputeResult, PredictiveState, ResidentCognitionCheckpoint,
+        ResidentCognitionLayer, WorkError,
+    },
     CollisionSector, ComputeInputError, LidarPoint, PREBUILT_FATBIN,
 };
 
 #[derive(Debug)]
 pub(crate) struct DeviceError(String);
+
+struct CudaCognitionLayer {
+    activation: CudaSlice<f32>,
+    weights: CudaSlice<f32>,
+    bias: CudaSlice<f32>,
+    sequence: u64,
+    precision: f32,
+    prediction_error_l2: f32,
+    activation_mean: f32,
+    activation_rms: f32,
+}
+
+struct CudaCognitionState {
+    dimension: usize,
+    sensor: CudaSlice<f32>,
+    top_down: CudaSlice<f32>,
+    layers: Vec<CudaCognitionLayer>,
+}
 
 impl fmt::Display for DeviceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,6 +55,7 @@ pub(crate) struct CudaBackend {
     collision_sector_reduce: CudaFunction,
     normalize_rgb: CudaFunction,
     predictive_step: CudaFunction,
+    predictive_step_metrics: CudaFunction,
     occupancy_cells: CudaSlice<i8>,
     occupancy_output: CudaSlice<i32>,
     lidar_ranges: CudaSlice<f32>,
@@ -48,6 +71,8 @@ pub(crate) struct CudaBackend {
     predictive_top_down: CudaSlice<f32>,
     predictive_weights: CudaSlice<f32>,
     predictive_bias: CudaSlice<f32>,
+    cognition_reductions: CudaSlice<f32>,
+    cognition: Option<CudaCognitionState>,
 }
 
 impl CudaBackend {
@@ -78,6 +103,9 @@ impl CudaBackend {
         let predictive_step = module
             .load_function("predictive_step")
             .map_err(|error| device_error("load predictive_step", error))?;
+        let predictive_step_metrics = module
+            .load_function("predictive_step_metrics")
+            .map_err(|error| device_error("load predictive_step_metrics", error))?;
 
         Ok(Self {
             occupancy_cells: allocate_one(&stream, "occupancy cells")?,
@@ -95,12 +123,17 @@ impl CudaBackend {
             predictive_top_down: allocate_one(&stream, "predictive top down")?,
             predictive_weights: allocate_one(&stream, "predictive weights")?,
             predictive_bias: allocate_one(&stream, "predictive bias")?,
+            cognition_reductions: stream
+                .alloc_zeros(3)
+                .map_err(|error| device_error("cognition reductions", error))?,
+            cognition: None,
             stream,
             project_occupancy,
             lidar_transform,
             collision_sector_reduce,
             normalize_rgb,
             predictive_step,
+            predictive_step_metrics,
         })
     }
 
@@ -436,6 +469,221 @@ impl CudaBackend {
                 .map_err(|error| backend_error("download predictive bias", error))?,
         })
     }
+
+    fn cognition_load(&mut self, checkpoint: ResidentCognitionCheckpoint) -> Result<(), WorkError> {
+        validate_cognition_checkpoint(&checkpoint)?;
+        let dimension = checkpoint.sensor.len();
+        let mut sensor = allocate_compute(&self.stream, dimension, "resident cognition sensor")?;
+        let mut top_down =
+            allocate_compute(&self.stream, dimension, "resident cognition top down")?;
+        self.stream
+            .memcpy_htod(&checkpoint.sensor, &mut sensor)
+            .map_err(|error| backend_error("upload resident cognition sensor", error))?;
+        self.stream
+            .memcpy_htod(&checkpoint.top_down, &mut top_down)
+            .map_err(|error| backend_error("upload resident cognition top down", error))?;
+        let mut layers = Vec::with_capacity(checkpoint.layers.len());
+        for source in checkpoint.layers {
+            let mut activation =
+                allocate_compute(&self.stream, dimension, "resident cognition activation")?;
+            let mut weights =
+                allocate_compute(&self.stream, dimension, "resident cognition weights")?;
+            let mut bias = allocate_compute(&self.stream, dimension, "resident cognition bias")?;
+            self.stream
+                .memcpy_htod(&source.activation, &mut activation)
+                .map_err(|error| backend_error("upload resident cognition activation", error))?;
+            self.stream
+                .memcpy_htod(&source.weights, &mut weights)
+                .map_err(|error| backend_error("upload resident cognition weights", error))?;
+            self.stream
+                .memcpy_htod(&source.bias, &mut bias)
+                .map_err(|error| backend_error("upload resident cognition bias", error))?;
+            let (activation_mean, activation_rms) = host_activation_metrics(&source.activation);
+            layers.push(CudaCognitionLayer {
+                activation,
+                weights,
+                bias,
+                sequence: source.sequence,
+                precision: source.precision,
+                prediction_error_l2: source.prediction_error_l2,
+                activation_mean,
+                activation_rms,
+            });
+        }
+        self.cognition = Some(CudaCognitionState {
+            dimension,
+            sensor,
+            top_down,
+            layers,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cognition_advance(
+        &mut self,
+        sensor: &[f32],
+        sensor_precision: f32,
+        top_down: &[f32],
+        top_precision: f32,
+        due_layers: &[bool],
+        snapshot_layer: Option<usize>,
+    ) -> Result<CognitionStep, WorkError> {
+        let cognition = self.cognition.as_mut().ok_or(WorkError::InvalidInput(
+            ComputeInputError::InvalidCognitionState,
+        ))?;
+        if sensor.len() != cognition.dimension
+            || top_down.len() != cognition.dimension
+            || due_layers.len() != cognition.layers.len()
+            || sensor
+                .iter()
+                .chain(top_down)
+                .any(|value| !value.is_finite())
+            || !valid_precision(sensor_precision)
+            || !valid_precision(top_precision)
+            || snapshot_layer.is_some_and(|layer| layer >= cognition.layers.len())
+        {
+            return Err(ComputeInputError::InvalidCognitionSchedule.into());
+        }
+        let count = u32::try_from(cognition.dimension)
+            .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
+        self.stream
+            .memcpy_htod(sensor, &mut cognition.sensor)
+            .map_err(|error| backend_error("upload resident cognition sensor", error))?;
+        self.stream
+            .memcpy_htod(top_down, &mut cognition.top_down)
+            .map_err(|error| backend_error("upload resident cognition top down", error))?;
+
+        for layer_index in 0..cognition.layers.len() {
+            if !due_layers[layer_index] {
+                continue;
+            }
+            let source_precision = if layer_index == 0 {
+                sensor_precision
+            } else {
+                cognition.layers[layer_index - 1].precision
+            };
+            let upper_precision = if layer_index + 1 < cognition.layers.len() {
+                cognition.layers[layer_index + 1].precision
+            } else {
+                top_precision
+            };
+            self.stream
+                .memcpy_htod(&[0.0_f32; 3], &mut self.cognition_reductions)
+                .map_err(|error| backend_error("reset cognition reductions", error))?;
+            {
+                let (before, current_and_after) = cognition.layers.split_at_mut(layer_index);
+                let (current, after) = current_and_after
+                    .split_first_mut()
+                    .expect("validated resident layer index");
+                let lower = if layer_index == 0 {
+                    cognition.sensor.slice(..cognition.dimension)
+                } else {
+                    before[layer_index - 1]
+                        .activation
+                        .slice(..cognition.dimension)
+                };
+                let upper = if after.is_empty() {
+                    cognition.top_down.slice(..cognition.dimension)
+                } else {
+                    after[0].activation.slice(..cognition.dimension)
+                };
+                let mut activation = current.activation.slice_mut(..cognition.dimension);
+                let mut weights = current.weights.slice_mut(..cognition.dimension);
+                let mut bias = current.bias.slice_mut(..cognition.dimension);
+                unsafe {
+                    self.stream
+                        .launch_builder(&self.predictive_step_metrics)
+                        .arg(&lower)
+                        .arg(&mut activation)
+                        .arg(&upper)
+                        .arg(&mut weights)
+                        .arg(&mut bias)
+                        .arg(&source_precision)
+                        .arg(&upper_precision)
+                        .arg(&count)
+                        .arg(&mut self.cognition_reductions)
+                        .launch(LaunchConfig::for_num_elems(count))
+                }
+                .map_err(|error| backend_error("launch predictive_step_metrics", error))?;
+            }
+            let reductions = self
+                .stream
+                .clone_dtoh(&self.cognition_reductions)
+                .map_err(|error| backend_error("download cognition layer metrics", error))?;
+            let dimension = cognition.dimension as f32;
+            let layer = &mut cognition.layers[layer_index];
+            layer.prediction_error_l2 = (reductions[0] / dimension).sqrt();
+            layer.precision =
+                (source_precision / (1.0 + layer.prediction_error_l2)).clamp(0.0, 1.0);
+            layer.activation_mean = reductions[1] / dimension;
+            layer.activation_rms = (reductions[2] / dimension).sqrt();
+            layer.sequence = layer.sequence.saturating_add(1);
+        }
+
+        let snapshot = snapshot_layer
+            .map(|layer| {
+                self.stream
+                    .clone_dtoh(&cognition.layers[layer].activation)
+                    .map(|activation| CognitionLayerSnapshot { layer, activation })
+                    .map_err(|error| backend_error("download cognition snapshot", error))
+            })
+            .transpose()?;
+        Ok(CognitionStep {
+            layers: cognition
+                .layers
+                .iter()
+                .map(|layer| CognitionLayerMetrics {
+                    sequence: layer.sequence,
+                    precision: layer.precision,
+                    prediction_error_l2: layer.prediction_error_l2,
+                    activation_mean: layer.activation_mean,
+                    activation_rms: layer.activation_rms,
+                })
+                .collect(),
+            snapshot,
+        })
+    }
+
+    fn cognition_checkpoint(&self) -> Result<ResidentCognitionCheckpoint, WorkError> {
+        let cognition = self.cognition.as_ref().ok_or(WorkError::InvalidInput(
+            ComputeInputError::InvalidCognitionState,
+        ))?;
+        let sensor = self
+            .stream
+            .clone_dtoh(&cognition.sensor)
+            .map_err(|error| backend_error("download checkpoint sensor", error))?;
+        let top_down = self
+            .stream
+            .clone_dtoh(&cognition.top_down)
+            .map_err(|error| backend_error("download checkpoint top down", error))?;
+        let mut layers = Vec::with_capacity(cognition.layers.len());
+        for source in &cognition.layers {
+            layers.push(ResidentCognitionLayer {
+                activation: self
+                    .stream
+                    .clone_dtoh(&source.activation)
+                    .map_err(|error| backend_error("download checkpoint activation", error))?,
+                weights: self
+                    .stream
+                    .clone_dtoh(&source.weights)
+                    .map_err(|error| backend_error("download checkpoint weights", error))?,
+                bias: self
+                    .stream
+                    .clone_dtoh(&source.bias)
+                    .map_err(|error| backend_error("download checkpoint bias", error))?,
+                sequence: source.sequence,
+                precision: source.precision,
+                prediction_error_l2: source.prediction_error_l2,
+            });
+        }
+        Ok(ResidentCognitionCheckpoint {
+            schema_version: crate::RESIDENT_COGNITION_SCHEMA_VERSION.to_string(),
+            sensor,
+            top_down,
+            layers,
+        })
+    }
 }
 
 impl Backend for CudaBackend {
@@ -533,6 +781,30 @@ impl Backend for CudaBackend {
             } => self
                 .predictive(&lower, state, &top_down, source_precision, top_precision)
                 .map(ComputeResult::Predictive),
+            ComputeJob::CognitionLoad { checkpoint } => {
+                self.cognition_load(checkpoint)?;
+                Ok(ComputeResult::CognitionLoaded)
+            }
+            ComputeJob::CognitionAdvance {
+                sensor,
+                sensor_precision,
+                top_down,
+                top_precision,
+                due_layers,
+                snapshot_layer,
+            } => self
+                .cognition_advance(
+                    &sensor,
+                    sensor_precision,
+                    &top_down,
+                    top_precision,
+                    &due_layers,
+                    snapshot_layer,
+                )
+                .map(ComputeResult::CognitionAdvanced),
+            ComputeJob::CognitionCheckpoint => self
+                .cognition_checkpoint()
+                .map(ComputeResult::CognitionCheckpoint),
         }
     }
 }
@@ -565,6 +837,30 @@ where
         .alloc_zeros(capacity)
         .map_err(|error| backend_error("grow persistent CUDA buffer", error))?;
     Ok(())
+}
+
+fn allocate_compute<T>(
+    stream: &Arc<CudaStream>,
+    count: usize,
+    context: &'static str,
+) -> Result<CudaSlice<T>, WorkError>
+where
+    T: DeviceRepr + ValidAsZeroBits,
+{
+    stream
+        .alloc_zeros(count)
+        .map_err(|error| backend_error(context, error))
+}
+
+fn host_activation_metrics(activation: &[f32]) -> (f32, f32) {
+    let dimension = activation.len() as f32;
+    let mean = activation.iter().sum::<f32>() / dimension;
+    let rms = (activation.iter().map(|value| value * value).sum::<f32>() / dimension).sqrt();
+    (mean, rms)
+}
+
+fn valid_precision(value: f32) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 fn backend_error(context: &'static str, error: impl fmt::Display) -> WorkError {

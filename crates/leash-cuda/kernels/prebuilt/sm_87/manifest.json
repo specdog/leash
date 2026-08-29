@@ -1,10 +1,10 @@
 {
   "schema_version": "leash.cuda-artifact.v1",
   "source": "kernels/leash_kernels.cu",
-  "source_sha256": "f98093654a249453de49584fcdac4d7d53f763700e2514868f4e56149d2202b0",
+  "source_sha256": "ffb6710f9611cf8984bbe44511e33a0d73e7564bba8e1f4b75987a8e888462be",
   "artifact": "leash_kernels.fatbin",
-  "artifact_sha256": "839ac2f50841565cb0f7a64aa206bd223a71bbe5a7f0b46430e6506dfb77540f",
-  "artifact_bytes": 36032,
+  "artifact_sha256": "c96e10ac48d9b8e58fc9f31eb5cdf58ad5cb907ddd0c49d98784344e86a640a4",
+  "artifact_bytes": 39080,
   "cuda_sdk": "12.9.0",
   "nvcc": "Build cuda_12.9.r12.9/compiler.35813241_0",
   "target": {
@@ -23,7 +23,8 @@
     "lidar_transform",
     "collision_sector_reduce",
     "normalize_rgb_u8",
-    "predictive_step"
+    "predictive_step",
+    "predictive_step_metrics"
   ],
   "reproducibility": {
     "builds_compared": 2,
@@ -38,7 +39,7 @@
     "rust": "1.94.1",
     "cudarc": "0.19.8",
     "driver_probe": {
-      "kernels_passed": 5,
+      "kernels_passed": 6,
       "no_motion": true
     },
     "rust_executor_probe": {

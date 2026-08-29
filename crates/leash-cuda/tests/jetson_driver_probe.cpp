@@ -213,8 +213,36 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    CUfunction predictive_metrics;
+    CUDA_CHECK(cuModuleGetFunction(&predictive_metrics, module,
+                                   "predictive_step_metrics"));
+    const float initial_state[] = {0.5f, -0.5f};
+    const float initial_weights[] = {0.75f, 0.75f};
+    const float initial_bias[] = {0.0f, 0.0f};
+    float reductions[] = {0.0f, 0.0f, 0.0f};
+    CUdeviceptr device_reductions;
+    CUDA_CHECK(cuMemAlloc(&device_reductions, sizeof(reductions)));
+    CUDA_CHECK(cuMemcpyHtoD(device_state, initial_state, sizeof(initial_state)));
+    CUDA_CHECK(cuMemcpyHtoD(device_weights, initial_weights, sizeof(initial_weights)));
+    CUDA_CHECK(cuMemcpyHtoD(device_bias, initial_bias, sizeof(initial_bias)));
+    CUDA_CHECK(cuMemcpyHtoD(device_reductions, reductions, sizeof(reductions)));
+    void* predictive_metrics_args[] = {
+        &device_lower, &device_state, &device_top_down, &device_weights,
+        &device_bias, &source_precision, &top_precision, &predictive_count,
+        &device_reductions};
+    CUDA_CHECK(cuLaunchKernel(predictive_metrics, 1, 1, 1, 128, 1, 1, 0,
+                              nullptr, predictive_metrics_args, nullptr));
+    CUDA_CHECK(cuCtxSynchronize());
+    CUDA_CHECK(cuMemcpyDtoH(state, device_state, sizeof(state)));
+    CUDA_CHECK(cuMemcpyDtoH(reductions, device_reductions, sizeof(reductions)));
+    if (!(state[0] > 0.5f) || !(state[1] < -0.5f) || !(reductions[0] > 0.0f) ||
+        !std::isfinite(reductions[1]) || !(reductions[2] > 0.0f)) {
+        std::fprintf(stderr, "predictive metrics parity failed\n");
+        return 1;
+    }
+
     CUDA_CHECK(cuModuleUnload(module));
     CUDA_CHECK(cuCtxDestroy(context));
-    std::printf("leash CUDA probe passed: sm_%d%d, 5 kernels\n", major, minor);
+    std::printf("leash CUDA probe passed: sm_%d%d, 6 kernels\n", major, minor);
     return 0;
 }

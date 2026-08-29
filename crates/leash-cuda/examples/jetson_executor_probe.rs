@@ -1,6 +1,7 @@
 #[cfg(feature = "cuda")]
 use leash_cuda::{
     ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority, PredictiveState,
+    ResidentCognitionCheckpoint, ResidentCognitionLayer, RESIDENT_COGNITION_SCHEMA_VERSION,
 };
 
 #[cfg(not(feature = "cuda"))]
@@ -83,6 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             assert_parity(&cpu_result, &cuda_result);
         }
     }
+    resident_cognition_probe(&cpu, &cuda)?;
     let status = cuda.status();
     let metrics = cuda.metrics();
     println!(
@@ -152,6 +154,28 @@ fn assert_parity(cpu: &ComputeResult, cuda: &ComputeResult) {
             assert_float_slice(&cpu.state, &cuda.state);
             assert_float_slice(&cpu.weights, &cuda.weights);
             assert_float_slice(&cpu.bias, &cuda.bias);
+        }
+        (ComputeResult::CognitionLoaded, ComputeResult::CognitionLoaded) => {}
+        (ComputeResult::CognitionAdvanced(cpu), ComputeResult::CognitionAdvanced(cuda)) => {
+            assert_eq!(cpu.layers.len(), cuda.layers.len());
+            for (cpu, cuda) in cpu.layers.iter().zip(&cuda.layers) {
+                assert_eq!(cpu.sequence, cuda.sequence);
+                assert!(close(cpu.precision, cuda.precision));
+                assert!(close(cpu.prediction_error_l2, cuda.prediction_error_l2));
+                assert!(close(cpu.activation_mean, cuda.activation_mean));
+                assert!(close(cpu.activation_rms, cuda.activation_rms));
+            }
+            match (&cpu.snapshot, &cuda.snapshot) {
+                (Some(cpu), Some(cuda)) => {
+                    assert_eq!(cpu.layer, cuda.layer);
+                    assert_float_slice(&cpu.activation, &cuda.activation);
+                }
+                (None, None) => {}
+                _ => panic!("CPU and CUDA cognition snapshots differ"),
+            }
+        }
+        (ComputeResult::CognitionCheckpoint(cpu), ComputeResult::CognitionCheckpoint(cuda)) => {
+            assert_resident_checkpoint_parity(cpu, cuda)
         }
         _ => panic!("CPU and CUDA returned different result variants"),
     }
@@ -344,4 +368,111 @@ fn random_unit(seed: &mut u32) -> f32 {
 fn lcg(seed: &mut u32) -> u32 {
     *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
     *seed
+}
+
+#[cfg(feature = "cuda")]
+fn resident_cognition_probe(
+    cpu: &ComputeExecutor,
+    cuda: &ComputeExecutor,
+) -> Result<(), Box<dyn std::error::Error>> {
+    const DIMENSION: usize = 1_024;
+    let initial = ResidentCognitionCheckpoint {
+        schema_version: RESIDENT_COGNITION_SCHEMA_VERSION.to_string(),
+        sensor: vec![0.0; DIMENSION],
+        top_down: vec![0.0; DIMENSION],
+        layers: (0..3)
+            .map(|layer| ResidentCognitionLayer {
+                activation: vec![0.0; DIMENSION],
+                weights: vec![0.75 + layer as f32 * 0.05; DIMENSION],
+                bias: vec![0.0; DIMENSION],
+                sequence: 0,
+                precision: 0.0,
+                prediction_error_l2: 0.0,
+            })
+            .collect(),
+    };
+    assert_parity(
+        &run(
+            cpu,
+            ComputeJob::CognitionLoad {
+                checkpoint: initial.clone(),
+            },
+        )?,
+        &run(
+            cuda,
+            ComputeJob::CognitionLoad {
+                checkpoint: initial,
+            },
+        )?,
+    );
+    let mut seed = 0xc06e_1200_u32;
+    for tick in 0..100 {
+        let sensor = (0..DIMENSION)
+            .map(|_| random_unit(&mut seed))
+            .collect::<Vec<_>>();
+        let top_down = (0..DIMENSION)
+            .map(|_| random_unit(&mut seed) * 0.25)
+            .collect::<Vec<_>>();
+        let job = ComputeJob::CognitionAdvance {
+            sensor,
+            sensor_precision: 0.8,
+            top_down,
+            top_precision: 0.4,
+            due_layers: vec![true, tick % 2 == 0, tick % 10 == 0],
+            snapshot_layer: (tick % 10 == 0).then_some(2),
+        };
+        assert_parity(&run(cpu, job.clone())?, &run(cuda, job)?);
+    }
+    let cpu_checkpoint = run(cpu, ComputeJob::CognitionCheckpoint)?;
+    let cuda_checkpoint = run(cuda, ComputeJob::CognitionCheckpoint)?;
+    assert_parity(&cpu_checkpoint, &cuda_checkpoint);
+    let ComputeResult::CognitionCheckpoint(cpu_checkpoint) = cpu_checkpoint else {
+        unreachable!()
+    };
+    let ComputeResult::CognitionCheckpoint(cuda_checkpoint) = cuda_checkpoint else {
+        unreachable!()
+    };
+
+    run(
+        cpu,
+        ComputeJob::CognitionLoad {
+            checkpoint: cuda_checkpoint.clone(),
+        },
+    )?;
+    let restored_cpu = run(cpu, ComputeJob::CognitionCheckpoint)?;
+    assert_eq!(
+        restored_cpu,
+        ComputeResult::CognitionCheckpoint(cuda_checkpoint)
+    );
+    run(
+        cuda,
+        ComputeJob::CognitionLoad {
+            checkpoint: cpu_checkpoint.clone(),
+        },
+    )?;
+    let restored_cuda = run(cuda, ComputeJob::CognitionCheckpoint)?;
+    assert_eq!(
+        restored_cuda,
+        ComputeResult::CognitionCheckpoint(cpu_checkpoint)
+    );
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+fn assert_resident_checkpoint_parity(
+    cpu: &ResidentCognitionCheckpoint,
+    cuda: &ResidentCognitionCheckpoint,
+) {
+    assert_eq!(cpu.schema_version, cuda.schema_version);
+    assert_float_slice(&cpu.sensor, &cuda.sensor);
+    assert_float_slice(&cpu.top_down, &cuda.top_down);
+    assert_eq!(cpu.layers.len(), cuda.layers.len());
+    for (cpu, cuda) in cpu.layers.iter().zip(&cuda.layers) {
+        assert_eq!(cpu.sequence, cuda.sequence);
+        assert!(close(cpu.precision, cuda.precision));
+        assert!(close(cpu.prediction_error_l2, cuda.prediction_error_l2));
+        assert_float_slice(&cpu.activation, &cuda.activation);
+        assert_float_slice(&cpu.weights, &cuda.weights);
+        assert_float_slice(&cpu.bias, &cuda.bias);
+    }
 }

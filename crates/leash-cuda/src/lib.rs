@@ -11,24 +11,26 @@ mod device;
 use core::fmt;
 
 pub use executor::{
-    BackendKind, BackendStatus, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig,
-    ExecutorMetrics, JobId, JobPriority, JobTicket, PredictiveState, StartError, SubmitError,
-    WorkError,
+    BackendKind, BackendStatus, CognitionLayerMetrics, CognitionLayerSnapshot, CognitionStep,
+    ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, ExecutorMetrics, JobId,
+    JobPriority, JobTicket, PredictiveState, ResidentCognitionCheckpoint, ResidentCognitionLayer,
+    StartError, SubmitError, WorkError, RESIDENT_COGNITION_SCHEMA_VERSION,
 };
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";
 pub const ARTIFACT_SHA256: &str =
-    "839ac2f50841565cb0f7a64aa206bd223a71bbe5a7f0b46430e6506dfb77540f";
-pub const SOURCE_SHA256: &str = "f98093654a249453de49584fcdac4d7d53f763700e2514868f4e56149d2202b0";
+    "c96e10ac48d9b8e58fc9f31eb5cdf58ad5cb907ddd0c49d98784344e86a640a4";
+pub const SOURCE_SHA256: &str = "ffb6710f9611cf8984bbe44511e33a0d73e7564bba8e1f4b75987a8e888462be";
 pub const TARGET_SM: &str = "sm_87";
 pub const TARGET_PTX: &str = "compute_87";
 pub const CUDA_SDK: &str = "12.9.0";
-pub const KERNEL_NAMES: [&str; 5] = [
+pub const KERNEL_NAMES: [&str; 6] = [
     "project_occupancy",
     "lidar_transform",
     "collision_sector_reduce",
     "normalize_rgb_u8",
     "predictive_step",
+    "predictive_step_metrics",
 ];
 
 #[cfg(feature = "cuda")]
@@ -50,7 +52,7 @@ pub const fn artifact() -> KernelArtifact {
     KernelArtifact {
         schema_version: ARTIFACT_SCHEMA_VERSION,
         sha256: ARTIFACT_SHA256,
-        bytes: 36_032,
+        bytes: 39_080,
         cuda_sdk: CUDA_SDK,
         native_target: TARGET_SM,
         ptx_target: TARGET_PTX,
@@ -67,6 +69,8 @@ pub enum ComputeInputError {
     InvalidAngles,
     InvalidSector,
     InvalidNormalization,
+    InvalidCognitionState,
+    InvalidCognitionSchedule,
 }
 
 impl fmt::Display for ComputeInputError {
@@ -80,6 +84,12 @@ impl fmt::Display for ComputeInputError {
             Self::InvalidSector => formatter.write_str("collision sector is invalid"),
             Self::InvalidNormalization => {
                 formatter.write_str("RGB normalization parameters are invalid")
+            }
+            Self::InvalidCognitionState => {
+                formatter.write_str("resident cognition state is invalid or not loaded")
+            }
+            Self::InvalidCognitionSchedule => {
+                formatter.write_str("resident cognition schedule is invalid")
             }
         }
     }
@@ -301,7 +311,7 @@ mod tests {
         let artifact = artifact();
         assert_eq!(artifact.schema_version, "leash.cuda-artifact.v1");
         assert_eq!(artifact.sha256.len(), 64);
-        assert_eq!(artifact.bytes, 36_032);
+        assert_eq!(artifact.bytes, 39_080);
         assert_eq!(artifact.native_target, "sm_87");
         assert_eq!(artifact.ptx_target, "compute_87");
         assert_eq!(artifact.kernels, KERNEL_NAMES);

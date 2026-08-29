@@ -2,7 +2,8 @@ use std::{error::Error, hint::black_box, time::Instant};
 
 use leash_cuda::{
     BackendKind, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority,
-    PredictiveState,
+    PredictiveState, ResidentCognitionCheckpoint, ResidentCognitionLayer,
+    RESIDENT_COGNITION_SCHEMA_VERSION,
 };
 
 const DEFAULT_ITERATIONS: usize = 20;
@@ -19,6 +20,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let profiles = profiles();
     let mut results = Vec::with_capacity(profiles.len());
     for profile in profiles {
+        if let Some(setup) = profile.setup.clone() {
+            let cpu_setup = execute(&cpu, setup.clone())?;
+            let cuda_setup = execute(&cuda, setup)?;
+            assert_parity(&cpu_setup, &cuda_setup)?;
+        }
         let (cpu_first, cpu_first_ns) = timed_execute(&cpu, profile.job.clone())?;
         let (cuda_first, cuda_first_ns) = timed_execute(&cuda, profile.job.clone())?;
         assert_parity(&cpu_first, &cuda_first)?;
@@ -27,6 +33,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             black_box(execute(&cuda, profile.job.clone())?);
         }
         let (cpu_times, cuda_times) = measure_alternating(&cpu, &cuda, &profile.job, iterations)?;
+        if profile.verify_checkpoint {
+            let cpu_checkpoint = execute(&cpu, ComputeJob::CognitionCheckpoint)?;
+            let cuda_checkpoint = execute(&cuda, ComputeJob::CognitionCheckpoint)?;
+            assert_parity(&cpu_checkpoint, &cuda_checkpoint)?;
+        }
         results.push(BenchmarkResult {
             name: profile.name,
             elements: profile.elements,
@@ -170,6 +181,8 @@ struct WorkloadProfile {
     name: &'static str,
     elements: usize,
     job: ComputeJob,
+    setup: Option<ComputeJob>,
+    verify_checkpoint: bool,
 }
 
 fn profiles() -> Vec<WorkloadProfile> {
@@ -185,6 +198,8 @@ fn profiles() -> Vec<WorkloadProfile> {
         rgb("camera_large", 640, 480),
         cognition("cognition_small", 4_096),
         cognition("cognition_large", 65_536),
+        resident_cognition("cognition_resident_small", 4_096),
+        resident_cognition("cognition_resident_large", 65_536),
     ]
 }
 
@@ -200,6 +215,8 @@ fn occupancy(name: &'static str, cells: usize, depth: u32) -> WorkloadProfile {
         name,
         elements: cells.len().saturating_mul(depth as usize),
         job: ComputeJob::ProjectOccupancy { cells, depth },
+        setup: None,
+        verify_checkpoint: false,
     }
 }
 
@@ -225,6 +242,8 @@ fn lidar(name: &'static str, count: usize) -> WorkloadProfile {
             yaw_offset_rad: 0.1,
             clockwise: false,
         },
+        setup: None,
+        verify_checkpoint: false,
     }
 }
 
@@ -248,6 +267,8 @@ fn collision(name: &'static str, count: usize) -> WorkloadProfile {
             sector_center_rad: 0.0,
             sector_half_width_rad: core::f32::consts::FRAC_PI_4,
         },
+        setup: None,
+        verify_checkpoint: false,
     }
 }
 
@@ -273,6 +294,8 @@ fn spatial(name: &'static str, count: usize) -> WorkloadProfile {
             sector_center_rad: 0.0,
             sector_half_width_rad: core::f32::consts::FRAC_PI_4,
         },
+        setup: None,
+        verify_checkpoint: false,
     }
 }
 
@@ -289,6 +312,8 @@ fn rgb(name: &'static str, width: usize, height: usize) -> WorkloadProfile {
             mean: [0.485, 0.456, 0.406],
             inverse_std: [4.366_812, 4.464_286, 4.444_444],
         },
+        setup: None,
+        verify_checkpoint: false,
     }
 }
 
@@ -313,6 +338,40 @@ fn cognition(name: &'static str, count: usize) -> WorkloadProfile {
             source_precision: 1.0,
             top_precision: 0.5,
         },
+        setup: None,
+        verify_checkpoint: false,
+    }
+}
+
+fn resident_cognition(name: &'static str, count: usize) -> WorkloadProfile {
+    let checkpoint = ResidentCognitionCheckpoint {
+        schema_version: RESIDENT_COGNITION_SCHEMA_VERSION.to_string(),
+        sensor: vec![0.0; count],
+        top_down: vec![0.0; count],
+        layers: (0..3)
+            .map(|layer| ResidentCognitionLayer {
+                activation: vec![0.0; count],
+                weights: vec![0.75 + layer as f32 * 0.05; count],
+                bias: vec![0.0; count],
+                sequence: 0,
+                precision: 0.0,
+                prediction_error_l2: 0.0,
+            })
+            .collect(),
+    };
+    WorkloadProfile {
+        name,
+        elements: count,
+        setup: Some(ComputeJob::CognitionLoad { checkpoint }),
+        job: ComputeJob::CognitionAdvance {
+            sensor: vec![0.5; count],
+            sensor_precision: 1.0,
+            top_down: vec![0.0; count],
+            top_precision: 0.5,
+            due_layers: vec![true; 3],
+            snapshot_layer: None,
+        },
+        verify_checkpoint: true,
     }
 }
 
@@ -407,6 +466,40 @@ fn assert_parity(cpu: &ComputeResult, cuda: &ComputeResult) -> Result<(), Box<dy
             assert_float_slice(&cpu.state, &cuda.state)?;
             assert_float_slice(&cpu.weights, &cuda.weights)?;
             assert_float_slice(&cpu.bias, &cuda.bias)?;
+        }
+        (ComputeResult::CognitionLoaded, ComputeResult::CognitionLoaded) => {}
+        (ComputeResult::CognitionAdvanced(cpu), ComputeResult::CognitionAdvanced(cuda)) => {
+            if cpu.layers.len() != cuda.layers.len() {
+                return Err("resident cognition layer counts differ".into());
+            }
+            for (cpu, cuda) in cpu.layers.iter().zip(&cuda.layers) {
+                if cpu.sequence != cuda.sequence
+                    || !close(cpu.precision, cuda.precision)
+                    || !close(cpu.prediction_error_l2, cuda.prediction_error_l2)
+                    || !close(cpu.activation_mean, cuda.activation_mean)
+                    || !close(cpu.activation_rms, cuda.activation_rms)
+                {
+                    return Err("resident cognition metrics parity failed".into());
+                }
+            }
+        }
+        (ComputeResult::CognitionCheckpoint(cpu), ComputeResult::CognitionCheckpoint(cuda)) => {
+            if cpu.layers.len() != cuda.layers.len() {
+                return Err("resident cognition checkpoint layer counts differ".into());
+            }
+            assert_float_slice(&cpu.sensor, &cuda.sensor)?;
+            assert_float_slice(&cpu.top_down, &cuda.top_down)?;
+            for (cpu, cuda) in cpu.layers.iter().zip(&cuda.layers) {
+                if cpu.sequence != cuda.sequence
+                    || !close(cpu.precision, cuda.precision)
+                    || !close(cpu.prediction_error_l2, cuda.prediction_error_l2)
+                {
+                    return Err("resident cognition checkpoint metadata parity failed".into());
+                }
+                assert_float_slice(&cpu.activation, &cuda.activation)?;
+                assert_float_slice(&cpu.weights, &cuda.weights)?;
+                assert_float_slice(&cpu.bias, &cuda.bias)?;
+            }
         }
         _ => return Err("CPU and CUDA result variants differ".into()),
     }

@@ -29,7 +29,7 @@ g++ -std=c++17 tests/jetson_driver_probe.cpp -I/usr/local/cuda/include \
 ```
 
 With Rust installed on the target, the same check exercises the bounded
-single-owner `cudarc` executor and compares all five kernels to their CPU
+single-owner `cudarc` executor and compares all six kernels to their CPU
 oracles over fixed, empty, maximum-size, and deterministic randomized inputs:
 
 ```bash

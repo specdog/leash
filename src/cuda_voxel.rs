@@ -6,7 +6,8 @@ use std::{
 
 use anyhow::{anyhow, ensure, Context, Result};
 use leash_cuda::{
-    ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority, WorkError,
+    BackendStatus, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority,
+    WorkError,
 };
 
 const COMPUTE_DEADLINE: Duration = Duration::from_millis(100);
@@ -42,22 +43,30 @@ pub fn probe() -> Result<()> {
 }
 
 pub fn project_occupancy(cells: &[i8], depth: u32) -> Result<Vec<i32>> {
-    let ticket = executor()?
-        .submit(
-            JobPriority::Interactive,
-            Some(Instant::now() + COMPUTE_DEADLINE),
-            ComputeJob::ProjectOccupancy {
-                cells: cells.to_vec(),
-                depth,
-            },
-        )
-        .context("submit voxel projection to the shared CUDA executor")?;
-    match ticket.wait().map_err(work_error)? {
+    match execute(ComputeJob::ProjectOccupancy {
+        cells: cells.to_vec(),
+        depth,
+    })? {
         ComputeResult::Occupancy(output) => Ok(output),
         _ => Err(anyhow!("CUDA executor returned the wrong result variant")),
     }
 }
 
+pub(crate) fn execute(job: ComputeJob) -> Result<ComputeResult> {
+    let ticket = executor()?
+        .submit(
+            JobPriority::Interactive,
+            Some(Instant::now() + COMPUTE_DEADLINE),
+            job,
+        )
+        .context("submit work to the shared CUDA executor")?;
+    ticket.wait().map_err(work_error)
+}
+
+pub(crate) fn backend_status() -> Result<BackendStatus> {
+    Ok(executor()?.status())
+}
+
 fn work_error(error: WorkError) -> anyhow::Error {
-    anyhow!("CUDA voxel projection failed: {error}")
+    anyhow!("CUDA compute failed: {error}")
 }

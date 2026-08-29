@@ -3125,6 +3125,31 @@
     },
     "CognitionStatusV1": {
       "$defs": {
+        "CognitionBackendStatusV1": {
+          "properties": {
+            "active": {
+              "type": "string"
+            },
+            "degraded": {
+              "type": "boolean"
+            },
+            "fallback_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "selected": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selected",
+            "active",
+            "degraded"
+          ],
+          "type": "object"
+        },
         "CognitionBoundaryFrameV1": {
           "properties": {
             "destination": {
@@ -3392,6 +3417,9 @@
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "backend_status": {
+          "$ref": "#/$defs/CognitionBackendStatusV1"
+        },
         "boundary": {
           "$ref": "#/$defs/CognitionBoundaryFrameV1"
         },
@@ -3426,6 +3454,7 @@
         "capabilities",
         "layers",
         "boundary",
+        "backend_status",
         "zero_motion"
       ],
       "title": "CognitionStatusV1",
