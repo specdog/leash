@@ -17,8 +17,9 @@ use tracing::{debug, warn};
 
 #[cfg(feature = "waveshare-ugv")]
 use crate::waveshare_ugv::{
-    imu_with_freshness, read_base_telemetry_loop, scan_blocks_drive, spawn_ld06_reader,
-    with_freshness, BaseTelemetryUpdate, WaveshareSensorConfig, WaveshareUgvDriver,
+    decode_base_frame, imu_with_freshness, read_base_telemetry_loop, scan_blocks_drive,
+    spawn_ld06_reader, with_freshness, BaseTelemetryUpdate, WaveshareSensorConfig,
+    WaveshareUgvDriver,
 };
 
 #[cfg(feature = "mavlink-drone")]
@@ -140,7 +141,38 @@ pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
         Ok(())
     }
 
+    #[cfg(feature = "waveshare-ugv")]
+    fn owns_native_telemetry(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "waveshare-ugv")]
+    fn take_native_telemetry(&self) -> Option<Box<str>> {
+        None
+    }
+
     fn request_telemetry(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn authorize_control(&self, _operator: &str, _ttl: Duration) -> Result<()> {
+        Ok(())
+    }
+
+    fn update_control_evidence(
+        &self,
+        _obstacle_blocked: bool,
+        _lidar_fresh: bool,
+        _localization_fresh: bool,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn emergency_stop(&self) -> Result<()> {
+        self.stop()
+    }
+
+    fn reset_emergency_stop(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -2238,6 +2270,11 @@ impl Harness {
             command.last_cmd_at = None;
         }
 
+        self.driver.authorize_control(
+            &operator_owner_id(&token),
+            Duration::from_secs(ttl_secs.max(1)),
+        )?;
+
         let mut sessions = self.sessions.lock();
         sessions.clear();
         sessions.insert(
@@ -2301,13 +2338,16 @@ impl Harness {
         self.validate_calibration_drive(token, left, right)?;
 
         #[cfg(feature = "waveshare-ugv")]
-        if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON)
-            && self.obstacle_blocks_drive(left, right)
-        {
-            self.stop_for_obstacle(requested_left, requested_right)?;
-            return Err(anyhow!(
-                "drive blocked by the configured lidar collision threshold"
-            ));
+        if self.config.profile == Profile::WaveshareUgv {
+            let (obstacle_blocked, lidar_fresh) = self.waveshare_control_evidence(left, right);
+            self.driver
+                .update_control_evidence(obstacle_blocked, lidar_fresh, true)?;
+            if (left.abs() > f64::EPSILON || right.abs() > f64::EPSILON) && obstacle_blocked {
+                self.stop_for_obstacle(requested_left, requested_right)?;
+                return Err(anyhow!(
+                    "drive blocked by the configured lidar collision threshold"
+                ));
+            }
         }
 
         let mut command = self.command.lock();
@@ -2369,21 +2409,24 @@ impl Harness {
     }
 
     #[cfg(feature = "waveshare-ugv")]
-    fn obstacle_blocks_drive(&self, left: f64, right: f64) -> bool {
+    fn waveshare_control_evidence(&self, left: f64, right: f64) -> (bool, bool) {
         if self.config.profile != Profile::WaveshareUgv {
-            return false;
+            return (false, true);
         }
         let Some(config) = self.waveshare_sensors.as_ref() else {
-            return false;
+            return (false, true);
         };
         let Some(threshold_m) = config.collision_threshold_m() else {
-            return false;
+            return (false, true);
         };
         let Some(stale_after_ms) = config.lidar_stale_after_ms() else {
-            return false;
+            return (false, true);
         };
         let status = with_freshness(self.raw.read().range_scan.clone(), now_ms(), stale_after_ms);
-        scan_blocks_drive(&status, threshold_m, left, right)
+        (
+            scan_blocks_drive(&status, threshold_m, left, right),
+            status.status == crate::types::SensorDataStatus::Available,
+        )
     }
 
     #[cfg(feature = "waveshare-ugv")]
@@ -2392,9 +2435,14 @@ impl Harness {
             let command = self.command.lock();
             (command.left_cmd, command.right_cmd)
         };
-        if (left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON)
-            || !self.obstacle_blocks_drive(left, right)
+        let (obstacle_blocked, lidar_fresh) = self.waveshare_control_evidence(left, right);
+        if let Err(error) = self
+            .driver
+            .update_control_evidence(obstacle_blocked, lidar_fresh, true)
         {
+            warn!(?error, "runtime v2 safety evidence update failed");
+        }
+        if (left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON) || !obstacle_blocked {
             return;
         }
         if let Err(error) = self.stop_for_obstacle(0.0, 0.0) {
@@ -2512,10 +2560,14 @@ impl Harness {
         self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
         self.cancel_planner_state("estop", "planner movement cancelled by estop");
         let mut command = self.command.lock();
-        self.write_stop_command(ActionCommandEvidence::stopped(
-            command.speed_mode.cap(),
-            ACTION_SAFETY_ESTOP,
-        ))?;
+        let mut io = self.command_io.lock();
+        let mut evidence = self.action_evidence.lock();
+        self.driver.emergency_stop()?;
+        io.sequence = io.sequence.saturating_add(1);
+        evidence.transition(
+            now_ns(),
+            ActionCommandEvidence::stopped(command.speed_mode.cap(), ACTION_SAFETY_ESTOP),
+        );
         command.left_cmd = 0.0;
         command.right_cmd = 0.0;
         command.estop = true;
@@ -2915,8 +2967,18 @@ impl Harness {
     }
 
     pub fn reset_estop(&self, token: Option<&str>) -> Result<()> {
-        self.validate_session(token)?;
+        let session = self.validate_session(token)?;
         let mut command = self.command.lock();
+        self.driver.reset_emergency_stop()?;
+        if let (Some(token), Some(session)) = (token, session) {
+            self.driver.authorize_control(
+                &operator_owner_id(token),
+                session
+                    .expires_at
+                    .saturating_duration_since(Instant::now())
+                    .max(Duration::from_millis(1)),
+            )?;
+        }
         self.action_evidence.lock().transition(
             now_ns(),
             ActionCommandEvidence::stopped(command.speed_mode.cap(), 0),
@@ -3170,23 +3232,42 @@ impl Harness {
             return;
         };
 
-        match self.driver.telemetry_reader() {
-            Ok(Some(port)) => {
-                let raw = self.raw.clone();
-                let publish = Arc::new(move |update: BaseTelemetryUpdate| {
-                    apply_waveshare_update(&raw, update);
-                });
-                let raw = self.raw.clone();
-                let publish_status = Arc::new(move |status: ImuStatus| {
-                    raw.write().imu = status;
-                });
-                let imu = sensor_config.imu.clone();
-                std::thread::spawn(move || {
-                    read_base_telemetry_loop(port, imu, publish, publish_status)
-                });
+        if self.driver.owns_native_telemetry() {
+            let driver = self.driver.clone();
+            let raw = self.raw.clone();
+            let imu = sensor_config.imu.clone();
+            std::thread::spawn(move || loop {
+                if let Some(line) = driver.take_native_telemetry() {
+                    match serde_json::from_str::<Value>(&line) {
+                        Ok(frame) => {
+                            if let Some(update) = decode_base_frame(frame, &imu, now_ms()) {
+                                apply_waveshare_update(&raw, update);
+                            }
+                        }
+                        Err(error) => warn!(?error, "runtime v2 telemetry decode failed"),
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            });
+        } else {
+            match self.driver.telemetry_reader() {
+                Ok(Some(port)) => {
+                    let raw = self.raw.clone();
+                    let publish = Arc::new(move |update: BaseTelemetryUpdate| {
+                        apply_waveshare_update(&raw, update);
+                    });
+                    let raw = self.raw.clone();
+                    let publish_status = Arc::new(move |status: ImuStatus| {
+                        raw.write().imu = status;
+                    });
+                    let imu = sensor_config.imu.clone();
+                    std::thread::spawn(move || {
+                        read_base_telemetry_loop(port, imu, publish, publish_status)
+                    });
+                }
+                Ok(None) => {}
+                Err(err) => warn!(?err, "waveshare telemetry reader unavailable"),
             }
-            Ok(None) => {}
-            Err(err) => warn!(?err, "waveshare telemetry reader unavailable"),
         }
 
         if let Some(lidar) = sensor_config.lidar.clone() {

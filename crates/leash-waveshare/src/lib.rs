@@ -382,6 +382,10 @@ enum ControllerCommand {
         id: CommandId,
         reply: mpsc::Sender<CommandAck>,
     },
+    EnableTelemetry {
+        id: CommandId,
+        reply: mpsc::Sender<CommandAck>,
+    },
 }
 
 struct SharedState {
@@ -430,8 +434,28 @@ impl ControllerHandle {
         Ok(AckTicket { receiver })
     }
 
+    pub fn enable_telemetry(&self, id: CommandId) -> Result<AckTicket, SubmitError> {
+        let (reply, receiver) = mpsc::channel();
+        self.enqueue(ControllerCommand::EnableTelemetry { id, reply })?;
+        Ok(AckTicket { receiver })
+    }
+
     pub fn safety(&self) -> SafetySender {
         self.safety.clone()
+    }
+
+    /// Clears the controller-owner e-stop latch after the CPU safety authority
+    /// has approved the corresponding reset transition.
+    ///
+    /// This does not reset the safety kernel and cannot authorize motion by
+    /// itself. Callers must reset the kernel first and then establish a fresh
+    /// operator lease before submitting another non-zero command.
+    pub fn reset_estop_latch(&self, approved: bool) -> bool {
+        if !approved || self.shared.shutdown.load(Ordering::Acquire) {
+            return false;
+        }
+        self.shared.estopped.store(false, Ordering::Release);
+        true
     }
 
     pub fn status(&self) -> OwnerStatus {
@@ -965,6 +989,9 @@ fn process_command(
         ControllerCommand::RequestTelemetry { id, reply } => {
             (encode_telemetry_request(), id, None, false, reply)
         }
+        ControllerCommand::EnableTelemetry { id, reply } => {
+            (encode_telemetry_enable(), id, None, false, reply)
+        }
     };
     match write_frame(stream, &frame) {
         Ok(()) => {
@@ -1010,6 +1037,7 @@ fn reply_rejected(
         }
         ControllerCommand::Gimbal { command, reply } => (command.id, None, reply),
         ControllerCommand::RequestTelemetry { id, reply } => (id, None, reply),
+        ControllerCommand::EnableTelemetry { id, reply } => (id, None, reply),
     };
     let _ = reply.send(CommandAck {
         command_id,
@@ -1149,6 +1177,12 @@ pub fn encode_gimbal(command: GimbalCommand) -> Vec<u8> {
 
 pub fn encode_telemetry_request() -> Vec<u8> {
     json_line(json!({"T": 130}))
+}
+
+pub fn encode_telemetry_enable() -> Vec<u8> {
+    let mut bytes = json_line(json!({"T": 142, "cmd": 100}));
+    bytes.extend(json_line(json!({"T": 131, "cmd": 1})));
+    bytes
 }
 
 fn json_line(value: serde_json::Value) -> Vec<u8> {
@@ -1313,6 +1347,19 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_enable_preserves_the_two_legacy_owner_frames() {
+        let encoded = String::from_utf8(encode_telemetry_enable()).unwrap();
+        let frames = encoded
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            frames,
+            vec![json!({"T": 142, "cmd": 100}), json!({"T": 131, "cmd": 1})]
+        );
+    }
+
+    #[test]
     fn one_owner_serializes_partial_writes_and_acknowledges_identity() {
         let transcript = Arc::new(Mutex::new(Transcript {
             maximum_write: 3,
@@ -1364,6 +1411,10 @@ mod tests {
             handle.submit_drive(authorized(3, 0.2, 0.2)),
             Err(SubmitError::EStopped)
         ));
+        assert!(!handle.reset_estop_latch(false));
+        assert!(handle.status().estopped);
+        assert!(handle.reset_estop_latch(true));
+        assert!(!handle.status().estopped);
     }
 
     #[test]

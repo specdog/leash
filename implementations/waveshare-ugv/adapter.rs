@@ -1,18 +1,38 @@
 use std::{
     env,
-    io::{BufRead, BufReader, ErrorKind, Write},
-    sync::Arc,
+    io::{BufRead, BufReader, ErrorKind},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
+use leash_core::{
+    Clock, CommandId, ControlEffect, ControlInput, ControlKernel, ControlKernelConfig,
+    DifferentialDrive, DurationNanos, MonotonicNanos, NormalizedDrive, OperatorId, ProducerEpoch,
+    Sequence,
+};
+use leash_runtime::{
+    CpuSafetySupervisor, EvidenceJournal, EvidenceJournalConfig, SafetyKind, SupervisorConfig,
+    SupervisorEvent, SupervisorHandle, TransitionReceipt,
+};
+use leash_waveshare::{
+    AckOutcome, CommandAck, ControllerHandle, ControllerIoFactory, ControllerOwner, GimbalCommand,
+    OwnerConfig, SerialPortFactory, WaveshareActuationPort,
+};
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use crate::{
-    adapter::{waveshare_drive_values, GimbalAdapter, MobileBaseAdapter},
+    adapter::{GimbalAdapter, MobileBaseAdapter},
     config::HarnessConfig,
+    daemon::default_state_dir,
     runtime::RobotDriver,
     types::{ImuSample, ImuStatus, PlanarRangeScan, RangeScanStatus, SensorDataStatus, Vector3Si},
 };
@@ -22,91 +42,406 @@ const LD06_VERSION_LENGTH: u8 = 0x2c;
 const LD06_PACKET_LEN: usize = 47;
 const LD06_POINTS_PER_PACKET: usize = 12;
 const STANDARD_GRAVITY_MPS2: f64 = 9.80665;
+const V2_COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
+const V2_DRIVE_DEADLINE: DurationNanos = DurationNanos::new(100_000_000);
 
 pub(crate) const WAVESHARE_SOURCE: &str = "waveshare-ugv";
 pub(crate) const LD06_SOURCE: &str = "waveshare-ugv-ld06";
 
+#[derive(Clone)]
+struct SharedMonotonicClock {
+    origin: Instant,
+}
+
+impl Clock for SharedMonotonicClock {
+    fn now(&mut self) -> MonotonicNanos {
+        MonotonicNanos::new(u64::try_from(self.origin.elapsed().as_nanos()).unwrap_or(u64::MAX))
+    }
+}
+
 pub(crate) struct WaveshareUgvDriver {
-    writer: Mutex<Box<dyn serialport::SerialPort>>,
-    drive_invert: bool,
-    drive_swap: bool,
+    supervisor: Mutex<CpuSafetySupervisor<CommandAck>>,
+    supervisor_handle: SupervisorHandle,
+    _evidence_journal: EvidenceJournal,
+    controller: Mutex<ControllerOwner>,
+    controller_handle: ControllerHandle,
+    next_aux_command: AtomicU64,
+    clock_origin: Instant,
 }
 
 impl WaveshareUgvDriver {
     pub(crate) fn open(config: &HarnessConfig) -> Result<Self> {
-        let port = serialport::new(&config.serial_port, config.serial_baud)
-            .timeout(Duration::from_millis(200))
-            .open()
-            .with_context(|| {
-                format!(
-                    "open Waveshare UGV serial port {} @ {}",
-                    config.serial_port, config.serial_baud
-                )
-            })?;
-        Ok(Self {
-            writer: Mutex::new(port),
-            drive_invert: config.drive_invert,
-            drive_swap: config.drive_swap,
-        })
+        let factory = SerialPortFactory::new(
+            config.serial_port.clone(),
+            config.serial_baud,
+            Duration::from_millis(2),
+        )
+        .context("configure runtime v2 Waveshare serial owner")?;
+        Self::open_runtime(config, Box::new(factory), runtime_v2_evidence_path()?)
     }
 
-    fn write_json(&self, payload: Value, context: &'static str) -> Result<()> {
-        let line = payload.to_string() + "\n";
-        let mut writer = self.writer.lock();
-        writer.write_all(line.as_bytes()).context(context)?;
-        writer.flush().context(context)?;
-        Ok(())
+    fn open_runtime(
+        config: &HarnessConfig,
+        factory: Box<dyn ControllerIoFactory>,
+        evidence_path: PathBuf,
+    ) -> Result<Self> {
+        let clock_origin = Instant::now();
+        let controller = ControllerOwner::spawn(
+            factory,
+            Box::new(SharedMonotonicClock {
+                origin: clock_origin,
+            }),
+            OwnerConfig {
+                drive_invert: config.drive_invert,
+                drive_swap: config.drive_swap,
+                ..OwnerConfig::default()
+            },
+        )
+        .context("start runtime v2 Waveshare serial owner")?;
+        let controller_handle = controller.handle();
+
+        if let Some(parent) = evidence_path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("create runtime v2 evidence directory {}", parent.display())
+            })?;
+        }
+        let evidence_journal = EvidenceJournal::open(EvidenceJournalConfig::new(&evidence_path))
+            .with_context(|| {
+                format!(
+                    "open runtime v2 evidence journal {}",
+                    evidence_path.display()
+                )
+            })?;
+
+        let epoch_seed = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        )
+        .unwrap_or(u64::MAX - 1)
+        .max(1);
+        let command_epoch =
+            ProducerEpoch::new(epoch_seed).context("create runtime v2 command producer epoch")?;
+        let evidence_epoch = ProducerEpoch::new(epoch_seed.saturating_add(1))
+            .or_else(|_| ProducerEpoch::new(1))
+            .context("create runtime v2 evidence producer epoch")?;
+        let kernel = ControlKernel::new(ControlKernelConfig {
+            command_epoch,
+            evidence_epoch,
+            deadman: DurationNanos::from_millis(config.deadman_ms)
+                .context("configure runtime v2 deadman")?,
+        });
+        let supervisor = CpuSafetySupervisor::spawn_with_evidence(
+            kernel,
+            WaveshareActuationPort::new(controller_handle.clone()),
+            Box::new(SharedMonotonicClock {
+                origin: clock_origin,
+            }),
+            SupervisorConfig::default(),
+            evidence_journal.producer(),
+        )
+        .context("start runtime v2 CPU safety supervisor")?;
+        let supervisor_handle = supervisor.handle();
+        let driver = Self {
+            supervisor: Mutex::new(supervisor),
+            supervisor_handle,
+            _evidence_journal: evidence_journal,
+            controller: Mutex::new(controller),
+            controller_handle,
+            next_aux_command: AtomicU64::new(1),
+            clock_origin,
+        };
+        driver.wait_until_connected(&config.serial_port, config.serial_baud)?;
+        driver.submit_control(ControlInput::UpdateEvidence {
+            obstacle_blocked: false,
+            lidar_fresh: true,
+            localization_fresh: true,
+        })?;
+        Ok(driver)
+    }
+
+    fn now(&self) -> MonotonicNanos {
+        MonotonicNanos::new(
+            u64::try_from(self.clock_origin.elapsed().as_nanos()).unwrap_or(u64::MAX),
+        )
+    }
+
+    fn wait_until_connected(&self, device: &str, baud: u32) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let status = self.controller_handle.status();
+            if status.connected && status.metrics.writes >= 1 {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(anyhow!(
+                    "runtime v2 Waveshare serial owner did not connect to {device} @ {baud}: {}",
+                    status
+                        .last_error
+                        .as_deref()
+                        .unwrap_or("connection timed out")
+                ));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn submit_control(&self, input: ControlInput) -> Result<TransitionReceipt> {
+        let ticket = self
+            .supervisor_handle
+            .submit(input)
+            .context("submit runtime v2 control input")?;
+        let receipt = ticket
+            .wait_timeout(V2_COMMAND_TIMEOUT)
+            .context("wait for runtime v2 control transition")?
+            .ok_or_else(|| anyhow!("runtime v2 control transition timed out"))?
+            .map_err(|error| anyhow!(error.to_string()))?;
+        if let Some(reason) = receipt.effects.iter().find_map(|effect| match effect {
+            ControlEffect::Denied { reason, .. } => Some(reason),
+            _ => None,
+        }) {
+            return Err(anyhow!("runtime v2 safety denied command: {reason:?}"));
+        }
+        Ok(receipt)
+    }
+
+    fn wait_for_ack(&self, command_id: CommandId) -> Result<CommandAck> {
+        let deadline = Instant::now() + V2_COMMAND_TIMEOUT;
+        loop {
+            if let Some(SupervisorEvent::Acknowledged(ack)) =
+                self.supervisor.lock().take_event().map(|event| event.value)
+            {
+                if ack.command_id == command_id {
+                    if ack.outcome == AckOutcome::Applied {
+                        return Ok(ack);
+                    }
+                    return Err(anyhow!(
+                        "runtime v2 Waveshare command was not applied: {:?}{}",
+                        ack.outcome,
+                        ack.detail
+                            .as_deref()
+                            .map(|detail| format!(": {detail}"))
+                            .unwrap_or_default()
+                    ));
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(anyhow!("runtime v2 Waveshare acknowledgement timed out"));
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn next_aux_command_id(&self) -> Result<CommandId> {
+        let sequence = self.next_aux_command.fetch_add(1, Ordering::AcqRel);
+        Ok(CommandId::new(
+            ProducerEpoch::new(1).expect("one is non-zero"),
+            Sequence::new(sequence).context("runtime v2 auxiliary command sequence exhausted")?,
+        ))
+    }
+
+    fn wait_for_safety(&self, kind: SafetyKind, previous_applied: u64) -> Result<()> {
+        let deadline = Instant::now() + V2_COMMAND_TIMEOUT;
+        loop {
+            let status = self.controller_handle.status();
+            let receipt = match kind {
+                SafetyKind::Stop => status.last_stop_receipt,
+                SafetyKind::EStop => status.last_estop_receipt,
+            };
+            if receipt.is_some_and(|receipt| {
+                receipt.applied_sequence > previous_applied && receipt.verified_zero
+            }) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(anyhow!("runtime v2 {kind:?} acknowledgement timed out"));
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn take_telemetry_json(&self) -> Option<Box<str>> {
+        self.controller
+            .lock()
+            .take_telemetry()
+            .map(|sample| sample.value.json)
     }
 }
 
+fn runtime_v2_evidence_path() -> Result<PathBuf> {
+    if let Some(path) =
+        env::var_os("LEASH_RUNTIME_V2_EVIDENCE_PATH").filter(|path| !path.is_empty())
+    {
+        return Ok(PathBuf::from(path));
+    }
+    Ok(default_state_dir()?.join("runtime-v2/waveshare.evidence"))
+}
+
 impl RobotDriver for WaveshareUgvDriver {
-    fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
-        let writer = self.writer.lock();
-        writer
-            .try_clone()
-            .map(Some)
-            .context("clone Waveshare UGV serial port for telemetry")
+    fn owns_native_telemetry(&self) -> bool {
+        true
+    }
+
+    fn take_native_telemetry(&self) -> Option<Box<str>> {
+        self.take_telemetry_json()
+    }
+
+    fn authorize_control(&self, operator: &str, ttl: Duration) -> Result<()> {
+        let expires_at = self
+            .now()
+            .checked_add(DurationNanos::new(
+                u64::try_from(ttl.as_nanos()).unwrap_or(u64::MAX),
+            ))
+            .context("runtime v2 operator lease overflow")?;
+        self.submit_control(ControlInput::Authorize {
+            operator: OperatorId::new(operator.to_string())
+                .context("runtime v2 operator identity")?,
+            expires_at,
+        })?;
+        Ok(())
+    }
+
+    fn update_control_evidence(
+        &self,
+        obstacle_blocked: bool,
+        lidar_fresh: bool,
+        localization_fresh: bool,
+    ) -> Result<()> {
+        self.submit_control(ControlInput::UpdateEvidence {
+            obstacle_blocked,
+            lidar_fresh,
+            localization_fresh,
+        })?;
+        Ok(())
+    }
+
+    fn emergency_stop(&self) -> Result<()> {
+        let previous = self
+            .controller_handle
+            .status()
+            .last_estop_receipt
+            .map_or(0, |receipt| receipt.applied_sequence);
+        self.supervisor_handle
+            .estop()
+            .context("request runtime v2 e-stop")?;
+        self.wait_for_safety(SafetyKind::EStop, previous)
+    }
+
+    fn reset_emergency_stop(&self) -> Result<()> {
+        let receipt = self.submit_control(ControlInput::ResetEStop { approved: true })?;
+        let disarmed = receipt.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                ControlEffect::SafetyChanged {
+                    state: leash_core::SafetyState::Disarmed
+                }
+            )
+        });
+        if !disarmed || !self.controller_handle.reset_estop_latch(true) {
+            return Err(anyhow!("runtime v2 e-stop reset was not applied"));
+        }
+        Ok(())
     }
 
     fn enable_telemetry(&self) -> Result<()> {
-        self.write_json(
-            json!({"T": 142, "cmd": 100}),
-            "set Waveshare UGV telemetry interval",
-        )?;
-        self.write_json(
-            json!({"T": 131, "cmd": 1}),
-            "enable Waveshare UGV telemetry flow",
-        )?;
-        self.request_telemetry()
+        let command_id = self.next_aux_command_id()?;
+        let acknowledgement = self
+            .controller_handle
+            .enable_telemetry(command_id)
+            .context("queue runtime v2 Waveshare telemetry enable")?
+            .wait_timeout(V2_COMMAND_TIMEOUT)
+            .context("wait for runtime v2 Waveshare telemetry enable")?
+            .ok_or_else(|| anyhow!("runtime v2 Waveshare telemetry enable timed out"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!(
+                "runtime v2 Waveshare telemetry enable was not applied: {:?}",
+                acknowledgement.outcome
+            ));
+        }
+        Ok(())
     }
 
     fn request_telemetry(&self) -> Result<()> {
-        self.write_json(json!({"T": 130}), "request Waveshare UGV base telemetry")
+        let command_id = self.next_aux_command_id()?;
+        let acknowledgement = self
+            .controller_handle
+            .request_telemetry(command_id)
+            .context("queue runtime v2 Waveshare telemetry request")?
+            .wait_timeout(V2_COMMAND_TIMEOUT)
+            .context("wait for runtime v2 Waveshare telemetry request")?
+            .ok_or_else(|| anyhow!("runtime v2 Waveshare telemetry request timed out"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!(
+                "runtime v2 Waveshare telemetry request was not applied: {:?}",
+                acknowledgement.outcome
+            ));
+        }
+        Ok(())
     }
 }
 
 impl MobileBaseAdapter for WaveshareUgvDriver {
     fn drive(&self, left: f64, right: f64) -> Result<()> {
-        let (left, right) = waveshare_drive_values(left, right, self.drive_invert, self.drive_swap);
-        self.write_json(
-            json!({"T": 1, "L": left, "R": right}),
-            "write Waveshare UGV drive command",
-        )
+        let command = DifferentialDrive::new(
+            NormalizedDrive::new(left).context("validate runtime v2 left drive")?,
+            NormalizedDrive::new(right).context("validate runtime v2 right drive")?,
+        );
+        let receipt = self.submit_control(ControlInput::Drive {
+            command,
+            deadline: self
+                .now()
+                .checked_add(V2_DRIVE_DEADLINE)
+                .context("runtime v2 drive deadline overflow")?,
+        })?;
+        let command_id = receipt
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                ControlEffect::Actuate { command, .. } => Some(command.command_id()),
+                _ => None,
+            })
+            .ok_or_else(|| anyhow!("runtime v2 drive transition did not authorize actuation"))?;
+        self.wait_for_ack(command_id)?;
+        Ok(())
+    }
+
+    fn stop(&self) -> Result<()> {
+        let previous = self
+            .controller_handle
+            .status()
+            .last_stop_receipt
+            .map_or(0, |receipt| receipt.applied_sequence);
+        self.supervisor_handle
+            .stop()
+            .context("request runtime v2 stop")?;
+        self.wait_for_safety(SafetyKind::Stop, previous)
     }
 }
 
 impl GimbalAdapter for WaveshareUgvDriver {
     fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        self.write_json(
-            json!({
-                "T": 133,
-                "X": pan_deg,
-                "Y": tilt_deg,
-                "SPD": speed,
-                "ACC": accel
-            }),
-            "write Waveshare UGV camera gimbal command",
-        )
+        let command = GimbalCommand {
+            id: self.next_aux_command_id()?,
+            pan_degrees: pan_deg,
+            tilt_degrees: tilt_deg,
+            speed,
+            acceleration: accel,
+        };
+        let acknowledgement = self
+            .controller_handle
+            .submit_gimbal(command)
+            .context("queue runtime v2 Waveshare gimbal command")?
+            .wait_timeout(V2_COMMAND_TIMEOUT)
+            .context("wait for runtime v2 Waveshare gimbal command")?
+            .ok_or_else(|| anyhow!("runtime v2 Waveshare gimbal command timed out"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!(
+                "runtime v2 Waveshare gimbal command was not applied: {:?}",
+                acknowledgement.outcome
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1106,9 +1441,96 @@ fn now_ms() -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        io::{self, Read, Write},
+    };
 
     use super::*;
+
+    #[derive(Clone)]
+    struct RuntimeV2Io {
+        transcript: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Read for RuntimeV2Io {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::WouldBlock))
+        }
+    }
+
+    impl Write for RuntimeV2Io {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.transcript.lock().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn runtime_v2_is_the_composed_physical_command_path() {
+        static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
+
+        let transcript = Arc::new(Mutex::new(Vec::new()));
+        let factory_transcript = Arc::clone(&transcript);
+        let factory = move || {
+            Ok(Box::new(RuntimeV2Io {
+                transcript: Arc::clone(&factory_transcript),
+            }) as Box<dyn leash_waveshare::ControllerIo>)
+        };
+        let evidence_path = env::temp_dir().join(format!(
+            "leash-runtime-v2-composition-{}-{}.evidence",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
+        ));
+        let harness_config = HarnessConfig {
+            profile: crate::config::Profile::WaveshareUgv,
+            deadman_ms: 400,
+            ..HarnessConfig::default()
+        };
+        let driver = WaveshareUgvDriver::open_runtime(
+            &harness_config,
+            Box::new(factory),
+            evidence_path.clone(),
+        )
+        .unwrap();
+
+        driver
+            .authorize_control("operator-test", Duration::from_secs(2))
+            .unwrap();
+        driver.update_control_evidence(false, true, true).unwrap();
+        driver.drive(0.25, -0.5).unwrap();
+        driver.stop().unwrap();
+        driver.emergency_stop().unwrap();
+        assert!(driver.drive(0.1, 0.1).is_err());
+        driver.reset_emergency_stop().unwrap();
+        driver
+            .authorize_control("operator-test", Duration::from_secs(2))
+            .unwrap();
+        driver.drive(0.1, 0.1).unwrap();
+        drop(driver);
+
+        let bytes = transcript.lock().clone();
+        let frames = String::from_utf8(bytes)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(frames.len() >= 5);
+        assert!(frames.iter().all(|frame| frame["T"] == 1));
+        assert!(frames.iter().any(|frame| frame["L"] == 0.25));
+        assert!(
+            frames
+                .iter()
+                .filter(|frame| frame["L"] == 0.0 && frame["R"] == 0.0)
+                .count()
+                >= 3
+        );
+        std::fs::remove_file(evidence_path).unwrap();
+    }
 
     fn config() -> WaveshareSensorConfig {
         WaveshareSensorConfig::from_lookup(|key| {

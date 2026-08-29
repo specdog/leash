@@ -53,7 +53,13 @@ default = ["sim", "http", "mcp"]
 sim = []
 http = ["dep:axum", "dep:futures-util", "dep:tower-http"]
 mcp = ["dep:rmcp", "dep:schemars"]
-waveshare-ugv = ["dep:serialport"]
+waveshare-ugv = [
+  "dep:serialport",
+  "dep:leash-core",
+  "dep:leash-runtime",
+  "dep:leash-waveshare",
+  "leash-waveshare/serial",
+]
 mavlink-drone = []
 manipulator = []
 physical-navigation = []
@@ -75,6 +81,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 leash-gateway = { path = "crates/leash-gateway", version = "0.1.0" }
 leash-cuda = { path = "crates/leash-cuda", version = "0.1.0", optional = true }
+leash-core = { path = "crates/leash-core", version = "0.1.0", optional = true }
+leash-runtime = { path = "crates/leash-runtime", version = "0.1.0", optional = true }
+leash-waveshare = { path = "crates/leash-waveshare", version = "0.1.0", optional = true }
 
 axum = { version = "0.7", optional = true, features = ["ws"] }
 futures-util = { version = "0.3", optional = true }
