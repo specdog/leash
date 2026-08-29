@@ -1,5 +1,11 @@
 [workspace]
-members = [".", "crates/leash-core", "crates/leash-runtime", "crates/leash-cuda"]
+members = [
+  ".",
+  "crates/leash-core",
+  "crates/leash-runtime",
+  "crates/leash-cuda",
+  "crates/leash-waveshare",
+]
 resolver = "2"
 
 [package]

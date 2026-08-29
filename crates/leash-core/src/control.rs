@@ -1,5 +1,9 @@
 use crate::{Authorized, CommandId, MonotonicNanos, Sequence, Stamped};
 
+pub trait Clock {
+    fn now(&mut self) -> MonotonicNanos;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tick<I> {
     pub at: MonotonicNanos,

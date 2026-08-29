@@ -40,6 +40,16 @@ target result are recorded in the CUDA artifact manifest. CUDA remains
 non-authoritative until the timing, fault-injection, and shadow gates in RV2-13
 are complete.
 
+The RV2 Waveshare boundary is also available as `leash-waveshare`. A single
+named owner thread holds the serial factory and live stream, performs all reads,
+writes, framing, and reconnects, and writes a verified zero before accepting
+normal work after every connection. Normal commands use a bounded reject-newest
+lane; stop and e-stop use the atomic priority mailbox, flush queued work, and
+retain separate request-range receipts. Partial writes, malformed telemetry,
+disconnect/reconnect, saturation, and owner panic are covered by fake serial
+transcripts. This boundary is not connected to the live service yet, so the
+existing driver remains the deployment path until the shadow gate.
+
 ## Runtime shape
 
 The core is a synchronous state transition system. It accepts owned, typed

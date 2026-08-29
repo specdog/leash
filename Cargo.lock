@@ -1429,6 +1429,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "leash-waveshare"
+version = "0.1.0"
+dependencies = [
+ "leash-core",
+ "leash-runtime",
+ "serde_json",
+ "serialport",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -15,7 +15,7 @@ mod time;
 mod units;
 
 pub use control::{
-    ActuatorSink, ComputeBackend, ComputeCompletion, ComputeRequest, Controller, Effects,
+    ActuatorSink, Clock, ComputeBackend, ComputeCompletion, ComputeRequest, Controller, Effects,
     SensorSource, Tick,
 };
 pub use drive::{
