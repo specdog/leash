@@ -1,0 +1,13 @@
+[package]
+name = "leash-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Bounded orchestration lanes for the Leash deterministic core"
+repository = "https://github.com/specdog/leash"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+leash-core = { path = "../leash-core", version = "0.1.0" }

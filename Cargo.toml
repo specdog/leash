@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/leash-core"]
+members = [".", "crates/leash-core", "crates/leash-runtime"]
 resolver = "2"
 
 [package]
