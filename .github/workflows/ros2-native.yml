@@ -78,7 +78,9 @@ jobs:
             --build-base target/ros2-ws/build \
             --install-base target/ros2-ws/install \
             --base-paths target/ros2-ws/src implementations/waveshare-ugv/ros2-native \
+            --packages-up-to leash_ros2_native_node \
             --packages-skip rosidl_generator_rs \
+            --cmake-args -DBUILD_TESTING=OFF \
             --event-handlers console_direct+
 
       - name: Exercise generated messages and bounded callbacks
