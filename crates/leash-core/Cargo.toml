@@ -1,0 +1,12 @@
+[package]
+name = "leash-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Deterministic owned domain contracts for the Leash robot runtime"
+repository = "https://github.com/specdog/leash"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
