@@ -6,6 +6,7 @@ usage() {
 Usage:
   deployment-baseline.sh capture --source-revision VALUE --build-features LIST [options]
   deployment-baseline.sh verify [options]
+  deployment-baseline.sh deploy CANDIDATE ARCHIVE --confirm [options]
   deployment-baseline.sh rollback ARCHIVE --confirm [options]
 
 Capture or verify a private Waveshare UGV deployment baseline, or restore one.
@@ -18,7 +19,7 @@ Options:
   --source-revision TEXT  git revision plus local patch identity; required by capture
   --build-features LIST   exact Cargo feature list; required by capture
   --output PATH           capture destination (default: private state directory)
-  --confirm               required for rollback
+  --confirm               required for deploy and rollback
   -h, --help              show this help
 EOF
 }
@@ -47,8 +48,15 @@ build_features=""
 output=""
 confirm="false"
 archive=""
+candidate=""
 
-if [[ "$action" == "rollback" ]]; then
+if [[ "$action" == "deploy" ]]; then
+  candidate="${1:-}"
+  archive="${2:-}"
+  [[ -n "$candidate" && "$candidate" != --* ]] || die "deploy requires a candidate binary"
+  [[ -n "$archive" && "$archive" != --* ]] || die "deploy requires a baseline archive path"
+  shift 2
+elif [[ "$action" == "rollback" ]]; then
   archive="${1:-}"
   [[ -n "$archive" && "$archive" != --* ]] || die "rollback requires an archive path"
   shift
@@ -94,7 +102,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for command in curl fuser sha256sum systemctl; do
+for command in cmp curl fuser install readlink sha256sum systemctl; do
   need "$command"
 done
 
@@ -304,9 +312,67 @@ rollback() {
   printf '%s\n' "$proof"
 }
 
+deploy() {
+  [[ "$confirm" == "true" ]] || die "deploy requires --confirm"
+  candidate="$(readlink -f "$candidate")"
+  archive="$(readlink -f "$archive")"
+  [[ -x "$candidate" ]] || die "candidate binary is not executable"
+  [[ -d "$archive" ]] || die "baseline archive does not exist"
+  for file in leash leash.service leash.env archive.sha256 manifest.txt; do
+    [[ -f "$archive/$file" ]] || die "baseline archive is missing $file"
+  done
+  (cd "$archive" && sha256sum --check archive.sha256)
+  service_paths
+  cmp "$archive/leash" "$binary" || die "active binary does not match the verified baseline"
+
+  local proof rollback_on_exit=0
+  proof="$archive/deploy-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -m 0700 "$proof"
+  stop_now >"$proof/stop-before.json"
+  device_ownership >"$proof/device-ownership-before.txt"
+  sha256sum "$candidate" >"$proof/candidate.sha256"
+  sha256sum "$binary" "$service_file" "$env_file" >"$proof/before.sha256"
+  "$candidate" --version >"$proof/candidate-version.txt"
+
+  deploy_cleanup() {
+    if [[ "$rollback_on_exit" == 1 ]]; then
+      systemctl --user stop "$service" >/dev/null 2>&1 || true
+      install -m 0755 "$archive/leash" "$binary"
+      install -m 0644 "$archive/leash.service" "$service_file"
+      install -m 0600 "$archive/leash.env" "$env_file"
+      systemctl --user daemon-reload >/dev/null 2>&1 || true
+      systemctl --user start "$service" >/dev/null 2>&1 || true
+    fi
+  }
+  trap deploy_cleanup EXIT
+  rollback_on_exit=1
+  systemctl --user stop "$service"
+  install -m 0755 "$candidate" "$binary"
+  systemctl --user start "$service"
+  wait_for_health
+
+  endpoint /health >"$proof/health.json"
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$proof/health.json" \
+    || die "candidate health did not report ok=true"
+  endpoint /capabilities >"$proof/capabilities.json"
+  endpoint /camera/status >"$proof/camera-status.json"
+  endpoint /sensors >"$proof/sensors.json"
+  stop_now >"$proof/stop-after.json"
+  device_ownership >"$proof/device-ownership-after.txt"
+  sha256sum "$binary" "$service_file" "$env_file" >"$proof/after.sha256"
+  cmp "$candidate" "$binary" || die "active binary differs from the candidate"
+  systemctl --user is-active --quiet "$service" || die "$service did not remain active"
+
+  rollback_on_exit=0
+  trap - EXIT
+  chmod 0600 "$proof"/*
+  printf '%s\n' "$proof"
+}
+
 case "$action" in
   capture) capture ;;
   verify) verify ;;
+  deploy) deploy ;;
   rollback) rollback ;;
   *) die "unknown action: $action" ;;
 esac

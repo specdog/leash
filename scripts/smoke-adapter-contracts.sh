@@ -40,7 +40,7 @@ done
 baseline_script="implementations/waveshare-ugv/deployment-baseline.sh"
 bash -n "$baseline_script"
 baseline_help="$(bash "$baseline_script" --help)"
-for command in "capture" "verify" "rollback" "--source-revision" "--build-features" "--confirm"; do
+for command in "capture" "verify" "deploy" "rollback" "CANDIDATE" "--source-revision" "--build-features" "--confirm"; do
   if ! grep -Fq -- "$command" <<<"$baseline_help"; then
     echo "deployment baseline help missing: $command" >&2
     exit 1

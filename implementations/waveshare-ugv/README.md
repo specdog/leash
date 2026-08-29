@@ -72,6 +72,23 @@ Rollback sends a zero-speed stop before and after the service restart, restores
 the archived binary/unit/environment, verifies health/capabilities/camera/sensors,
 and rejects a foreign device owner. It never sends a drive command.
 
+Deploy a reviewed candidate only after the same stationary preflight and
+explicit operator authorization. The command refuses an unverified or
+non-matching baseline, records candidate/binary/service/config hashes and
+backend health, and automatically restores the baseline if candidate health
+does not pass:
+
+```bash
+implementations/waveshare-ugv/deployment-baseline.sh deploy \
+  /tmp/leash-runtime-v2-candidate \
+  ~/.local/state/leash/waveshare-ugv-baselines/<timestamp> \
+  --confirm
+```
+
+The successful deployment proof is private under the baseline directory as
+`deploy-<timestamp>/`. Preserve it together with the subsequent rollback
+proof; neither directory belongs in the repository.
+
 ## USB bring-up without committed identity
 
 1. Connect one UGV directly over USB and identify the new point-to-point network
