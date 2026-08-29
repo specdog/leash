@@ -1,0 +1,71 @@
+{
+  "schema_version": "leash.runtime-v2-rollout-candidate-evidence.v1",
+  "recorded_at": "2026-08-29",
+  "source_commit": "87d84ef48027e90657b979349aa2cd6d1cbbdf6c",
+  "source_archive_sha256": "034f3a4d64def73fff896605ab01cf1a92b0f3ce8864b9d15d8f89ad359524c6",
+  "vendor_archive_sha256": "43196bc1b4cd31d6acb23fb12b2043199032a350412d94a462f678ea90dc5a08",
+  "build_features": "http,mcp,waveshare-ugv,bridge-compat,v4l2-camera,webrtc,cuda,physical-navigation",
+  "target": {
+    "architecture": "aarch64",
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "power_mode": "10W (mode 0)",
+    "rustc": "1.94.0",
+    "cargo": "1.94.0"
+  },
+  "candidate": {
+    "binary_sha256": "b062d3b102f4112afc59e7e89e43eea454281e4c449ede881684a66754a0ad48",
+    "version": "0.1.1",
+    "format": "ELF 64-bit LSB pie executable, ARM aarch64",
+    "dynamic_linkage_missing": [],
+    "source_location": "isolated /tmp source archive",
+    "production_binary_or_configuration_modified": false
+  },
+  "composition_proof": {
+    "command": "cargo test --offline --release --test runtime_v2_waveshare_composition --features http,mcp,waveshare-ugv,bridge-compat,v4l2-camera,webrtc,cuda,physical-navigation",
+    "tests_passed": 1,
+    "tests_failed": 0,
+    "serial_opened": false,
+    "motor_commands_sent": false,
+    "assertions": [
+      "CPU safety supervisor is the final command authority",
+      "Waveshare controller owner is the sole motor authority",
+      "drive acknowledgements remain ordered",
+      "priority stop and E-stop produce ordered verified-zero receipts",
+      "evidence journal remains healthy with zero acknowledgement failures"
+    ]
+  },
+  "ci": {
+    "workflow_run_id": 33269950579,
+    "head_commit": "87d84ef48027e90657b979349aa2cd6d1cbbdf6c",
+    "conclusion": "success",
+    "all_feature_tests": "pass",
+    "all_feature_clippy": "pass",
+    "feature_matrix": "pass",
+    "hardware_adapter_matrix": "pass",
+    "smoke_all": "pass"
+  },
+  "baseline": {
+    "private_archive_id": "20260829T185447Z",
+    "archive_manifest_sha256": "e424cc8e9ad191b1f2e30fdcfdc1c193e83d06dda4d1429cc91cfcbb0117f332",
+    "archive_checksums_sha256": "518b42b59808682ad2a371798829137aee6d291cd38664e029b57ebdfdf4814c",
+    "effective_unit_sha256": "9264f7ef736eeb24ab50cbae76f0acad46f717f9f2f2a76ca9e0e476b63df49e",
+    "checksummed_files": 8,
+    "environment_file_count": 2,
+    "binary_sha256": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294",
+    "archive_checksum_validation": "pass"
+  },
+  "prior_no_motion_evidence": "jetson-orin-nx-rv2-16-nomotion-20260829.json",
+  "safety": {
+    "candidate_build_used_live_source": false,
+    "candidate_build_opened_serial": false,
+    "candidate_build_sent_motor_commands": false,
+    "live_binary_sha256_after": "6aca86b0faf761c94bbc825657bdab3a0a7eb7b83d45bc2771eb0fff0c4cc294",
+    "live_service_after": "active",
+    "live_binary_modified": false,
+    "live_configuration_modified": false,
+    "deployed": false,
+    "rolled_back": false,
+    "physical_test_completed": false,
+    "physical_stop_latency_claimed": false
+  }
+}

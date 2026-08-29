@@ -107,8 +107,11 @@ under the archive and compares the restored binary byte-for-byte.
   record without changing existing v1 responses.
 - A production-equivalent aarch64 candidate with
   `http,mcp,waveshare-ugv,bridge-compat,v4l2-camera,webrtc,cuda,physical-navigation`
-  built successfully in isolated `/tmp` source. The final candidate will be
-  rebuilt from the rollout commit before physical authorization.
+  built successfully from exact commit `87d84ef` in isolated LF-canonical
+  `/tmp` source. Its binary SHA-256 is `b062d3b1...d48`; the source archive is
+  `034f3a4d...24c6`. The target release composition test and CI run
+  `33269950579` passed. Exact provenance is checked in at
+  `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-candidate-20260829.json`.
 - The exact live baseline was captured read-only under the target's private
   state directory at `20260829T185447Z`. Its archive checksums pass, both service
   environment files are retained, and its binary SHA-256 `6aca86b0...294`
