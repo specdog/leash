@@ -471,12 +471,48 @@ fn validate_motion_event(event: &MotionEvent) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time::Duration};
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
 
-    fn shell_worker(name: &str, script: &str) -> ExternalWorkerSpec {
+    #[cfg(unix)]
+    fn shell_worker(name: &str, unix_script: &str, _windows_script: &str) -> ExternalWorkerSpec {
         let mut spec = ExternalWorkerSpec::new(name, "sh");
-        spec.args = vec!["-c".to_string(), script.to_string()];
+        spec.args = vec!["-c".to_string(), unix_script.to_string()];
         spec
+    }
+
+    #[cfg(windows)]
+    fn shell_worker(name: &str, _unix_script: &str, windows_script: &str) -> ExternalWorkerSpec {
+        let mut spec = ExternalWorkerSpec::new(name, "powershell.exe");
+        spec.args = vec![
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
+            windows_script.to_string(),
+        ];
+        spec
+    }
+
+    fn poll_until(
+        supervisor: &mut WorkerSupervisor,
+        name: &str,
+        predicate: impl Fn(&ExternalWorkerStatus) -> bool,
+    ) -> ExternalWorkerStatus {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            supervisor.poll(name).unwrap();
+            let status = supervisor.status(name).unwrap();
+            if predicate(&status) {
+                return status.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "worker status did not converge: {status:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -554,7 +590,7 @@ mod tests {
     fn starts_reports_and_stops_worker_process() {
         let mut supervisor = WorkerSupervisor::new();
         supervisor
-            .add(shell_worker("sleeper", "sleep 5"))
+            .add(shell_worker("sleeper", "sleep 5", "Start-Sleep -Seconds 5"))
             .expect("valid worker");
 
         supervisor.start("sleeper").unwrap();
@@ -575,14 +611,13 @@ mod tests {
     fn reports_exited_worker_process() {
         let mut supervisor = WorkerSupervisor::new();
         supervisor
-            .add(shell_worker("exit-seven", "exit 7"))
+            .add(shell_worker("exit-seven", "exit 7", "exit 7"))
             .expect("valid worker");
 
         supervisor.start("exit-seven").unwrap();
-        thread::sleep(Duration::from_millis(50));
-        supervisor.poll("exit-seven").unwrap();
-
-        let status = supervisor.status("exit-seven").unwrap();
+        let status = poll_until(&mut supervisor, "exit-seven", |status| {
+            status.state == ExternalWorkerState::Exited
+        });
         assert_eq!(status.state, ExternalWorkerState::Exited);
         assert!(!status.healthy);
         assert_eq!(status.exit_code, Some(7));
@@ -617,17 +652,20 @@ mod tests {
 
     #[test]
     fn restarts_failed_worker_within_limit() {
-        let mut spec = shell_worker("restart-once", "sleep 0.01; exit 9");
+        let mut spec = shell_worker(
+            "restart-once",
+            "sleep 0.01; exit 9",
+            "Start-Sleep -Milliseconds 10; exit 9",
+        );
         spec.restart_policy = WorkerRestartPolicy::OnFailure;
         spec.max_restarts = 1;
         let mut supervisor = WorkerSupervisor::new();
         supervisor.add(spec).unwrap();
 
         supervisor.start("restart-once").unwrap();
-        thread::sleep(Duration::from_millis(50));
-        supervisor.poll("restart-once").unwrap();
-
-        let status = supervisor.status("restart-once").unwrap();
+        let status = poll_until(&mut supervisor, "restart-once", |status| {
+            status.state == ExternalWorkerState::Running && status.restarts == 1
+        });
         assert_eq!(status.state, ExternalWorkerState::Running);
         assert!(status.healthy);
         assert_eq!(status.restarts, 1);
