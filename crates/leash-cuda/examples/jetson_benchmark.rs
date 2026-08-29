@@ -6,7 +6,7 @@ use leash_cuda::{
 };
 
 const DEFAULT_ITERATIONS: usize = 20;
-const WARMUP_ITERATIONS: usize = 2;
+const WARMUP_ITERATIONS: usize = 10;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let iterations = parse_iterations()?;
@@ -19,18 +19,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let profiles = profiles();
     let mut results = Vec::with_capacity(profiles.len());
     for profile in profiles {
-        let cpu_warm = execute(&cpu, profile.job.clone())?;
-        let cuda_warm = execute(&cuda, profile.job.clone())?;
-        assert_parity(&cpu_warm, &cuda_warm)?;
+        let (cpu_first, cpu_first_ns) = timed_execute(&cpu, profile.job.clone())?;
+        let (cuda_first, cuda_first_ns) = timed_execute(&cuda, profile.job.clone())?;
+        assert_parity(&cpu_first, &cuda_first)?;
         for _ in 1..WARMUP_ITERATIONS {
             black_box(execute(&cpu, profile.job.clone())?);
             black_box(execute(&cuda, profile.job.clone())?);
         }
-        let cpu_times = measure(&cpu, &profile.job, iterations)?;
-        let cuda_times = measure(&cuda, &profile.job, iterations)?;
+        let (cpu_times, cuda_times) = measure_alternating(&cpu, &cuda, &profile.job, iterations)?;
         results.push(BenchmarkResult {
             name: profile.name,
             elements: profile.elements,
+            cpu_first_ns,
+            cuda_first_ns,
             cpu: Distribution::new(cpu_times)?,
             cuda: Distribution::new(cuda_times)?,
         });
@@ -61,12 +62,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         print!(
             concat!(
                 "{{\"name\":\"{}\",\"elements\":{},",
+                "\"first_ns\":{{\"cpu\":{},\"cuda\":{}}},",
                 "\"cpu_ns\":{{\"p50\":{},\"p95\":{},\"p99\":{},\"max\":{}}},",
                 "\"cuda_ns\":{{\"p50\":{},\"p95\":{},\"p99\":{},\"max\":{}}},",
                 "\"cpu_over_cuda_speedup_milli\":{},\"winner\":\"{}\"}}"
             ),
             result.name,
             result.elements,
+            result.cpu_first_ns,
+            result.cuda_first_ns,
             result.cpu.p50,
             result.cpu.p95,
             result.cpu.p99,
@@ -124,19 +128,42 @@ fn execute(executor: &ComputeExecutor, job: ComputeJob) -> Result<ComputeResult,
         .wait()?)
 }
 
-fn measure(
+fn timed_execute(
     executor: &ComputeExecutor,
+    job: ComputeJob,
+) -> Result<(ComputeResult, u64), Box<dyn Error>> {
+    let started = Instant::now();
+    let result = execute(executor, job)?;
+    let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    Ok((result, elapsed))
+}
+
+fn measure_alternating(
+    cpu: &ComputeExecutor,
+    cuda: &ComputeExecutor,
     job: &ComputeJob,
     iterations: usize,
-) -> Result<Vec<u64>, Box<dyn Error>> {
-    let mut samples = Vec::with_capacity(iterations);
-    for _ in 0..iterations {
-        let owned_job = job.clone();
-        let started = Instant::now();
-        black_box(execute(executor, owned_job)?);
-        samples.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+) -> Result<(Vec<u64>, Vec<u64>), Box<dyn Error>> {
+    let mut cpu_samples = Vec::with_capacity(iterations);
+    let mut cuda_samples = Vec::with_capacity(iterations);
+    for index in 0..iterations {
+        if index.is_multiple_of(2) {
+            let (result, elapsed) = timed_execute(cpu, job.clone())?;
+            black_box(result);
+            cpu_samples.push(elapsed);
+            let (result, elapsed) = timed_execute(cuda, job.clone())?;
+            black_box(result);
+            cuda_samples.push(elapsed);
+        } else {
+            let (result, elapsed) = timed_execute(cuda, job.clone())?;
+            black_box(result);
+            cuda_samples.push(elapsed);
+            let (result, elapsed) = timed_execute(cpu, job.clone())?;
+            black_box(result);
+            cpu_samples.push(elapsed);
+        }
     }
-    Ok(samples)
+    Ok((cpu_samples, cuda_samples))
 }
 
 struct WorkloadProfile {
@@ -241,6 +268,8 @@ fn cognition(name: &'static str, count: usize) -> WorkloadProfile {
 struct BenchmarkResult {
     name: &'static str,
     elements: usize,
+    cpu_first_ns: u64,
+    cuda_first_ns: u64,
     cpu: Distribution,
     cuda: Distribution,
 }
