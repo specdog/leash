@@ -461,11 +461,21 @@ impl ControllerHandle {
     pub fn status(&self) -> OwnerStatus {
         let last_stop_receipt = *lock(&self.shared.last_stop_receipt);
         let last_estop_receipt = *lock(&self.shared.last_estop_receipt);
+        let last_safety_receipt = match (last_stop_receipt, last_estop_receipt) {
+            (Some(stop), Some(estop)) => Some(if stop.applied_sequence > estop.applied_sequence {
+                stop
+            } else {
+                estop
+            }),
+            (Some(stop), None) => Some(stop),
+            (None, Some(estop)) => Some(estop),
+            (None, None) => None,
+        };
         OwnerStatus {
             connected: self.shared.connected.load(Ordering::Acquire),
             estopped: self.shared.estopped.load(Ordering::Acquire),
             last_error: lock(&self.shared.last_error).clone(),
-            last_safety_receipt: last_estop_receipt.or(last_stop_receipt),
+            last_safety_receipt,
             last_stop_receipt,
             last_estop_receipt,
             metrics: self.shared.metrics.snapshot(),
@@ -764,8 +774,15 @@ fn run_owner(
                     pending_estop = Some(signal);
                 }
                 SafetyKind::Stop => {
-                    if let Some(estop) = *lock(&shared.last_estop_receipt) {
-                        record_safety_receipt(shared.as_ref(), receipt_covered_by(signal, estop));
+                    if shared.estopped.load(Ordering::Acquire) {
+                        if let Some(estop) = *lock(&shared.last_estop_receipt) {
+                            record_safety_receipt(
+                                shared.as_ref(),
+                                receipt_covered_by(signal, estop),
+                            );
+                        } else {
+                            pending_stop = Some(signal);
+                        }
                     } else {
                         pending_stop = Some(signal);
                     }
@@ -1415,6 +1432,53 @@ mod tests {
         assert!(handle.status().estopped);
         assert!(handle.reset_estop_latch(true));
         assert!(!handle.status().estopped);
+    }
+
+    #[test]
+    fn stop_after_estop_reset_writes_a_fresh_verified_zero() {
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let owner = owner(Arc::clone(&transcript));
+        let handle = owner.handle();
+        wait_connected(&handle);
+        let safety = handle.safety();
+
+        safety.estop().unwrap();
+        for _ in 0..100 {
+            if handle.status().last_estop_receipt.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let estop = handle.status().last_estop_receipt.unwrap();
+        assert!(estop.verified_zero);
+        assert!(handle.reset_estop_latch(true));
+
+        let drive = handle.submit_drive(authorized(3, 0.2, -0.2)).unwrap();
+        let drive_ack = drive.wait().unwrap();
+        assert_eq!(drive_ack.outcome, AckOutcome::Applied);
+        let drive_sequence = drive_ack.applied_sequence.unwrap();
+        assert!(drive_sequence > estop.applied_sequence);
+
+        safety.stop().unwrap();
+        for _ in 0..100 {
+            if handle.status().last_stop_receipt.is_some_and(|receipt| {
+                receipt.applied_sequence > drive_sequence && receipt.verified_zero
+            }) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let status = handle.status();
+        let stop = status.last_stop_receipt.unwrap();
+        assert!(stop.applied_sequence > drive_sequence);
+        assert!(stop.verified_zero);
+        assert_eq!(status.last_safety_receipt, Some(stop));
+
+        let writes = String::from_utf8(lock(&transcript).writes.clone()).unwrap();
+        let last =
+            serde_json::from_str::<serde_json::Value>(writes.lines().last().unwrap()).unwrap();
+        assert_eq!(last["L"], 0.0);
+        assert_eq!(last["R"], 0.0);
     }
 
     #[test]
