@@ -1,0 +1,117 @@
+{
+  "schema_version": "leash.runtime-v2-stop-after-reset-evidence.v1",
+  "recorded_at": "2026-08-30",
+  "source_commit": "abebece2dd89382f9fff8049848a4cbbc8354761",
+  "source_archive_sha256": "975e9d9c51e77c1d83f3a66cba356b5d44958db3cb9f96e7da49d93e102e0594",
+  "candidate_binary_sha256": "77e01eba69ff5d4f7389d59edd59bb64ac01c57d032ea8f588e7c7a190786f0c",
+  "build": {
+    "host": "jetson-orin-nx",
+    "cargo": "1.94.1",
+    "locked": true,
+    "offline_vendored_dependencies": true,
+    "release": true,
+    "features": [
+      "http",
+      "mcp",
+      "waveshare-ugv",
+      "bridge-compat",
+      "v4l2-camera",
+      "webrtc",
+      "cuda",
+      "physical-navigation"
+    ]
+  },
+  "incident": {
+    "previous_binary_sha256": "b062d3b102f4112afc59e7e89e43eea454281e4c449ede881684a66754a0ad48",
+    "trigger": "a Stop requested after an approved E-stop reset",
+    "observed_failure": "the drive command applied but Stop acknowledgement timed out and the controller retained the non-zero command",
+    "response": "the operator was told to use the physical E-stop while the network E-stop was sent immediately",
+    "network_estop_applied_sequence": 41053,
+    "network_estop_verified_zero": true,
+    "telemetry_zero_after_estop": true,
+    "root_cause": "the controller owner treated any historical E-stop receipt as covering a later Stop, including after the E-stop latch had been reset",
+    "fix": "an E-stop receipt covers Stop only while the controller is currently E-stopped; otherwise Stop writes and verifies a fresh zero. Status also reports the newest safety receipt by applied sequence."
+  },
+  "regression": {
+    "test": "leash_waveshare::tests::stop_after_estop_reset_writes_a_fresh_verified_zero",
+    "cargo_test_leash_waveshare": "pass",
+    "production_composition_test": "pass",
+    "physical_sequence": [
+      "verified E-stop zero",
+      "approved E-stop reset",
+      "0.04/-0.04 low-speed pivot for 150 ms",
+      "verified Stop"
+    ],
+    "stop_receipt_sequence_before": 5,
+    "stop_receipt_sequence_after": 106,
+    "fresh_sequence_advanced": true,
+    "verified_zero": true,
+    "adapter_sample_sequence": 496,
+    "result": "pass"
+  },
+  "deployment": {
+    "rollback_baseline": "20260830T012924Z",
+    "proof_id": "deploy-20260830T012931Z",
+    "proof_aggregate_sha256": "b349805cb26e343707b2f233b39296942e9641611b71c7c061f9c3f933a32887",
+    "candidate_configuration_sha256": "b7757ccdbf39d1549b5ec2457898ea714ad6779230f13816401afdcd50aeb912",
+    "accelerator_requested": "cuda",
+    "accelerator_active": "cuda",
+    "accelerator_required": true,
+    "drive_invert": true,
+    "drive_swap": false,
+    "cpu_final_authority": true,
+    "motor_authority": "waveshare-controller-owner",
+    "service_active": true,
+    "post_deploy_journal_safety_errors": 0,
+    "result": "pass"
+  },
+  "bounded_room_exploration": {
+    "operator_authorized": true,
+    "transport": "wifi",
+    "mode": "manual bounded teleoperation",
+    "autonomous_navigation_used": false,
+    "autonomous_navigation_reason": "localization had no pose and remained initializing",
+    "deadman_refresh_interval_ms": 150,
+    "maximum_wheel_command": 0.08,
+    "maximum_leg_duration_ms": 2500,
+    "camera_and_lidar_checked_between_legs": true,
+    "failure_trap": "network E-stop",
+    "forward_translation_odometry_estimate_m": 0.805,
+    "legs": [
+      { "left": 0.07, "right": 0.07, "duration_ms": 800, "stop_sequence": 243, "verified_zero": true },
+      { "left": 0.07, "right": 0.07, "duration_ms": 2000, "stop_sequence": 423, "verified_zero": true },
+      { "left": 0.08, "right": 0.08, "duration_ms": 2500, "stop_sequence": 593, "verified_zero": true },
+      { "left": 0.05, "right": -0.05, "duration_ms": 500, "stop_sequence": 668, "verified_zero": true },
+      { "left": 0.07, "right": -0.07, "duration_ms": 1200, "stop_sequence": 731, "verified_zero": true },
+      { "left": -0.07, "right": 0.07, "duration_ms": 1600, "stop_sequence": 817, "verified_zero": true },
+      { "left": 0.08, "right": 0.08, "duration_ms": 2500, "stop_sequence": 901, "verified_zero": true },
+      { "left": 0.08, "right": 0.08, "duration_ms": 2500, "stop_sequence": 989, "verified_zero": true },
+      { "left": 0.07, "right": -0.07, "duration_ms": 1400, "stop_sequence": 1059, "verified_zero": true }
+    ],
+    "result": "pass"
+  },
+  "final_state": {
+    "left_command": 0.0,
+    "right_command": 0.0,
+    "raw_left": 0,
+    "raw_right": 0,
+    "estop_latched": false,
+    "last_stop_applied_sequence": 1059,
+    "last_stop_verified_zero": true,
+    "controller_connected": true,
+    "supervisor_faulted": false,
+    "battery_v": 11.87,
+    "lidar_front_min_m": 1.319,
+    "lidar_front_right_min_m": 1.145,
+    "lidar_front_left_min_m": 0.83,
+    "camera": "healthy",
+    "wifi_health": "pass"
+  },
+  "ci": {
+    "workflow": "ci",
+    "run_id": 33285457041,
+    "head_sha": "abebece2dd89382f9fff8049848a4cbbc8354761",
+    "conclusion": "success"
+  },
+  "result": "pass"
+}

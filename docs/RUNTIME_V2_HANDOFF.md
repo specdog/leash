@@ -1,6 +1,6 @@
 # Runtime v2 handoff
 
-Status date: 2026-08-29
+Status date: 2026-08-30
 
 ## Current state
 
@@ -8,14 +8,42 @@ Status date: 2026-08-29
 - Remote: `https://github.com/specdog/leash`
 - Branch: `feat/rust-native-runtime-v2`
 - Candidate implementation commit: `87d84ef48027e90657b979349aa2cd6d1cbbdf6c`
+- Post-E-stop-reset safety correction commit:
+  `abebece2dd89382f9fff8049848a4cbbc8354761`.
 - Rollout direction/configuration hardening commit:
   `9cc6c685c66b81227d2f56e049310b3c0cb0d9e1`.
 - No pull request is open. Nothing has been merged.
-- Runtime-v2 issues #192 through #207 are closed. Rollout issue #208 and tracker
-  #209 are ready for closure after exact-head CI passes.
+- Runtime-v2 issues #192 through #209 are closed. Rollout issue #208 and tracker
+  #209 were reopened for the live Stop regression described below, then closed
+  again only after the fix, target redeployment, physical proof, and exact-head
+  CI passed.
 - The exact candidate is live with required CUDA selected, the CPU safety
   supervisor retains final authority, telemetry is zero, and the service is
   reachable independently over Wi-Fi.
+
+## Post-handoff safety correction
+
+A supervised room-exploration command exposed a controller-owner bug after an
+approved E-stop reset. The old candidate reused the historical E-stop receipt
+for a later Stop instead of writing a new zero command. Stop acknowledgement
+timed out; the network E-stop then applied verified zero. No safety gate was
+bypassed and no further motion was sent on the old binary.
+
+Commit `abebece2` restricts E-stop coverage of Stop to the period while the
+E-stop latch is actually active and reports the newest safety receipt by
+applied sequence. The regression test
+`stop_after_estop_reset_writes_a_fresh_verified_zero` covers E-stop, approved
+reset, drive, and a later fresh verified Stop.
+
+The exact aarch64 candidate `77e01eba...86f0c` was built on the Jetson, deployed
+with required CUDA and the accepted direction mapping, and exercised through
+that same physical sequence. The Stop receipt advanced from sequence 5 to 106
+and verified hardware zero. A subsequent bounded Wi-Fi room exploration
+covered approximately 0.805 m of forward wheel odometry with camera and lidar
+checks between legs; every leg ended with a fresh verified-zero receipt. The
+final receipt is sequence 1059, both raw motor outputs are zero, and the front
+lidar minimum is 1.319 m. Exact evidence is in
+`../crates/leash-runtime/evidence/jetson-orin-nx-rv2-stop-after-reset-20260830.json`.
 
 The architecture, invariants, and ticket definitions of done are in
 [`RUNTIME_V2.md`](RUNTIME_V2.md). The frozen rollout thresholds and execution

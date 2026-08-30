@@ -1,7 +1,8 @@
 # Runtime v2 lossless evidence journal
 
-Status: implementation, host verification, and the isolated Jetson timing and
-fault gate are complete. This is not physical motor stop proof.
+Status: implementation, host verification, isolated Jetson timing/fault gates,
+and bounded physical motor stop proof are complete. Fake-actuator timing below
+is still not a substitute for the separately recorded physical proof.
 
 ## Contract
 
@@ -80,3 +81,13 @@ measurement noise; the result supports no measurable p99 regression, not a
 claim that persistence improves stopping. All 24 release-mode runtime tests,
 including the 50 ms writer-stall fail-closed deadline, passed on the same
 isolated source archive.
+
+The physical rollout proof is checked in at
+`crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`.
+The later live post-E-stop-reset regression, correction, exact target
+redeployment, fresh Stop sequence proof, and bounded Wi-Fi room exploration are
+recorded at
+`crates/leash-runtime/evidence/jetson-orin-nx-rv2-stop-after-reset-20260830.json`.
+The corrected physical sequence advanced the Stop receipt from sequence 5 to
+106 after E-stop reset; the final exploration Stop is sequence 1059 with both
+raw motor outputs zero.

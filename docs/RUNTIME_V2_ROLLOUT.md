@@ -150,3 +150,13 @@ evidence.
 - Scrubbed deployment, rollback, resource, direction, and stop proof is checked
   in at
   `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`.
+- A later supervised room-exploration command exposed stale E-stop receipt
+  reuse after reset on the live candidate. Network E-stop immediately produced
+  verified zero. Commit `abebece2` fixed the controller-owner rule and added a
+  regression test. Exact-head CI `33285457041` passed, candidate
+  `77e01eba...86f0c` was deployed over Wi-Fi with required CUDA, and the
+  physical E-stop-reset-drive-Stop sequence advanced the Stop receipt from 5
+  to 106 with verified zero. Bounded exploration then completed with final
+  Stop sequence 1059, raw motor output zero, and no post-deploy safety errors.
+  The checked follow-up evidence is
+  `crates/leash-runtime/evidence/jetson-orin-nx-rv2-stop-after-reset-20260830.json`.
