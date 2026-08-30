@@ -4508,6 +4508,7 @@ mod tests {
             },
             None,
             Some(driver.clone()),
+            None,
         )
         .unwrap();
         (harness, driver)
@@ -4664,6 +4665,7 @@ mod tests {
             },
             None,
             Some(driver.clone()),
+            None,
         )
         .unwrap();
         {
@@ -4799,6 +4801,7 @@ mod tests {
             },
             None,
             Some(driver),
+            None,
         )
         .unwrap();
         harness.waveshare_sensors = Some(Arc::new(
