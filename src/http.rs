@@ -57,8 +57,9 @@ use crate::{
     calibration::{CalibrationEnterRequest, CalibrationEnterResult, CalibrationStatus},
     mapping::{MappingLifecycleRequest, MappingStatus, MAPPING_LIFECYCLE_SCHEMA_VERSION},
     navigation::{
-        NavigationGoalRequest, NavigationStatusResponse, NavigationTerminalReason,
-        NAVIGATION_GOAL_SCHEMA_VERSION, NAVIGATION_STATUS_SCHEMA_VERSION,
+        NavigationGoalRequest, NavigationReadinessQuery, NavigationReadinessResponse,
+        NavigationStatusResponse, NavigationTerminalReason, NAVIGATION_GOAL_SCHEMA_VERSION,
+        NAVIGATION_READINESS_SCHEMA_VERSION, NAVIGATION_STATUS_SCHEMA_VERSION,
     },
     runtime::Harness,
     transport::StreamRecvError,
@@ -401,6 +402,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/calibration/exit", post(calibration_exit))
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
+        .route("/navigation/readiness", get(navigation_readiness))
         .route("/navigation/goals", post(navigation_goal_submit))
         .route("/navigation/status", get(navigation_status))
         .route(
@@ -2832,6 +2834,20 @@ async fn navigation_status(
     Json(navigation_response(&harness, &query.mission_id, record)).into_response()
 }
 
+async fn navigation_readiness(
+    State(harness): State<Harness>,
+    Query(query): Query<NavigationReadinessQuery>,
+) -> Json<NavigationReadinessResponse> {
+    let expected_map = query.expected_map();
+    let readiness = harness.navigation_readiness(&expected_map);
+    Json(NavigationReadinessResponse {
+        schema_version: NAVIGATION_READINESS_SCHEMA_VERSION.to_string(),
+        expected_map,
+        active_map: harness.active_map_identity(),
+        readiness,
+    })
+}
+
 async fn navigation_goal_cancel(
     AxumPath(mission_id): AxumPath<String>,
     State(harness): State<Harness>,
@@ -3334,14 +3350,16 @@ mod tests {
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
         compute_authorized, localization_authorized, localization_update, mapping_lifecycle,
         mapping_status, motors_stop_verified, navigation_goal_cancel, navigation_goal_submit,
-        navigation_status, validate_agent_console_capability, AgentCapabilityReq,
-        CameraRuntimeState, NavigationStatusQuery, CAMERA_RUNTIME_STATE, NAVIGATION_HTTP_STATE,
+        navigation_readiness, navigation_status, validate_agent_console_capability,
+        AgentCapabilityReq, CameraRuntimeState, NavigationStatusQuery, CAMERA_RUNTIME_STATE,
+        NAVIGATION_HTTP_STATE,
     };
     use crate::{
         agent_runtime::{AgentRuntime, AgentSessionStore, CapabilityPermissions},
         Harness, HarnessConfig, LocalizationProviderUpdate, MapIdentity, MappingLifecycleAction,
-        MappingLifecycleRequest, NavigationGoalRequest, NavigationStatusResponse,
-        NavigationTerminalReason, MAPPING_LIFECYCLE_SCHEMA_VERSION, NAVIGATION_GOAL_SCHEMA_VERSION,
+        MappingLifecycleRequest, NavigationGoalRequest, NavigationReadinessQuery,
+        NavigationReadinessResponse, NavigationStatusResponse, NavigationTerminalReason,
+        MAPPING_LIFECYCLE_SCHEMA_VERSION, NAVIGATION_GOAL_SCHEMA_VERSION,
     };
     use tokio::sync::Mutex;
 
@@ -3469,6 +3487,69 @@ mod tests {
             map_revision: "sim-grid-v1".to_string(),
             frame_id: "map".to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn navigation_readiness_http_exposes_expected_and_active_map_mismatch() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let expected_map = MapIdentity {
+            map_id: "different-map".to_string(),
+            map_revision: "different-revision".to_string(),
+            frame_id: "map".to_string(),
+        };
+        let response = navigation_readiness(
+            State(harness),
+            axum::extract::Query(NavigationReadinessQuery {
+                map_id: expected_map.map_id.clone(),
+                map_revision: expected_map.map_revision.clone(),
+                frame_id: expected_map.frame_id.clone(),
+            }),
+        )
+        .await
+        .0;
+
+        assert_eq!(response.schema_version, "leash.navigation-readiness.v1");
+        assert_eq!(response.expected_map, expected_map);
+        assert_eq!(response.active_map, Some(sim_map_identity()));
+        assert!(!response.readiness.ready);
+        assert!(!response.readiness.map_matches);
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn navigation_readiness_http_reports_unsupported_executor_as_not_ready() {
+        use std::sync::Arc;
+
+        let harness = Harness::new_with_test_driver_and_navigation_executor(
+            HarnessConfig {
+                profile: crate::Profile::WaveshareUgv,
+                allow_physical_actuation: true,
+                allow_physical_navigation: true,
+                policy_mode: crate::config::PolicyMode::RequireApproval,
+                ..HarnessConfig::default()
+            },
+            Arc::new(crate::UnsupportedNavigationExecutor),
+        )
+        .unwrap();
+        let expected_map = sim_map_identity();
+        let response: NavigationReadinessResponse = navigation_readiness(
+            State(harness),
+            axum::extract::Query(NavigationReadinessQuery {
+                map_id: expected_map.map_id,
+                map_revision: expected_map.map_revision,
+                frame_id: expected_map.frame_id,
+            }),
+        )
+        .await
+        .0;
+
+        assert_eq!(response.schema_version, "leash.navigation-readiness.v1");
+        assert!(!response.readiness.ready);
+        assert!(!response.readiness.executor_supported);
+        assert_eq!(
+            response.readiness.executor,
+            crate::NavigationExecutorKind::Unsupported
+        );
     }
 
     #[tokio::test]

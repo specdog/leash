@@ -94,9 +94,10 @@ pub use memory::{
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackBlueprintMetadata};
 pub use navigation::{
     default_navigation_path, NavigationExecutionStatus, NavigationExecutor, NavigationExecutorKind,
-    NavigationFeedback, NavigationGoalRequest, NavigationReadiness, NavigationStatusResponse,
-    NavigationStore, NavigationTerminalReason, PatrolZoneSpec, UnsupportedNavigationExecutor,
-    WaypointSpec, NAVIGATION_FORMAT, NAVIGATION_GOAL_SCHEMA_VERSION,
+    NavigationFeedback, NavigationGoalRequest, NavigationReadiness, NavigationReadinessQuery,
+    NavigationReadinessResponse, NavigationStatusResponse, NavigationStore,
+    NavigationTerminalReason, PatrolZoneSpec, UnsupportedNavigationExecutor, WaypointSpec,
+    NAVIGATION_FORMAT, NAVIGATION_GOAL_SCHEMA_VERSION, NAVIGATION_READINESS_SCHEMA_VERSION,
     NAVIGATION_STATUS_SCHEMA_VERSION,
 };
 pub use operator_session::{validate_operator_session, OPERATOR_SESSION_FORMAT};

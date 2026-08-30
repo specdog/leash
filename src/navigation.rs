@@ -20,7 +20,27 @@ use crate::{
 
 pub const NAVIGATION_FORMAT: &str = "leash-navigation-v1";
 pub const NAVIGATION_GOAL_SCHEMA_VERSION: &str = "leash.navigation-goal.v2";
+pub const NAVIGATION_READINESS_SCHEMA_VERSION: &str = "leash.navigation-readiness.v1";
 pub const NAVIGATION_STATUS_SCHEMA_VERSION: &str = "leash.navigation-status.v2";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct NavigationReadinessQuery {
+    pub map_id: String,
+    pub map_revision: String,
+    pub frame_id: String,
+}
+
+impl NavigationReadinessQuery {
+    pub fn expected_map(&self) -> MapIdentity {
+        MapIdentity {
+            map_id: self.map_id.clone(),
+            map_revision: self.map_revision.clone(),
+            frame_id: self.frame_id.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
@@ -94,6 +114,16 @@ impl NavigationReadiness {
             message: message.into(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct NavigationReadinessResponse {
+    pub schema_version: String,
+    pub expected_map: MapIdentity,
+    #[serde(default)]
+    pub active_map: Option<MapIdentity>,
+    pub readiness: NavigationReadiness,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

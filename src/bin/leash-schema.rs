@@ -36,8 +36,8 @@ use leash_harness::{
     },
     navigation::{
         NavigationExecutionStatus, NavigationExecutorKind, NavigationFeedback,
-        NavigationGoalRequest, NavigationReadiness, NavigationStatusResponse,
-        NavigationTerminalReason,
+        NavigationGoalRequest, NavigationReadiness, NavigationReadinessQuery,
+        NavigationReadinessResponse, NavigationStatusResponse, NavigationTerminalReason,
     },
     replay::{ReplayEvent, ReplayEventKind},
     stack::{AdapterCategory, AdapterMaturity, AdapterProfile},
@@ -222,6 +222,8 @@ fn schema_document() -> Result<Value> {
     insert::<PlannerStatus>(&mut schemas, "PlannerStatus")?;
     insert::<NavigationExecutorKind>(&mut schemas, "NavigationExecutorKind")?;
     insert::<NavigationReadiness>(&mut schemas, "NavigationReadiness")?;
+    insert::<NavigationReadinessQuery>(&mut schemas, "NavigationReadinessQuery")?;
+    insert::<NavigationReadinessResponse>(&mut schemas, "NavigationReadinessResponse")?;
     insert::<NavigationTerminalReason>(&mut schemas, "NavigationTerminalReason")?;
     insert::<NavigationFeedback>(&mut schemas, "NavigationFeedback")?;
     insert::<NavigationExecutionStatus>(&mut schemas, "NavigationExecutionStatus")?;

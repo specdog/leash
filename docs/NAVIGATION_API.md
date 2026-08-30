@@ -11,6 +11,7 @@ E-stop remain authoritative.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `POST` | `/navigation/goals` | Submit an idempotent bounded planner goal |
+| `GET` | `/navigation/readiness?map_id=...&map_revision=...&frame_id=...` | Check readiness for an exact map identity |
 | `GET` | `/navigation/status?mission_id=...` | Reconcile current planner state |
 | `POST` | `/navigation/goals/:mission_id/cancel` | Cancel the goal and command zero output |
 | `POST` | `/motors/stop/verified` | Command and confirm zero output |
@@ -53,6 +54,12 @@ used for submission but are not retained in the idempotency registry.
 lineage change while a mission is active cancels that mission. `grid_revision`
 is reported by mapping status but is not pinned by the goal because occupancy
 may update without replacing the underlying saved map.
+
+`GET /navigation/readiness` is read-only. Its `leash.navigation-readiness.v1`
+response includes the requested `expected_map`, the current `active_map`, and
+the complete `NavigationReadiness` gate result. Callers must treat `ready=false`
+as authoritative; `readiness.map_matches=false` makes stale map lineage visible
+before a goal is submitted.
 
 Status uses `leash.navigation-status.v2` and includes the expected and active
 map identities, deadline, readiness gates, explicit terminal reason, accepted

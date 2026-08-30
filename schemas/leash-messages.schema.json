@@ -7647,6 +7647,140 @@
       "title": "NavigationReadiness",
       "type": "object"
     },
+    "NavigationReadinessQuery": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "map_id": {
+          "type": "string"
+        },
+        "map_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "map_id",
+        "map_revision",
+        "frame_id"
+      ],
+      "title": "NavigationReadinessQuery",
+      "type": "object"
+    },
+    "NavigationReadinessResponse": {
+      "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "NavigationExecutorKind": {
+          "enum": [
+            "sim-grid",
+            "nav2",
+            "unsupported"
+          ],
+          "type": "string"
+        },
+        "NavigationReadiness": {
+          "properties": {
+            "collision_clear": {
+              "type": "boolean"
+            },
+            "deadman_clear": {
+              "type": "boolean"
+            },
+            "estop_clear": {
+              "type": "boolean"
+            },
+            "executor": {
+              "$ref": "#/$defs/NavigationExecutorKind"
+            },
+            "executor_supported": {
+              "type": "boolean"
+            },
+            "lidar_available": {
+              "type": "boolean"
+            },
+            "lidar_fresh": {
+              "type": "boolean"
+            },
+            "localization_tracking": {
+              "type": "boolean"
+            },
+            "map_matches": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "ready": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ready",
+            "executor",
+            "executor_supported",
+            "map_matches",
+            "localization_tracking",
+            "lidar_available",
+            "lidar_fresh",
+            "collision_clear",
+            "deadman_clear",
+            "estop_clear",
+            "message"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active_map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expected_map": {
+          "$ref": "#/$defs/MapIdentity"
+        },
+        "readiness": {
+          "$ref": "#/$defs/NavigationReadiness"
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "expected_map",
+        "readiness"
+      ],
+      "title": "NavigationReadinessResponse",
+      "type": "object"
+    },
     "NavigationStatusResponse": {
       "$defs": {
         "MapIdentity": {
