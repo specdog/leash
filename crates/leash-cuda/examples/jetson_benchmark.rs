@@ -2,7 +2,7 @@ use std::{error::Error, hint::black_box, time::Instant};
 
 use leash_cuda::{
     BackendKind, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority,
-    PredictiveState, ResidentCognitionCheckpoint, ResidentCognitionLayer,
+    PredictiveState, ResidentCognitionCheckpoint, ResidentCognitionLayer, SpatialScan,
     RESIDENT_COGNITION_SCHEMA_VERSION,
 };
 
@@ -194,6 +194,7 @@ fn profiles() -> Vec<WorkloadProfile> {
         collision("collision_small", 720),
         collision("collision_large", 10_000),
         spatial("spatial_combined_large", 10_000),
+        temporal_spatial("spatial_window_32x360", 32, 360),
         rgb("camera_small", 320, 240),
         rgb("camera_large", 640, 480),
         cognition("cognition_small", 4_096),
@@ -294,6 +295,39 @@ fn spatial(name: &'static str, count: usize) -> WorkloadProfile {
             sector_center_rad: 0.0,
             sector_half_width_rad: core::f32::consts::FRAC_PI_4,
         },
+        setup: None,
+        verify_checkpoint: false,
+    }
+}
+
+fn temporal_spatial(
+    name: &'static str,
+    scan_count: usize,
+    samples_per_scan: usize,
+) -> WorkloadProfile {
+    let scans = (0..scan_count)
+        .map(|scan_index| SpatialScan {
+            ranges_m: (0..samples_per_scan)
+                .map(|index| match index % 127 {
+                    0 => f32::NAN,
+                    1 => f32::INFINITY,
+                    _ => 0.1 + (index % 1_100) as f32 * 0.01,
+                })
+                .collect(),
+            angle_min_rad: -core::f32::consts::PI,
+            angle_increment_rad: core::f32::consts::TAU / samples_per_scan as f32,
+            range_min_m: 0.05,
+            range_max_m: 12.0,
+            clockwise: false,
+            pose_x_m: scan_index as f32 * 0.01,
+            pose_y_m: scan_index as f32 * -0.005,
+            pose_yaw_rad: scan_index as f32 * 0.002,
+        })
+        .collect::<Vec<_>>();
+    WorkloadProfile {
+        name,
+        elements: scan_count.saturating_mul(samples_per_scan),
+        job: ComputeJob::SpatialWindowTransform { scans },
         setup: None,
         verify_checkpoint: false,
     }
@@ -458,6 +492,18 @@ fn assert_parity(cpu: &ComputeResult, cuda: &ComputeResult) -> Result<(), Box<dy
                 &ComputeResult::CollisionSector(*cpu_collision),
                 &ComputeResult::CollisionSector(*cuda_collision),
             )?;
+        }
+        (ComputeResult::SpatialWindow(cpu), ComputeResult::SpatialWindow(cuda)) => {
+            if cpu.len() != cuda.len() {
+                return Err("spatial-window result lengths differ".into());
+            }
+            for (cpu, cuda) in cpu.iter().zip(cuda) {
+                if cpu.valid != cuda.valid
+                    || cpu.valid && (!close(cpu.x_m, cuda.x_m) || !close(cpu.y_m, cuda.y_m))
+                {
+                    return Err("spatial-window parity failed".into());
+                }
+            }
         }
         (ComputeResult::NormalizedRgb(cpu), ComputeResult::NormalizedRgb(cuda)) => {
             assert_float_slice(cpu, cuda)?;
