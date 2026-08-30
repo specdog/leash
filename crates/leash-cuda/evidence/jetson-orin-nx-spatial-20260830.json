@@ -1,0 +1,58 @@
+{
+  "schema_version": "leash.cuda-spatial-validation.v1",
+  "date": "2026-08-30",
+  "validated_commit": "99ece5e551f833bd8afdd63cf152afa3acf7d1f6",
+  "artifact_sha256": "9a09844a57df173929ec20282fdd04cfaf6660635e70fec1b83c15347b53d2ba",
+  "artifact_bytes": 47200,
+  "source_sha256": "9e66815108672598be6fbff3de70f9139a434fb4df9cd2138cc170116d354c6f",
+  "target": {
+    "model": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
+    "architecture": "aarch64",
+    "native_target": "sm_87",
+    "ptx_target": "compute_87",
+    "runtime_cuda": "12.9.0",
+    "rust": "1.94.0"
+  },
+  "parity": {
+    "command": "cargo test -p leash-cuda --features cuda cuda_temporal_spatial_window_matches_cpu_when_a_device_is_present -- --nocapture",
+    "scans": 32,
+    "samples_per_scan": 360,
+    "points": 11520,
+    "tolerance_m": 0.0001,
+    "result": "passed"
+  },
+  "benchmark": {
+    "command": "cargo run --release -p leash-cuda --features cuda --example jetson_benchmark -- --iterations 20",
+    "warmup_iterations": 10,
+    "iterations": 20,
+    "includes": [
+      "queue",
+      "host_to_device",
+      "kernel",
+      "synchronization",
+      "device_to_host"
+    ],
+    "workload": "spatial_window_32x360",
+    "elements": 11520,
+    "cpu_ns": {
+      "p50": 403755,
+      "p95": 413163,
+      "max": 435212
+    },
+    "cuda_ns": {
+      "p50": 255911,
+      "p95": 701907,
+      "max": 976890
+    },
+    "cpu_over_cuda_speedup_milli": 1577,
+    "p50_winner": "cuda",
+    "cuda_queue_failed": 0,
+    "cuda_circuit_open": false
+  },
+  "safety": {
+    "live_service_state": "active and unchanged",
+    "candidate_deployed": false,
+    "motor_commands_sent": false,
+    "serial_adapter_opened_by_validation": false
+  }
+}

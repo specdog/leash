@@ -32,14 +32,19 @@
     "byte_identical": true
   },
   "target_validation": {
-    "date": null,
-    "latest_validation_commit": null,
+    "date": "2026-08-30",
+    "latest_validation_commit": "99ece5e551f833bd8afdd63cf152afa3acf7d1f6",
     "device": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
     "architecture": "aarch64",
     "compute_capability": "8.7",
     "rust": "1.94.1",
     "cudarc": "0.19.8",
-    "status": "pending exact-artifact validation on Jetson",
+    "status": "exact artifact passed 11520-point CPU/CUDA parity and bounded benchmark",
+    "spatial_window_points": 11520,
+    "cpu_cuda_tolerance_m": 0.0001,
+    "cpu_p50_ns": 403755,
+    "cuda_p50_ns": 255911,
+    "cpu_over_cuda_speedup_milli": 1577,
     "no_motion": true
   },
   "host_validation": {
