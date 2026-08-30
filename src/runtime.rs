@@ -5288,18 +5288,21 @@ mod tests {
             capabilities.accelerator.requested,
             crate::config::AcceleratorBackend::Cuda
         );
-        assert_eq!(
-            capabilities.accelerator.active,
-            crate::config::AcceleratorBackend::Cpu
-        );
-        assert!(capabilities
+        let cuda_probe = capabilities
             .accelerator
             .probes
             .iter()
-            .any(
-                |probe| probe.backend == crate::config::AcceleratorBackend::Cuda
-                    && !probe.available
-            ));
+            .find(|probe| probe.backend == crate::config::AcceleratorBackend::Cuda)
+            .expect("CUDA probe inventory");
+        assert_eq!(
+            capabilities.accelerator.active,
+            if cuda_probe.available {
+                crate::config::AcceleratorBackend::Cuda
+            } else {
+                crate::config::AcceleratorBackend::Cpu
+            }
+        );
+        assert_eq!(cuda_probe.compiled, cfg!(feature = "cuda"));
     }
 
     #[tokio::test]

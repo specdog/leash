@@ -834,11 +834,12 @@ mod tests {
     async fn external_provider_worker_panic_is_isolated_as_failed_health() {
         let provider = ExternalLocalizationProvider::new("external-panic", 1_000, 1);
         provider.panic_worker_for_test().unwrap();
-        for _ in 0..1_000 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < deadline {
             if provider.snapshot(now_ms()).status.state == LocalizationProviderState::Failed {
                 break;
             }
-            thread::yield_now();
+            thread::sleep(std::time::Duration::from_millis(1));
         }
         let snapshot = provider.snapshot(now_ms());
         assert_eq!(snapshot.status.state, LocalizationProviderState::Failed);

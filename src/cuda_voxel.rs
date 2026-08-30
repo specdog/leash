@@ -1,5 +1,6 @@
+#[cfg(not(windows))]
+use std::path::Path;
 use std::{
-    path::Path,
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -17,7 +18,7 @@ static EXECUTOR: OnceLock<Result<ComputeExecutor, String>> = OnceLock::new();
 fn executor() -> Result<&'static ComputeExecutor> {
     EXECUTOR
         .get_or_init(|| {
-            if !cuda_device_node_present() {
+            if !platform_cuda_device_present() {
                 return Err("no local CUDA device node is present".to_string());
             }
             ComputeExecutor::start_cuda(ExecutorConfig::default())
@@ -27,7 +28,15 @@ fn executor() -> Result<&'static ComputeExecutor> {
         .map_err(|error| anyhow!(error.clone()))
 }
 
-fn cuda_device_node_present() -> bool {
+#[cfg(windows)]
+fn platform_cuda_device_present() -> bool {
+    // Windows exposes CUDA through the driver API rather than Linux device nodes.
+    // ComputeExecutor::start_cuda performs the authoritative driver/device checks.
+    true
+}
+
+#[cfg(not(windows))]
+fn platform_cuda_device_present() -> bool {
     ["/dev/nvidiactl", "/dev/nvidia0", "/dev/nvhost-gpu"]
         .iter()
         .any(|path| Path::new(path).exists())
