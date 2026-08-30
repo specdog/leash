@@ -29,6 +29,7 @@ flowchart TB
 
 - `BOT_INSTALL.md`: how to install Leash on a bot host as a user service.
 - `RELEASE.md`: release checklist, feature matrix, bot preflight, and packaging notes.
+- `NAVIGATION_API.md`: bounded idempotent goal submission, reconciliation, cancellation, and verified stop.
 - `SOURCE_MAP.md`: canonical Leash source map and the library/UGV implementation boundary.
 - `MCP_HTTP.md`: MCP Streamable HTTP requests, safety behavior, and legacy REST compatibility.
 - `CAMERA.md`: camera ownership, health and recovery routes, capture settings, and Jetson encoder tuning.

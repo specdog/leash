@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     convert::Infallible,
     env,
     net::SocketAddr,
@@ -29,7 +29,7 @@ use axum::{
 };
 use futures_util::{stream, SinkExt, Stream, StreamExt};
 use parking_lot::Mutex as ParkingMutex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
@@ -57,7 +57,7 @@ use crate::{
     calibration::{CalibrationEnterRequest, CalibrationEnterResult, CalibrationStatus},
     runtime::Harness,
     transport::StreamRecvError,
-    types::{SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
+    types::{PlannerGoal, PlannerStatus, SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
     LocalizationProviderUpdate,
 };
 
@@ -65,8 +65,20 @@ static CAMERA_PROCESS_LOCK: LazyLock<Arc<TokioMutex<()>>> =
     LazyLock::new(|| Arc::new(TokioMutex::new(())));
 static CAMERA_RUNTIME_STATE: LazyLock<ParkingMutex<CameraRuntimeState>> =
     LazyLock::new(|| ParkingMutex::new(CameraRuntimeState::default()));
+static NAVIGATION_HTTP_STATE: LazyLock<ParkingMutex<NavigationHttpState>> =
+    LazyLock::new(|| ParkingMutex::new(NavigationHttpState::default()));
 
 const CAMERA_FAILURE_HISTORY_LIMIT: usize = 16;
+const NAVIGATION_GOAL_SCHEMA_VERSION: &str = "leash.navigation-goal.v1";
+const NAVIGATION_STATUS_SCHEMA_VERSION: &str = "leash.navigation-status.v1";
+const NAVIGATION_MAX_GOALS: usize = 256;
+
+#[derive(Debug, Default)]
+struct NavigationHttpState {
+    goals: HashMap<String, NavigationGoalReq>,
+    idempotency: HashMap<String, String>,
+    order: VecDeque<String>,
+}
 
 #[derive(Debug, Default)]
 struct CameraRuntimeState {
@@ -194,6 +206,54 @@ struct DriveReq {
     right: f64,
     speed_mode: Option<SpeedMode>,
     approval: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct NavigationGoalReq {
+    schema_version: String,
+    mission_id: String,
+    idempotency_key: String,
+    token: String,
+    approval: bool,
+    frame_id: String,
+    x_m: f64,
+    y_m: f64,
+    tolerance_m: f64,
+    speed_mode: SpeedMode,
+    deadline_ms: u128,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct NavigationStatusQuery {
+    mission_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NavigationStatusResponse {
+    schema_version: &'static str,
+    mission_id: String,
+    idempotency_key: String,
+    ok: bool,
+    active: bool,
+    status: String,
+    message: String,
+    goal: Option<PlannerGoal>,
+}
+
+impl NavigationStatusResponse {
+    fn from_status(mission_id: &str, idempotency_key: &str, status: PlannerStatus) -> Self {
+        Self {
+            schema_version: NAVIGATION_STATUS_SCHEMA_VERSION,
+            mission_id: mission_id.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+            ok: status.ok,
+            active: status.active,
+            status: status.status,
+            message: status.message,
+            goal: status.goal,
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -338,6 +398,12 @@ pub fn router(harness: Harness) -> Router {
         .route("/calibration/exit", post(calibration_exit))
         .route("/pilot/authorize", post(pilot_authorize))
         .route("/pilot/speed-mode", post(pilot_speed_mode))
+        .route("/navigation/goals", post(navigation_goal_submit))
+        .route("/navigation/status", get(navigation_status))
+        .route(
+            "/navigation/goals/:mission_id/cancel",
+            post(navigation_goal_cancel),
+        )
         .route("/waypoints", get(waypoints))
         .route("/patrol/zones", get(patrol_zones))
         .route("/patrol/zones/:zone_id/start", post(patrol_zone_start))
@@ -2633,6 +2699,169 @@ async fn pilot_speed_mode(
     Ok(Json(serde_json::to_value(response)?))
 }
 
+async fn navigation_goal_submit(
+    State(harness): State<Harness>,
+    Json(request): Json<NavigationGoalReq>,
+) -> Response {
+    if let Err(message) = validate_navigation_goal(&request) {
+        return navigation_error(StatusCode::BAD_REQUEST, &message);
+    }
+    let mut runtime = NAVIGATION_HTTP_STATE.lock();
+    if let Some(mission_id) = runtime.idempotency.get(&request.idempotency_key) {
+        let existing = runtime
+            .goals
+            .get(mission_id)
+            .expect("navigation idempotency index is valid");
+        if existing != &request {
+            return navigation_error(
+                StatusCode::CONFLICT,
+                "idempotency key was already used for a different navigation goal",
+            );
+        }
+        return Json(NavigationStatusResponse::from_status(
+            mission_id,
+            &request.idempotency_key,
+            harness.planner_status(),
+        ))
+        .into_response();
+    }
+    if runtime.goals.contains_key(&request.mission_id) {
+        return navigation_error(
+            StatusCode::CONFLICT,
+            "mission_id already has a different navigation goal",
+        );
+    }
+    let goal = PlannerGoal {
+        frame_id: request.frame_id.clone(),
+        x_m: request.x_m,
+        y_m: request.y_m,
+        tolerance_m: request.tolerance_m,
+        speed_mode: SpeedMode::Low,
+    };
+    let status =
+        match harness.set_planner_goal_authorized(goal, Some(&request.token), request.approval) {
+            Ok(status) => status,
+            Err(error) => return navigation_error(StatusCode::CONFLICT, &error.to_string()),
+        };
+    if runtime.order.len() >= NAVIGATION_MAX_GOALS {
+        if let Some(oldest) = runtime.order.pop_front() {
+            if let Some(old) = runtime.goals.remove(&oldest) {
+                runtime.idempotency.remove(&old.idempotency_key);
+            }
+        }
+    }
+    runtime
+        .idempotency
+        .insert(request.idempotency_key.clone(), request.mission_id.clone());
+    runtime.order.push_back(request.mission_id.clone());
+    runtime
+        .goals
+        .insert(request.mission_id.clone(), request.clone());
+    let response = NavigationStatusResponse::from_status(
+        &request.mission_id,
+        &request.idempotency_key,
+        status,
+    );
+    (StatusCode::CREATED, Json(response)).into_response()
+}
+
+async fn navigation_status(
+    State(harness): State<Harness>,
+    Query(query): Query<NavigationStatusQuery>,
+) -> Response {
+    let runtime = NAVIGATION_HTTP_STATE.lock();
+    let Some(request) = runtime.goals.get(&query.mission_id) else {
+        return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
+    };
+    Json(NavigationStatusResponse::from_status(
+        &query.mission_id,
+        &request.idempotency_key,
+        harness.planner_status(),
+    ))
+    .into_response()
+}
+
+async fn navigation_goal_cancel(
+    AxumPath(mission_id): AxumPath<String>,
+    State(harness): State<Harness>,
+) -> Response {
+    let idempotency_key = {
+        let runtime = NAVIGATION_HTTP_STATE.lock();
+        let Some(request) = runtime.goals.get(&mission_id) else {
+            return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
+        };
+        request.idempotency_key.clone()
+    };
+    match harness.cancel_planner_goal() {
+        Ok(status) => Json(NavigationStatusResponse::from_status(
+            &mission_id,
+            &idempotency_key,
+            status,
+        ))
+        .into_response(),
+        Err(error) => navigation_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    }
+}
+
+fn validate_navigation_goal(request: &NavigationGoalReq) -> Result<(), String> {
+    if request.schema_version != NAVIGATION_GOAL_SCHEMA_VERSION {
+        return Err(format!(
+            "schema_version must be {NAVIGATION_GOAL_SCHEMA_VERSION}"
+        ));
+    }
+    for (field, value) in [
+        ("mission_id", request.mission_id.as_str()),
+        ("idempotency_key", request.idempotency_key.as_str()),
+    ] {
+        if value.is_empty()
+            || value.len() > 160
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')
+            })
+        {
+            return Err(format!("{field} must contain 1..=160 URL-safe characters"));
+        }
+    }
+    if request.token.trim().is_empty() {
+        return Err("an explicitly authorized pilot token is required".to_string());
+    }
+    if !request.approval {
+        return Err("navigation goal requires approval=true".to_string());
+    }
+    if request.speed_mode != SpeedMode::Low {
+        return Err("navigation goal is restricted to low speed mode".to_string());
+    }
+    if request.frame_id.trim().is_empty()
+        || !request.x_m.is_finite()
+        || !request.y_m.is_finite()
+        || !request.tolerance_m.is_finite()
+        || !(0.05..=1.0).contains(&request.tolerance_m)
+    {
+        return Err("navigation goal geometry is invalid".to_string());
+    }
+    let now = camera_now_ms();
+    if request.deadline_ms <= now || request.deadline_ms.saturating_sub(now) > 120_000 {
+        return Err(
+            "navigation deadline must be a future timestamp within 120 seconds".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn navigation_error(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(json!({
+            "schema_version": NAVIGATION_STATUS_SCHEMA_VERSION,
+            "ok": false,
+            "active": false,
+            "status": "rejected",
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
 async fn drive(
     State(harness): State<Harness>,
     Json(req): Json<DriveReq>,
@@ -2896,8 +3125,9 @@ mod tests {
     use super::{
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
         compute_authorized, localization_authorized, localization_update, motors_stop_verified,
+        navigation_goal_cancel, navigation_goal_submit, navigation_status,
         validate_agent_console_capability, AgentCapabilityReq, CameraRuntimeState,
-        CAMERA_RUNTIME_STATE,
+        NavigationGoalReq, NavigationStatusQuery, CAMERA_RUNTIME_STATE, NAVIGATION_HTTP_STATE,
     };
     use crate::{
         agent_runtime::{AgentRuntime, AgentSessionStore, CapabilityPermissions},
@@ -2907,6 +3137,66 @@ mod tests {
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[tokio::test]
+    async fn navigation_http_goal_is_low_speed_idempotent_and_cancellable() {
+        {
+            let mut runtime = NAVIGATION_HTTP_STATE.lock();
+            runtime.goals.clear();
+            runtime.idempotency.clear();
+            runtime.order.clear();
+        }
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let request = NavigationGoalReq {
+            schema_version: "leash.navigation-goal.v1".to_string(),
+            mission_id: "http-navigation-test".to_string(),
+            idempotency_key: "http-navigation-test:plan-1".to_string(),
+            token: "explicit-test-token".to_string(),
+            approval: true,
+            frame_id: "map".to_string(),
+            x_m: 0.25,
+            y_m: 0.0,
+            tolerance_m: 0.1,
+            speed_mode: crate::types::SpeedMode::Low,
+            deadline_ms: super::camera_now_ms() + 10_000,
+        };
+        let created = navigation_goal_submit(State(harness.clone()), Json(request.clone())).await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let replay = navigation_goal_submit(State(harness.clone()), Json(request.clone())).await;
+        assert_eq!(replay.status(), StatusCode::OK);
+        let status = navigation_status(
+            State(harness.clone()),
+            axum::extract::Query(NavigationStatusQuery {
+                mission_id: request.mission_id.clone(),
+            }),
+        )
+        .await;
+        assert_eq!(status.status(), StatusCode::OK);
+        let cancelled =
+            navigation_goal_cancel(axum::extract::Path(request.mission_id), State(harness)).await;
+        assert_eq!(cancelled.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn navigation_http_goal_rejects_non_low_speed_and_expired_deadline() {
+        let mut request = NavigationGoalReq {
+            schema_version: "leash.navigation-goal.v1".to_string(),
+            mission_id: "invalid-navigation-test".to_string(),
+            idempotency_key: "invalid-navigation-test:plan-1".to_string(),
+            token: "explicit-test-token".to_string(),
+            approval: true,
+            frame_id: "odom".to_string(),
+            x_m: 1.0,
+            y_m: 0.0,
+            tolerance_m: 0.1,
+            speed_mode: crate::types::SpeedMode::Medium,
+            deadline_ms: super::camera_now_ms() + 10_000,
+        };
+        assert!(super::validate_navigation_goal(&request).is_err());
+        request.speed_mode = crate::types::SpeedMode::Low;
+        request.deadline_ms = super::camera_now_ms().saturating_sub(1);
+        assert!(super::validate_navigation_goal(&request).is_err());
+    }
 
     #[tokio::test]
     async fn compact_telemetry_keeps_spatial_inputs_and_drops_dense_surfaces() {
