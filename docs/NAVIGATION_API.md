@@ -36,8 +36,11 @@ Goal submission never creates or extends that lease.
 
 Identifiers are URL-safe and limited to 160 characters. The deadline must be
 in the future and no more than 120 seconds away. Only `low` speed is accepted.
-Repeating an identical request with the same idempotency key returns current
-planner state; changing any field under that key returns `409 Conflict`.
+Leash accepts one active HTTP navigation mission at a time and independently
+cancels it at the submitted deadline. Repeating the same goal fields with the
+same idempotency key returns that mission's stored planner state; changing a
+goal field under that key returns `409 Conflict`. Authorization tokens are
+used for submission but are not retained in the idempotency registry.
 
 Status uses `leash.navigation-status.v1` and includes `ok`, `active`, `status`,
 `message`, and the accepted goal. A client must treat any inactive state other

@@ -75,9 +75,47 @@ const NAVIGATION_MAX_GOALS: usize = 256;
 
 #[derive(Debug, Default)]
 struct NavigationHttpState {
-    goals: HashMap<String, NavigationGoalReq>,
+    goals: HashMap<String, NavigationGoalRecord>,
     idempotency: HashMap<String, String>,
     order: VecDeque<String>,
+    active_mission_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct NavigationGoalRecord {
+    identity: NavigationGoalIdentity,
+    status: PlannerStatus,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NavigationGoalIdentity {
+    schema_version: String,
+    mission_id: String,
+    idempotency_key: String,
+    approval: bool,
+    frame_id: String,
+    x_m: f64,
+    y_m: f64,
+    tolerance_m: f64,
+    speed_mode: SpeedMode,
+    deadline_ms: u128,
+}
+
+impl From<&NavigationGoalReq> for NavigationGoalIdentity {
+    fn from(request: &NavigationGoalReq) -> Self {
+        Self {
+            schema_version: request.schema_version.clone(),
+            mission_id: request.mission_id.clone(),
+            idempotency_key: request.idempotency_key.clone(),
+            approval: request.approval,
+            frame_id: request.frame_id.clone(),
+            x_m: request.x_m,
+            y_m: request.y_m,
+            tolerance_m: request.tolerance_m,
+            speed_mode: request.speed_mode,
+            deadline_ms: request.deadline_ms,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2707,12 +2745,14 @@ async fn navigation_goal_submit(
         return navigation_error(StatusCode::BAD_REQUEST, &message);
     }
     let mut runtime = NAVIGATION_HTTP_STATE.lock();
+    reconcile_active_navigation(&mut runtime, &harness);
+    let identity = NavigationGoalIdentity::from(&request);
     if let Some(mission_id) = runtime.idempotency.get(&request.idempotency_key) {
         let existing = runtime
             .goals
             .get(mission_id)
             .expect("navigation idempotency index is valid");
-        if existing != &request {
+        if existing.identity != identity {
             return navigation_error(
                 StatusCode::CONFLICT,
                 "idempotency key was already used for a different navigation goal",
@@ -2721,7 +2761,7 @@ async fn navigation_goal_submit(
         return Json(NavigationStatusResponse::from_status(
             mission_id,
             &request.idempotency_key,
-            harness.planner_status(),
+            existing.status.clone(),
         ))
         .into_response();
     }
@@ -2729,6 +2769,12 @@ async fn navigation_goal_submit(
         return navigation_error(
             StatusCode::CONFLICT,
             "mission_id already has a different navigation goal",
+        );
+    }
+    if runtime.active_mission_id.is_some() {
+        return navigation_error(
+            StatusCode::CONFLICT,
+            "another navigation mission is already active",
         );
     }
     let goal = PlannerGoal {
@@ -2746,7 +2792,7 @@ async fn navigation_goal_submit(
     if runtime.order.len() >= NAVIGATION_MAX_GOALS {
         if let Some(oldest) = runtime.order.pop_front() {
             if let Some(old) = runtime.goals.remove(&oldest) {
-                runtime.idempotency.remove(&old.idempotency_key);
+                runtime.idempotency.remove(&old.identity.idempotency_key);
             }
         }
     }
@@ -2754,14 +2800,31 @@ async fn navigation_goal_submit(
         .idempotency
         .insert(request.idempotency_key.clone(), request.mission_id.clone());
     runtime.order.push_back(request.mission_id.clone());
-    runtime
-        .goals
-        .insert(request.mission_id.clone(), request.clone());
+    runtime.goals.insert(
+        request.mission_id.clone(),
+        NavigationGoalRecord {
+            identity,
+            status: status.clone(),
+        },
+    );
+    if status.active {
+        runtime.active_mission_id = Some(request.mission_id.clone());
+    }
     let response = NavigationStatusResponse::from_status(
         &request.mission_id,
         &request.idempotency_key,
         status,
     );
+    let mission_id = request.mission_id;
+    let idempotency_key = request.idempotency_key;
+    let deadline_ms = request.deadline_ms;
+    drop(runtime);
+    tokio::spawn(enforce_navigation_deadline(
+        harness,
+        mission_id,
+        idempotency_key,
+        deadline_ms,
+    ));
     (StatusCode::CREATED, Json(response)).into_response()
 }
 
@@ -2769,14 +2832,15 @@ async fn navigation_status(
     State(harness): State<Harness>,
     Query(query): Query<NavigationStatusQuery>,
 ) -> Response {
-    let runtime = NAVIGATION_HTTP_STATE.lock();
-    let Some(request) = runtime.goals.get(&query.mission_id) else {
+    let mut runtime = NAVIGATION_HTTP_STATE.lock();
+    reconcile_active_navigation(&mut runtime, &harness);
+    let Some(record) = runtime.goals.get(&query.mission_id) else {
         return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
     };
     Json(NavigationStatusResponse::from_status(
         &query.mission_id,
-        &request.idempotency_key,
-        harness.planner_status(),
+        &record.identity.idempotency_key,
+        record.status.clone(),
     ))
     .into_response()
 }
@@ -2785,21 +2849,88 @@ async fn navigation_goal_cancel(
     AxumPath(mission_id): AxumPath<String>,
     State(harness): State<Harness>,
 ) -> Response {
-    let idempotency_key = {
-        let runtime = NAVIGATION_HTTP_STATE.lock();
-        let Some(request) = runtime.goals.get(&mission_id) else {
+    let (idempotency_key, active, stored_status) = {
+        let mut runtime = NAVIGATION_HTTP_STATE.lock();
+        reconcile_active_navigation(&mut runtime, &harness);
+        let Some(record) = runtime.goals.get(&mission_id) else {
             return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
         };
-        request.idempotency_key.clone()
+        (
+            record.identity.idempotency_key.clone(),
+            runtime.active_mission_id.as_deref() == Some(&mission_id),
+            record.status.clone(),
+        )
     };
-    match harness.cancel_planner_goal() {
-        Ok(status) => Json(NavigationStatusResponse::from_status(
+    if !active {
+        return Json(NavigationStatusResponse::from_status(
             &mission_id,
             &idempotency_key,
-            status,
+            stored_status,
         ))
-        .into_response(),
+        .into_response();
+    }
+    match harness.cancel_planner_goal() {
+        Ok(status) => {
+            let mut runtime = NAVIGATION_HTTP_STATE.lock();
+            if let Some(record) = runtime.goals.get_mut(&mission_id) {
+                record.status = status.clone();
+            }
+            if runtime.active_mission_id.as_deref() == Some(&mission_id) {
+                runtime.active_mission_id = None;
+            }
+            Json(NavigationStatusResponse::from_status(
+                &mission_id,
+                &idempotency_key,
+                status,
+            ))
+            .into_response()
+        }
         Err(error) => navigation_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    }
+}
+
+fn reconcile_active_navigation(runtime: &mut NavigationHttpState, harness: &Harness) {
+    let Some(mission_id) = runtime.active_mission_id.clone() else {
+        return;
+    };
+    let status = harness.planner_status();
+    if let Some(record) = runtime.goals.get_mut(&mission_id) {
+        record.status = status.clone();
+    }
+    if !status.active {
+        runtime.active_mission_id = None;
+    }
+}
+
+async fn enforce_navigation_deadline(
+    harness: Harness,
+    mission_id: String,
+    idempotency_key: String,
+    deadline_ms: u128,
+) {
+    let delay_ms = deadline_ms
+        .saturating_sub(camera_now_ms())
+        .min(u64::MAX as u128) as u64;
+    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    let should_cancel = {
+        let runtime = NAVIGATION_HTTP_STATE.lock();
+        runtime.active_mission_id.as_deref() == Some(&mission_id)
+            && runtime.goals.get(&mission_id).is_some_and(|record| {
+                record.identity.idempotency_key == idempotency_key
+                    && record.identity.deadline_ms == deadline_ms
+            })
+    };
+    if !should_cancel {
+        return;
+    }
+    if let Ok(status) = harness.cancel_planner_goal() {
+        let mut runtime = NAVIGATION_HTTP_STATE.lock();
+        if let Some(record) = runtime.goals.get_mut(&mission_id) {
+            record.status = status;
+        }
+        if runtime.active_mission_id.as_deref() == Some(&mission_id) {
+            runtime.active_mission_id = None;
+        }
     }
 }
 
@@ -3137,14 +3268,17 @@ mod tests {
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+    static NAVIGATION_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
     async fn navigation_http_goal_is_low_speed_idempotent_and_cancellable() {
+        let _guard = NAVIGATION_TEST_LOCK.lock().await;
         {
             let mut runtime = NAVIGATION_HTTP_STATE.lock();
             runtime.goals.clear();
             runtime.idempotency.clear();
             runtime.order.clear();
+            runtime.active_mission_id = None;
         }
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         let request = NavigationGoalReq {
@@ -3175,6 +3309,41 @@ mod tests {
         let cancelled =
             navigation_goal_cancel(axum::extract::Path(request.mission_id), State(harness)).await;
         assert_eq!(cancelled.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn navigation_http_deadline_cancels_active_goal() {
+        let _guard = NAVIGATION_TEST_LOCK.lock().await;
+        {
+            let mut runtime = NAVIGATION_HTTP_STATE.lock();
+            runtime.goals.clear();
+            runtime.idempotency.clear();
+            runtime.order.clear();
+            runtime.active_mission_id = None;
+        }
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let mission_id = "http-navigation-deadline-test".to_string();
+        let request = NavigationGoalReq {
+            schema_version: "leash.navigation-goal.v1".to_string(),
+            mission_id: mission_id.clone(),
+            idempotency_key: "http-navigation-deadline-test:plan-1".to_string(),
+            token: "explicit-test-token".to_string(),
+            approval: true,
+            frame_id: "map".to_string(),
+            x_m: 0.25,
+            y_m: 0.0,
+            tolerance_m: 0.1,
+            speed_mode: crate::types::SpeedMode::Low,
+            deadline_ms: super::camera_now_ms() + 150,
+        };
+        let created = navigation_goal_submit(State(harness), Json(request)).await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+        let runtime = NAVIGATION_HTTP_STATE.lock();
+        assert!(runtime.active_mission_id.is_none());
+        assert!(!runtime.goals.get(&mission_id).unwrap().status.active);
     }
 
     #[test]
