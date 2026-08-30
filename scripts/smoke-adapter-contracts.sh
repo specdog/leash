@@ -47,6 +47,17 @@ for command in "capture" "verify" "deploy" "rollback" "CANDIDATE" "--source-revi
   fi
 done
 
+systemd_environment_files_fixture=$'/home/robot/.config/leash/leash.env\n(ignore_errors=no)\n-/home/robot/.config/leash/optional.env (ignore_errors=yes)'
+parsed_environment_files="$({
+  printf '%s\n' "$systemd_environment_files_fixture" \
+    | awk '{ for (field = 1; field <= NF; field++) if ($field ~ /^-?\//) { sub(/^-/, "", $field); print $field } }'
+})"
+expected_environment_files=$'/home/robot/.config/leash/leash.env\n/home/robot/.config/leash/optional.env'
+if [[ "$parsed_environment_files" != "$expected_environment_files" ]]; then
+  echo "deployment baseline did not parse wrapped systemd environment files" >&2
+  exit 1
+fi
+
 hardware_soak_script="implementations/waveshare-ugv/runtime-v2-hardware-soak.sh"
 bash -n "$hardware_soak_script"
 hardware_soak_help="$(bash "$hardware_soak_script" --help)"

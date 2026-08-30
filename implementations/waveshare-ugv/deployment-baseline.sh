@@ -135,7 +135,10 @@ service_paths() {
   [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || die "$service has no running MainPID"
   binary="$(readlink -f "/proc/$main_pid/exe")"
   service_file="$(service_property FragmentPath)"
-  mapfile -t env_files < <(service_property EnvironmentFiles | awk '{print $1}' | sed '/^$/d')
+  mapfile -t env_files < <(
+    service_property EnvironmentFiles \
+      | awk '{ for (field = 1; field <= NF; field++) if ($field ~ /^-?\//) { sub(/^-/, "", $field); print $field } }'
+  )
   [[ "${#env_files[@]}" -gt 0 ]] || die "service environment is unavailable"
   env_file="${env_files[0]}"
   [[ -x "$binary" ]] || die "service binary is not executable"
