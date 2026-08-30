@@ -1,9 +1,9 @@
 {
   "schema_version": "leash.cuda-spatial-validation.v1",
   "date": "2026-08-30",
-  "artifact_sha256": "dd060fb7c82787d2c3a979d9761b7435a697169ef44b74c188834fa1166fb5fc",
-  "artifact_bytes": 47552,
-  "source_sha256": "51caacb9e0e1cf25b208def75e911b54288e96916c6d9cb833c4a932b320105b",
+  "artifact_sha256": "79e134c2f43f98be36a4db407cb88848dfae0ebc3f39b628776c9b949cfdb283",
+  "artifact_bytes": 46912,
+  "source_sha256": "ae063eba2054f11f793b754865b11746921853adf09265004a3567cc18896815",
   "compiler": {
     "cuda_sdk": "12.8.0",
     "nvcc": "Build cuda_12.8.r12.8/compiler.35583870_0",

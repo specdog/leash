@@ -65,14 +65,7 @@ pub(crate) struct CudaBackend {
     lidar_valid: CudaSlice<u8>,
     spatial_scan_indices: CudaSlice<u32>,
     spatial_local_indices: CudaSlice<u32>,
-    spatial_angle_min: CudaSlice<f32>,
-    spatial_angle_increment: CudaSlice<f32>,
-    spatial_range_min: CudaSlice<f32>,
-    spatial_range_max: CudaSlice<f32>,
-    spatial_clockwise: CudaSlice<i32>,
-    spatial_pose_x: CudaSlice<f32>,
-    spatial_pose_y: CudaSlice<f32>,
-    spatial_pose_yaw: CudaSlice<f32>,
+    spatial_scan_params: CudaSlice<f32>,
     collision_minimum_bits: CudaSlice<u32>,
     collision_sample_count: CudaSlice<u32>,
     rgb_input: CudaSlice<u8>,
@@ -130,14 +123,7 @@ impl CudaBackend {
             lidar_valid: allocate_one(&stream, "lidar validity")?,
             spatial_scan_indices: allocate_one(&stream, "spatial scan indices")?,
             spatial_local_indices: allocate_one(&stream, "spatial local indices")?,
-            spatial_angle_min: allocate_one(&stream, "spatial angle minimums")?,
-            spatial_angle_increment: allocate_one(&stream, "spatial angle increments")?,
-            spatial_range_min: allocate_one(&stream, "spatial range minimums")?,
-            spatial_range_max: allocate_one(&stream, "spatial range maximums")?,
-            spatial_clockwise: allocate_one(&stream, "spatial scan directions")?,
-            spatial_pose_x: allocate_one(&stream, "spatial pose x")?,
-            spatial_pose_y: allocate_one(&stream, "spatial pose y")?,
-            spatial_pose_yaw: allocate_one(&stream, "spatial pose yaw")?,
+            spatial_scan_params: allocate_one(&stream, "spatial scan parameters")?,
             collision_minimum_bits: allocate_one(&stream, "collision minimum")?,
             collision_sample_count: allocate_one(&stream, "collision sample count")?,
             rgb_input: allocate_one(&stream, "RGB input")?,
@@ -381,14 +367,7 @@ impl CudaBackend {
         let mut ranges = Vec::with_capacity(point_count);
         let mut scan_indices = Vec::with_capacity(point_count);
         let mut local_indices = Vec::with_capacity(point_count);
-        let mut angle_min = Vec::with_capacity(scans.len());
-        let mut angle_increment = Vec::with_capacity(scans.len());
-        let mut range_min = Vec::with_capacity(scans.len());
-        let mut range_max = Vec::with_capacity(scans.len());
-        let mut clockwise = Vec::with_capacity(scans.len());
-        let mut pose_x = Vec::with_capacity(scans.len());
-        let mut pose_y = Vec::with_capacity(scans.len());
-        let mut pose_yaw = Vec::with_capacity(scans.len());
+        let mut scan_params = Vec::with_capacity(scans.len().saturating_mul(8));
         for (scan_index, scan) in scans.iter().enumerate() {
             if !scan.range_min_m.is_finite()
                 || !scan.range_max_m.is_finite()
@@ -415,14 +394,16 @@ impl CudaBackend {
                         .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?,
                 );
             }
-            angle_min.push(scan.angle_min_rad);
-            angle_increment.push(scan.angle_increment_rad);
-            range_min.push(scan.range_min_m);
-            range_max.push(scan.range_max_m);
-            clockwise.push(i32::from(scan.clockwise));
-            pose_x.push(scan.pose_x_m);
-            pose_y.push(scan.pose_y_m);
-            pose_yaw.push(scan.pose_yaw_rad);
+            scan_params.extend_from_slice(&[
+                scan.angle_min_rad,
+                scan.angle_increment_rad,
+                scan.range_min_m,
+                scan.range_max_m,
+                if scan.clockwise { -1.0 } else { 1.0 },
+                scan.pose_x_m,
+                scan.pose_y_m,
+                scan.pose_yaw_rad,
+            ]);
         }
 
         ensure_capacity(&self.stream, &mut self.lidar_ranges, point_count)?;
@@ -431,14 +412,11 @@ impl CudaBackend {
         ensure_capacity(&self.stream, &mut self.lidar_valid, point_count)?;
         ensure_capacity(&self.stream, &mut self.spatial_scan_indices, point_count)?;
         ensure_capacity(&self.stream, &mut self.spatial_local_indices, point_count)?;
-        ensure_capacity(&self.stream, &mut self.spatial_angle_min, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_angle_increment, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_range_min, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_range_max, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_clockwise, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_pose_x, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_pose_y, scans.len())?;
-        ensure_capacity(&self.stream, &mut self.spatial_pose_yaw, scans.len())?;
+        ensure_capacity(
+            &self.stream,
+            &mut self.spatial_scan_params,
+            scan_params.len(),
+        )?;
 
         macro_rules! upload {
             ($source:expr, $target:expr, $name:literal) => {
@@ -459,50 +437,16 @@ impl CudaBackend {
             "upload spatial local indices"
         );
         upload!(
-            &angle_min,
-            &mut self.spatial_angle_min,
-            "upload spatial angle minimums"
-        );
-        upload!(
-            &angle_increment,
-            &mut self.spatial_angle_increment,
-            "upload spatial angle increments"
-        );
-        upload!(
-            &range_min,
-            &mut self.spatial_range_min,
-            "upload spatial range minimums"
-        );
-        upload!(
-            &range_max,
-            &mut self.spatial_range_max,
-            "upload spatial range maximums"
-        );
-        upload!(
-            &clockwise,
-            &mut self.spatial_clockwise,
-            "upload spatial scan directions"
-        );
-        upload!(&pose_x, &mut self.spatial_pose_x, "upload spatial pose x");
-        upload!(&pose_y, &mut self.spatial_pose_y, "upload spatial pose y");
-        upload!(
-            &pose_yaw,
-            &mut self.spatial_pose_yaw,
-            "upload spatial pose yaw"
+            &scan_params,
+            &mut self.spatial_scan_params,
+            "upload spatial scan parameters"
         );
 
         {
             let ranges = self.lidar_ranges.slice(..point_count);
             let scan_indices = self.spatial_scan_indices.slice(..point_count);
             let local_indices = self.spatial_local_indices.slice(..point_count);
-            let angle_min = self.spatial_angle_min.slice(..scans.len());
-            let angle_increment = self.spatial_angle_increment.slice(..scans.len());
-            let range_min = self.spatial_range_min.slice(..scans.len());
-            let range_max = self.spatial_range_max.slice(..scans.len());
-            let clockwise = self.spatial_clockwise.slice(..scans.len());
-            let pose_x = self.spatial_pose_x.slice(..scans.len());
-            let pose_y = self.spatial_pose_y.slice(..scans.len());
-            let pose_yaw = self.spatial_pose_yaw.slice(..scans.len());
+            let scan_params = self.spatial_scan_params.slice(..scan_params.len());
             let mut x = self.lidar_x.slice_mut(..point_count);
             let mut y = self.lidar_y.slice_mut(..point_count);
             let mut valid = self.lidar_valid.slice_mut(..point_count);
@@ -512,14 +456,7 @@ impl CudaBackend {
                     .arg(&ranges)
                     .arg(&scan_indices)
                     .arg(&local_indices)
-                    .arg(&angle_min)
-                    .arg(&angle_increment)
-                    .arg(&range_min)
-                    .arg(&range_max)
-                    .arg(&clockwise)
-                    .arg(&pose_x)
-                    .arg(&pose_y)
-                    .arg(&pose_yaw)
+                    .arg(&scan_params)
                     .arg(&mut x)
                     .arg(&mut y)
                     .arg(&mut valid)
