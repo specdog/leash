@@ -712,7 +712,7 @@ async fn spatial_inputs(State(harness): State<Harness>) -> Json<Value> {
 
 async fn compute_capabilities(State(harness): State<Harness>, headers: HeaderMap) -> Response {
     if let Err(response) = compute_authorized(&headers) {
-        return response;
+        return *response;
     }
     Json(harness.compute().capabilities()).into_response()
 }
@@ -723,7 +723,7 @@ async fn compute_submit(
     body: Bytes,
 ) -> Response {
     if let Err(response) = compute_authorized(&headers) {
-        return response;
+        return *response;
     }
     if body.len() > 1_048_576 {
         return compute_error_response(
@@ -752,7 +752,7 @@ async fn compute_get(
     AxumPath(job_id): AxumPath<String>,
 ) -> Response {
     if let Err(response) = compute_authorized(&headers) {
-        return response;
+        return *response;
     }
     match harness.compute().get(&job_id) {
         Ok(job) => Json(job).into_response(),
@@ -766,7 +766,7 @@ async fn compute_cancel(
     AxumPath(job_id): AxumPath<String>,
 ) -> Response {
     if let Err(response) = compute_authorized(&headers) {
-        return response;
+        return *response;
     }
     match harness.compute().cancel(&job_id) {
         Ok(job) => Json(job).into_response(),
@@ -776,7 +776,7 @@ async fn compute_cancel(
 
 async fn sse_compute(State(harness): State<Harness>, headers: HeaderMap) -> Response {
     if let Err(response) = compute_authorized(&headers) {
-        return response;
+        return *response;
     }
     let receiver = harness.compute().subscribe();
     let stream = stream::unfold(receiver, |mut receiver| async move {
@@ -803,24 +803,24 @@ async fn sse_compute(State(harness): State<Harness>, headers: HeaderMap) -> Resp
         .into_response()
 }
 
-fn compute_authorized(headers: &HeaderMap) -> Result<(), Response> {
+fn compute_authorized(headers: &HeaderMap) -> Result<(), Box<Response>> {
     let expected = match env::var("LEASH_COMPUTE_TOKEN_FILE")
         .map_err(anyhow::Error::from)
         .and_then(|path| read_ingress_token(&path, "compute"))
     {
         Ok(token) => token,
         Err(error) => {
-            return Err(compute_error_response(
+            return Err(Box::new(compute_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 &format!("compute API is disabled; set LEASH_COMPUTE_TOKEN_FILE: {error}"),
-            ))
+            )))
         }
     };
     if !bearer_authorized(headers, &expected) {
-        return Err(compute_error_response(
+        return Err(Box::new(compute_error_response(
             StatusCode::UNAUTHORIZED,
             "compute API authorization failed",
-        ));
+        )));
     }
     Ok(())
 }
