@@ -125,19 +125,6 @@ fn normalize_newlines(value: &str) -> String {
     value.replace("\r\n", "\n")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_newlines;
-
-    #[test]
-    fn schema_freshness_ignores_checkout_line_endings() {
-        assert_eq!(
-            normalize_newlines("{\r\n  \"type\": \"object\"\r\n}\r\n"),
-            "{\n  \"type\": \"object\"\n}\n"
-        );
-    }
-}
-
 fn schema_document() -> Result<Value> {
     let mut schemas = BTreeMap::new();
 
@@ -289,4 +276,17 @@ fn schema_document() -> Result<Value> {
 fn insert<T: JsonSchema>(schemas: &mut BTreeMap<String, Value>, name: &str) -> Result<()> {
     schemas.insert(name.to_string(), serde_json::to_value(schema_for!(T))?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_newlines;
+
+    #[test]
+    fn schema_freshness_ignores_checkout_line_endings() {
+        assert_eq!(
+            normalize_newlines("{\r\n  \"type\": \"object\"\r\n}\r\n"),
+            "{\n  \"type\": \"object\"\n}\n"
+        );
+    }
 }
