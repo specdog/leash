@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     if args.check {
         let current = fs::read_to_string(&args.output)
             .with_context(|| format!("read {}", args.output.display()))?;
-        if current != rendered {
+        if normalize_newlines(&current) != rendered {
             eprintln!(
                 "{} is stale; run `cargo run --features mcp --bin leash-schema -- --output {}`",
                 args.output.display(),
@@ -119,6 +119,23 @@ fn parse_args() -> Result<Args> {
     }
 
     Ok(Args { output, check })
+}
+
+fn normalize_newlines(value: &str) -> String {
+    value.replace("\r\n", "\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_newlines;
+
+    #[test]
+    fn schema_freshness_ignores_checkout_line_endings() {
+        assert_eq!(
+            normalize_newlines("{\r\n  \"type\": \"object\"\r\n}\r\n"),
+            "{\n  \"type\": \"object\"\n}\n"
+        );
+    }
 }
 
 fn schema_document() -> Result<Value> {
