@@ -1,10 +1,10 @@
 {
   "schema_version": "leash.cuda-artifact.v1",
   "source": "kernels/leash_kernels.cu",
-  "source_sha256": "ae063eba2054f11f793b754865b11746921853adf09265004a3567cc18896815",
+  "source_sha256": "9e66815108672598be6fbff3de70f9139a434fb4df9cd2138cc170116d354c6f",
   "artifact": "leash_kernels.fatbin",
-  "artifact_sha256": "79e134c2f43f98be36a4db407cb88848dfae0ebc3f39b628776c9b949cfdb283",
-  "artifact_bytes": 46912,
+  "artifact_sha256": "9a09844a57df173929ec20282fdd04cfaf6660635e70fec1b83c15347b53d2ba",
+  "artifact_bytes": 47200,
   "cuda_sdk": "12.8.0",
   "nvcc": "Build cuda_12.8.r12.8/compiler.35583870_0",
   "target": {

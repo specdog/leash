@@ -25,8 +25,8 @@ pub use gate::{
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";
 pub const ARTIFACT_SHA256: &str =
-    "79e134c2f43f98be36a4db407cb88848dfae0ebc3f39b628776c9b949cfdb283";
-pub const SOURCE_SHA256: &str = "ae063eba2054f11f793b754865b11746921853adf09265004a3567cc18896815";
+    "9a09844a57df173929ec20282fdd04cfaf6660635e70fec1b83c15347b53d2ba";
+pub const SOURCE_SHA256: &str = "9e66815108672598be6fbff3de70f9139a434fb4df9cd2138cc170116d354c6f";
 pub const TARGET_SM: &str = "sm_87";
 pub const TARGET_PTX: &str = "compute_87";
 pub const CUDA_SDK: &str = "12.8.0";
@@ -59,7 +59,7 @@ pub const fn artifact() -> KernelArtifact {
     KernelArtifact {
         schema_version: ARTIFACT_SCHEMA_VERSION,
         sha256: ARTIFACT_SHA256,
-        bytes: 46_912,
+        bytes: 47_200,
         cuda_sdk: CUDA_SDK,
         native_target: TARGET_SM,
         ptx_target: TARGET_PTX,
@@ -369,7 +369,7 @@ mod tests {
         let artifact = artifact();
         assert_eq!(artifact.schema_version, "leash.cuda-artifact.v1");
         assert_eq!(artifact.sha256.len(), 64);
-        assert_eq!(artifact.bytes, 46_912);
+        assert_eq!(artifact.bytes, 47_200);
         assert_eq!(artifact.native_target, "sm_87");
         assert_eq!(artifact.ptx_target, "compute_87");
         assert_eq!(artifact.kernels, KERNEL_NAMES);

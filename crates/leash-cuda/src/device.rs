@@ -63,8 +63,7 @@ pub(crate) struct CudaBackend {
     lidar_x: CudaSlice<f32>,
     lidar_y: CudaSlice<f32>,
     lidar_valid: CudaSlice<u8>,
-    spatial_scan_indices: CudaSlice<u32>,
-    spatial_local_indices: CudaSlice<u32>,
+    spatial_scan_offsets: CudaSlice<u32>,
     spatial_scan_params: CudaSlice<f32>,
     collision_minimum_bits: CudaSlice<u32>,
     collision_sample_count: CudaSlice<u32>,
@@ -121,8 +120,7 @@ impl CudaBackend {
             lidar_x: allocate_one(&stream, "lidar x")?,
             lidar_y: allocate_one(&stream, "lidar y")?,
             lidar_valid: allocate_one(&stream, "lidar validity")?,
-            spatial_scan_indices: allocate_one(&stream, "spatial scan indices")?,
-            spatial_local_indices: allocate_one(&stream, "spatial local indices")?,
+            spatial_scan_offsets: allocate_one(&stream, "spatial scan offsets")?,
             spatial_scan_params: allocate_one(&stream, "spatial scan parameters")?,
             collision_minimum_bits: allocate_one(&stream, "collision minimum")?,
             collision_sample_count: allocate_one(&stream, "collision sample count")?,
@@ -360,15 +358,17 @@ impl CudaBackend {
         })?;
         let count = u32::try_from(point_count)
             .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
+        let scan_count = u32::try_from(scans.len())
+            .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
         if point_count == 0 {
             return Ok(Vec::new());
         }
 
         let mut ranges = Vec::with_capacity(point_count);
-        let mut scan_indices = Vec::with_capacity(point_count);
-        let mut local_indices = Vec::with_capacity(point_count);
+        let mut scan_offsets = Vec::with_capacity(scans.len().saturating_add(1));
+        scan_offsets.push(0_u32);
         let mut scan_params = Vec::with_capacity(scans.len().saturating_mul(8));
-        for (scan_index, scan) in scans.iter().enumerate() {
+        for scan in scans {
             if !scan.range_min_m.is_finite()
                 || !scan.range_max_m.is_finite()
                 || scan.range_min_m < 0.0
@@ -384,16 +384,11 @@ impl CudaBackend {
             {
                 return Err(ComputeInputError::InvalidAngles.into());
             }
-            let scan_index = u32::try_from(scan_index)
-                .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
-            for (local_index, range) in scan.ranges_m.iter().copied().enumerate() {
-                ranges.push(range);
-                scan_indices.push(scan_index);
-                local_indices.push(
-                    u32::try_from(local_index)
-                        .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?,
-                );
-            }
+            ranges.extend_from_slice(&scan.ranges_m);
+            scan_offsets.push(
+                u32::try_from(ranges.len())
+                    .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?,
+            );
             scan_params.extend_from_slice(&[
                 scan.angle_min_rad,
                 scan.angle_increment_rad,
@@ -410,8 +405,11 @@ impl CudaBackend {
         ensure_capacity(&self.stream, &mut self.lidar_x, point_count)?;
         ensure_capacity(&self.stream, &mut self.lidar_y, point_count)?;
         ensure_capacity(&self.stream, &mut self.lidar_valid, point_count)?;
-        ensure_capacity(&self.stream, &mut self.spatial_scan_indices, point_count)?;
-        ensure_capacity(&self.stream, &mut self.spatial_local_indices, point_count)?;
+        ensure_capacity(
+            &self.stream,
+            &mut self.spatial_scan_offsets,
+            scan_offsets.len(),
+        )?;
         ensure_capacity(
             &self.stream,
             &mut self.spatial_scan_params,
@@ -427,14 +425,9 @@ impl CudaBackend {
         }
         upload!(&ranges, &mut self.lidar_ranges, "upload spatial ranges");
         upload!(
-            &scan_indices,
-            &mut self.spatial_scan_indices,
-            "upload spatial scan indices"
-        );
-        upload!(
-            &local_indices,
-            &mut self.spatial_local_indices,
-            "upload spatial local indices"
+            &scan_offsets,
+            &mut self.spatial_scan_offsets,
+            "upload spatial scan offsets"
         );
         upload!(
             &scan_params,
@@ -444,8 +437,7 @@ impl CudaBackend {
 
         {
             let ranges = self.lidar_ranges.slice(..point_count);
-            let scan_indices = self.spatial_scan_indices.slice(..point_count);
-            let local_indices = self.spatial_local_indices.slice(..point_count);
+            let scan_offsets = self.spatial_scan_offsets.slice(..scan_offsets.len());
             let scan_params = self.spatial_scan_params.slice(..scan_params.len());
             let mut x = self.lidar_x.slice_mut(..point_count);
             let mut y = self.lidar_y.slice_mut(..point_count);
@@ -454,13 +446,13 @@ impl CudaBackend {
                 self.stream
                     .launch_builder(&self.spatial_window_transform)
                     .arg(&ranges)
-                    .arg(&scan_indices)
-                    .arg(&local_indices)
+                    .arg(&scan_offsets)
                     .arg(&scan_params)
                     .arg(&mut x)
                     .arg(&mut y)
                     .arg(&mut valid)
                     .arg(&count)
+                    .arg(&scan_count)
                     .launch(LaunchConfig::for_num_elems(count))
             }
             .map_err(|error| backend_error("launch spatial_window_transform", error))?;

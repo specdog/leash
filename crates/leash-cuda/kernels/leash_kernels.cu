@@ -51,19 +51,30 @@ extern "C" __global__ void lidar_transform(
 
 extern "C" __global__ void spatial_window_transform(
     const float* ranges_m,
-    const uint32_t* scan_indices,
-    const uint32_t* local_indices,
+    const uint32_t* scan_offsets,
     const float* scan_params,
     float* x_m,
     float* y_m,
     uint8_t* valid,
-    uint32_t count
+    uint32_t count,
+    uint32_t scan_count
 ) {
     const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= count) {
         return;
     }
-    const uint32_t scan = scan_indices[index];
+    uint32_t lower = 0;
+    uint32_t upper = scan_count;
+    while (lower + 1U < upper) {
+        const uint32_t middle = lower + (upper - lower) / 2U;
+        if (index >= scan_offsets[middle]) {
+            lower = middle;
+        } else {
+            upper = middle;
+        }
+    }
+    const uint32_t scan = lower;
+    const uint32_t local_index = index - scan_offsets[scan];
     const float* params = &scan_params[scan * 8U];
     const float range = ranges_m[index];
     if (!isfinite(range)
@@ -78,7 +89,7 @@ extern "C" __global__ void spatial_window_transform(
     const float angle = params[7]
         + direction * (
             params[0]
-            + static_cast<float>(local_indices[index]) * params[1]
+            + static_cast<float>(local_index) * params[1]
         );
     x_m[index] = params[5] + range * cosf(angle);
     y_m[index] = params[6] + range * sinf(angle);
