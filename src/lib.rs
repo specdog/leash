@@ -20,6 +20,7 @@ pub mod gateway;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod localization;
+pub mod mapping;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 #[cfg(feature = "mcp")]
@@ -82,13 +83,21 @@ pub use localization::{
     ReplayLocalizationProvider, SimulationLocalizationProvider,
     DEFAULT_LOCALIZATION_STALE_AFTER_MS, LOCALIZATION_PROVIDER_UPDATE_VERSION,
 };
+pub use mapping::{
+    MappingLifecycleAction, MappingLifecycleRequest, MappingLifecycleState, MappingStatus,
+    MAPPING_LIFECYCLE_SCHEMA_VERSION, MAPPING_STATUS_SCHEMA_VERSION,
+};
 pub use memory::{
     default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     SPATIAL_MEMORY_FORMAT, SPATIAL_MEMORY_STALE_AFTER_MS,
 };
 pub use module::{ModuleCoordinator, ModuleGraph, ModuleInfo, ModuleState, StackBlueprintMetadata};
 pub use navigation::{
-    default_navigation_path, NavigationStore, PatrolZoneSpec, WaypointSpec, NAVIGATION_FORMAT,
+    default_navigation_path, NavigationExecutionStatus, NavigationExecutor, NavigationExecutorKind,
+    NavigationFeedback, NavigationGoalRequest, NavigationReadiness, NavigationStatusResponse,
+    NavigationStore, NavigationTerminalReason, PatrolZoneSpec, UnsupportedNavigationExecutor,
+    WaypointSpec, NAVIGATION_FORMAT, NAVIGATION_GOAL_SCHEMA_VERSION,
+    NAVIGATION_STATUS_SCHEMA_VERSION,
 };
 pub use operator_session::{validate_operator_session, OPERATOR_SESSION_FORMAT};
 pub use perception::{

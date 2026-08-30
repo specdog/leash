@@ -14,18 +14,25 @@ E-stop remain authoritative.
 | `GET` | `/navigation/status?mission_id=...` | Reconcile current planner state |
 | `POST` | `/navigation/goals/:mission_id/cancel` | Cancel the goal and command zero output |
 | `POST` | `/motors/stop/verified` | Command and confirm zero output |
+| `GET` | `/mapping/status` | Read the provider-owned fixed-map lineage and health |
+| `POST` | `/mapping/lifecycle` | Versioned lifecycle contract; currently returns `501 Not Implemented` |
 
 The caller must first create a short pilot lease with `POST /pilot/authorize`.
 Goal submission never creates or extends that lease.
 
 ```json
 {
-  "schema_version": "leash.navigation-goal.v1",
+  "schema_version": "leash.navigation-goal.v2",
   "mission_id": "bounded-room-pass-1",
   "idempotency_key": "bounded-room-pass-1:plan-1",
   "token": "runtime-supplied-token",
   "approval": true,
-  "frame_id": "odom",
+  "expected_map": {
+    "map_id": "bounded-room",
+    "map_revision": "2026-08-30-a",
+    "frame_id": "map"
+  },
+  "frame_id": "map",
   "x_m": 0.8,
   "y_m": 0.2,
   "tolerance_m": 0.2,
@@ -42,8 +49,36 @@ same idempotency key returns that mission's stored planner state; changing a
 goal field under that key returns `409 Conflict`. Authorization tokens are
 used for submission but are not retained in the idempotency registry.
 
-Status uses `leash.navigation-status.v1` and includes `ok`, `active`, `status`,
-`message`, and the accepted goal. A client must treat any inactive state other
-than `reached` as a denial or failure and issue a verified stop. Client
-disconnect never grants continued authority: Leash independently stops on
-lease expiry, deadman, stale providers, collision, or any other safety gate.
+`expected_map` must be copied exactly from `/mapping/status.active_map`. A
+lineage change while a mission is active cancels that mission. `grid_revision`
+is reported by mapping status but is not pinned by the goal because occupancy
+may update without replacing the underlying saved map.
+
+Status uses `leash.navigation-status.v2` and includes the expected and active
+map identities, deadline, readiness gates, explicit terminal reason, accepted
+goal, path, and available executor feedback. A client must treat any inactive
+state other than terminal reason `reached` as a denial or failure and issue a
+verified stop. Client disconnect never grants continued authority: Leash
+independently stops on lease expiry, deadman, stale providers, collision, map
+replacement, or any other safety gate.
+
+## Mapping boundary
+
+`GET /mapping/status` returns `leash.mapping-status.v1` with provider state,
+`active_map`, `grid_revision`, provider identity, freshness, and
+`lifecycle_control_supported`. Leash does not currently own the ROS service or
+process boundary needed to start, stop, save, or load SLAM safely. Therefore
+`POST /mapping/lifecycle` accepts the versioned `leash.mapping-lifecycle.v1`
+contract but returns `501 Not Implemented` and
+`lifecycle_control_supported=false`; it never shells out to host scripts.
+
+## Physical executor boundary
+
+Simulation retains its deterministic grid planner. Physical navigation no
+longer synthesizes a two-pose path and drives toward it directly. A physical
+runtime must inject a `NavigationExecutor` that owns Nav2 goal, cancel, path,
+and feedback exchange while Nav2 velocity remains a proposal to Leash's CPU
+safety supervisor and single motor owner. The default physical executor reports
+`executor=unsupported` and rejects goals. The existing ROS boundary does not
+yet provide an outbound Nav2 action client, so enabling physical compile and
+runtime flags alone does not claim goal readiness.

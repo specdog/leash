@@ -29,7 +29,7 @@ use axum::{
 };
 use futures_util::{stream, SinkExt, Stream, StreamExt};
 use parking_lot::Mutex as ParkingMutex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
@@ -55,9 +55,14 @@ use crate::types::{AgentMessageAck, AgentMessageList};
 use crate::webrtc_camera::{camera_webrtc_status, camera_webrtc_ws};
 use crate::{
     calibration::{CalibrationEnterRequest, CalibrationEnterResult, CalibrationStatus},
+    mapping::{MappingLifecycleRequest, MappingStatus, MAPPING_LIFECYCLE_SCHEMA_VERSION},
+    navigation::{
+        NavigationGoalRequest, NavigationStatusResponse, NavigationTerminalReason,
+        NAVIGATION_GOAL_SCHEMA_VERSION, NAVIGATION_STATUS_SCHEMA_VERSION,
+    },
     runtime::Harness,
     transport::StreamRecvError,
-    types::{PlannerGoal, PlannerStatus, SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
+    types::{PlannerStatus, SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
     LocalizationProviderUpdate,
 };
 
@@ -69,8 +74,6 @@ static NAVIGATION_HTTP_STATE: LazyLock<ParkingMutex<NavigationHttpState>> =
     LazyLock::new(|| ParkingMutex::new(NavigationHttpState::default()));
 
 const CAMERA_FAILURE_HISTORY_LIMIT: usize = 16;
-const NAVIGATION_GOAL_SCHEMA_VERSION: &str = "leash.navigation-goal.v1";
-const NAVIGATION_STATUS_SCHEMA_VERSION: &str = "leash.navigation-status.v1";
 const NAVIGATION_MAX_GOALS: usize = 256;
 
 #[derive(Debug, Default)]
@@ -85,6 +88,7 @@ struct NavigationHttpState {
 struct NavigationGoalRecord {
     identity: NavigationGoalIdentity,
     status: PlannerStatus,
+    terminal_reason: Option<NavigationTerminalReason>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +97,7 @@ struct NavigationGoalIdentity {
     mission_id: String,
     idempotency_key: String,
     approval: bool,
+    expected_map: crate::types::MapIdentity,
     frame_id: String,
     x_m: f64,
     y_m: f64,
@@ -101,13 +106,14 @@ struct NavigationGoalIdentity {
     deadline_ms: u128,
 }
 
-impl From<&NavigationGoalReq> for NavigationGoalIdentity {
-    fn from(request: &NavigationGoalReq) -> Self {
+impl From<&NavigationGoalRequest> for NavigationGoalIdentity {
+    fn from(request: &NavigationGoalRequest) -> Self {
         Self {
             schema_version: request.schema_version.clone(),
             mission_id: request.mission_id.clone(),
             idempotency_key: request.idempotency_key.clone(),
             approval: request.approval,
+            expected_map: request.expected_map.clone(),
             frame_id: request.frame_id.clone(),
             x_m: request.x_m,
             y_m: request.y_m,
@@ -246,52 +252,9 @@ struct DriveReq {
     approval: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct NavigationGoalReq {
-    schema_version: String,
-    mission_id: String,
-    idempotency_key: String,
-    token: String,
-    approval: bool,
-    frame_id: String,
-    x_m: f64,
-    y_m: f64,
-    tolerance_m: f64,
-    speed_mode: SpeedMode,
-    deadline_ms: u128,
-}
-
 #[derive(Debug, Default, Deserialize)]
 struct NavigationStatusQuery {
     mission_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct NavigationStatusResponse {
-    schema_version: &'static str,
-    mission_id: String,
-    idempotency_key: String,
-    ok: bool,
-    active: bool,
-    status: String,
-    message: String,
-    goal: Option<PlannerGoal>,
-}
-
-impl NavigationStatusResponse {
-    fn from_status(mission_id: &str, idempotency_key: &str, status: PlannerStatus) -> Self {
-        Self {
-            schema_version: NAVIGATION_STATUS_SCHEMA_VERSION,
-            mission_id: mission_id.to_string(),
-            idempotency_key: idempotency_key.to_string(),
-            ok: status.ok,
-            active: status.active,
-            status: status.status,
-            message: status.message,
-            goal: status.goal,
-        }
-    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -412,6 +375,8 @@ pub fn router(harness: Harness) -> Router {
         .route("/events/cognition", get(sse_cognition))
         .route("/localization", get(localization_status))
         .route("/localization/update", post(localization_update))
+        .route("/mapping/status", get(mapping_status))
+        .route("/mapping/lifecycle", post(mapping_lifecycle))
         .route("/events/telemetry", get(sse_telemetry))
         .route("/sse/telemetry", get(sse_telemetry))
         .route("/sensors", get(sensors))
@@ -948,6 +913,36 @@ async fn localization_status(
     State(harness): State<Harness>,
 ) -> Json<crate::localization::LocalizationProviderStatus> {
     Json(harness.localization_provider_status())
+}
+
+async fn mapping_status(State(harness): State<Harness>) -> Json<MappingStatus> {
+    Json(harness.mapping_status())
+}
+
+async fn mapping_lifecycle(
+    State(harness): State<Harness>,
+    Json(request): Json<MappingLifecycleRequest>,
+) -> Response {
+    if request.schema_version != MAPPING_LIFECYCLE_SCHEMA_VERSION {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                harness
+                    .mapping_status()
+                    .lifecycle_unsupported(request.action),
+            ),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(
+            harness
+                .mapping_status()
+                .lifecycle_unsupported(request.action),
+        ),
+    )
+        .into_response()
 }
 
 async fn localization_update(
@@ -2739,7 +2734,7 @@ async fn pilot_speed_mode(
 
 async fn navigation_goal_submit(
     State(harness): State<Harness>,
-    Json(request): Json<NavigationGoalReq>,
+    Json(request): Json<NavigationGoalRequest>,
 ) -> Response {
     if let Err(message) = validate_navigation_goal(&request) {
         return navigation_error(StatusCode::BAD_REQUEST, &message);
@@ -2758,12 +2753,7 @@ async fn navigation_goal_submit(
                 "idempotency key was already used for a different navigation goal",
             );
         }
-        return Json(NavigationStatusResponse::from_status(
-            mission_id,
-            &request.idempotency_key,
-            existing.status.clone(),
-        ))
-        .into_response();
+        return Json(navigation_response(&harness, mission_id, existing)).into_response();
     }
     if runtime.goals.contains_key(&request.mission_id) {
         return navigation_error(
@@ -2777,18 +2767,16 @@ async fn navigation_goal_submit(
             "another navigation mission is already active",
         );
     }
-    let goal = PlannerGoal {
-        frame_id: request.frame_id.clone(),
-        x_m: request.x_m,
-        y_m: request.y_m,
-        tolerance_m: request.tolerance_m,
-        speed_mode: SpeedMode::Low,
+    let goal = request.planner_goal();
+    let status = match harness.set_navigation_goal_authorized(
+        goal,
+        request.expected_map.clone(),
+        Some(&request.token),
+        request.approval,
+    ) {
+        Ok(status) => status,
+        Err(error) => return navigation_error(StatusCode::CONFLICT, &error.to_string()),
     };
-    let status =
-        match harness.set_planner_goal_authorized(goal, Some(&request.token), request.approval) {
-            Ok(status) => status,
-            Err(error) => return navigation_error(StatusCode::CONFLICT, &error.to_string()),
-        };
     if runtime.order.len() >= NAVIGATION_MAX_GOALS {
         if let Some(oldest) = runtime.order.pop_front() {
             if let Some(old) = runtime.goals.remove(&oldest) {
@@ -2805,15 +2793,19 @@ async fn navigation_goal_submit(
         NavigationGoalRecord {
             identity,
             status: status.clone(),
+            terminal_reason: terminal_reason_for_planner(&status),
         },
     );
     if status.active {
         runtime.active_mission_id = Some(request.mission_id.clone());
     }
-    let response = NavigationStatusResponse::from_status(
+    let response = navigation_response(
+        &harness,
         &request.mission_id,
-        &request.idempotency_key,
-        status,
+        runtime
+            .goals
+            .get(&request.mission_id)
+            .expect("inserted navigation mission exists"),
     );
     let mission_id = request.mission_id;
     let idempotency_key = request.idempotency_key;
@@ -2837,53 +2829,44 @@ async fn navigation_status(
     let Some(record) = runtime.goals.get(&query.mission_id) else {
         return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
     };
-    Json(NavigationStatusResponse::from_status(
-        &query.mission_id,
-        &record.identity.idempotency_key,
-        record.status.clone(),
-    ))
-    .into_response()
+    Json(navigation_response(&harness, &query.mission_id, record)).into_response()
 }
 
 async fn navigation_goal_cancel(
     AxumPath(mission_id): AxumPath<String>,
     State(harness): State<Harness>,
 ) -> Response {
-    let (idempotency_key, active, stored_status) = {
+    let active = {
         let mut runtime = NAVIGATION_HTTP_STATE.lock();
         reconcile_active_navigation(&mut runtime, &harness);
-        let Some(record) = runtime.goals.get(&mission_id) else {
+        if !runtime.goals.contains_key(&mission_id) {
             return navigation_error(StatusCode::NOT_FOUND, "navigation mission was not found");
-        };
-        (
-            record.identity.idempotency_key.clone(),
-            runtime.active_mission_id.as_deref() == Some(&mission_id),
-            record.status.clone(),
-        )
+        }
+        runtime.active_mission_id.as_deref() == Some(&mission_id)
     };
     if !active {
-        return Json(NavigationStatusResponse::from_status(
-            &mission_id,
-            &idempotency_key,
-            stored_status,
-        ))
-        .into_response();
+        let runtime = NAVIGATION_HTTP_STATE.lock();
+        let record = runtime
+            .goals
+            .get(&mission_id)
+            .expect("navigation mission still exists");
+        return Json(navigation_response(&harness, &mission_id, record)).into_response();
     }
     match harness.cancel_planner_goal() {
         Ok(status) => {
             let mut runtime = NAVIGATION_HTTP_STATE.lock();
             if let Some(record) = runtime.goals.get_mut(&mission_id) {
                 record.status = status.clone();
+                record.terminal_reason = Some(NavigationTerminalReason::Cancelled);
             }
             if runtime.active_mission_id.as_deref() == Some(&mission_id) {
                 runtime.active_mission_id = None;
             }
-            Json(NavigationStatusResponse::from_status(
-                &mission_id,
-                &idempotency_key,
-                status,
-            ))
-            .into_response()
+            let record = runtime
+                .goals
+                .get(&mission_id)
+                .expect("navigation mission still exists");
+            Json(navigation_response(&harness, &mission_id, record)).into_response()
         }
         Err(error) => navigation_error(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
     }
@@ -2893,9 +2876,37 @@ fn reconcile_active_navigation(runtime: &mut NavigationHttpState, harness: &Harn
     let Some(mission_id) = runtime.active_mission_id.clone() else {
         return;
     };
+    let expected_map = runtime
+        .goals
+        .get(&mission_id)
+        .map(|record| record.identity.expected_map.clone());
+    if expected_map.as_ref() != harness.active_map_identity().as_ref() {
+        let mut status = harness
+            .cancel_planner_goal()
+            .unwrap_or_else(|error| PlannerStatus {
+                ok: false,
+                active: false,
+                status: "map-changed".to_string(),
+                message: format!("navigation stopped after map identity changed: {error}"),
+                ..PlannerStatus::default()
+            });
+        status.ok = false;
+        status.active = false;
+        status.status = "map-changed".to_string();
+        status.message = "navigation stopped because the active map identity changed".to_string();
+        if let Some(record) = runtime.goals.get_mut(&mission_id) {
+            record.status = status;
+            record.terminal_reason = Some(NavigationTerminalReason::MapChanged);
+        }
+        runtime.active_mission_id = None;
+        return;
+    }
     let status = harness.planner_status();
     if let Some(record) = runtime.goals.get_mut(&mission_id) {
         record.status = status.clone();
+        if !status.active {
+            record.terminal_reason = terminal_reason_for_planner(&status);
+        }
     }
     if !status.active {
         runtime.active_mission_id = None;
@@ -2926,7 +2937,13 @@ async fn enforce_navigation_deadline(
     if let Ok(status) = harness.cancel_planner_goal() {
         let mut runtime = NAVIGATION_HTTP_STATE.lock();
         if let Some(record) = runtime.goals.get_mut(&mission_id) {
+            let mut status = status;
+            status.ok = false;
+            status.active = false;
+            status.status = "deadline-exceeded".to_string();
+            status.message = "navigation deadline expired and the goal was cancelled".to_string();
             record.status = status;
+            record.terminal_reason = Some(NavigationTerminalReason::DeadlineExceeded);
         }
         if runtime.active_mission_id.as_deref() == Some(&mission_id) {
             runtime.active_mission_id = None;
@@ -2934,7 +2951,7 @@ async fn enforce_navigation_deadline(
     }
 }
 
-fn validate_navigation_goal(request: &NavigationGoalReq) -> Result<(), String> {
+fn validate_navigation_goal(request: &NavigationGoalRequest) -> Result<(), String> {
     if request.schema_version != NAVIGATION_GOAL_SCHEMA_VERSION {
         return Err(format!(
             "schema_version must be {NAVIGATION_GOAL_SCHEMA_VERSION}"
@@ -2959,6 +2976,16 @@ fn validate_navigation_goal(request: &NavigationGoalReq) -> Result<(), String> {
     if !request.approval {
         return Err("navigation goal requires approval=true".to_string());
     }
+    if request.expected_map.map_id.trim().is_empty()
+        || request.expected_map.map_revision.trim().is_empty()
+        || request.expected_map.frame_id.trim().is_empty()
+        || request.expected_map.frame_id != request.frame_id
+    {
+        return Err(
+            "expected_map requires map_id, map_revision, and a frame_id matching the goal"
+                .to_string(),
+        );
+    }
     if request.speed_mode != SpeedMode::Low {
         return Err("navigation goal is restricted to low speed mode".to_string());
     }
@@ -2977,6 +3004,55 @@ fn validate_navigation_goal(request: &NavigationGoalReq) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn navigation_response(
+    harness: &Harness,
+    mission_id: &str,
+    record: &NavigationGoalRecord,
+) -> NavigationStatusResponse {
+    let execution = record
+        .status
+        .active
+        .then(|| harness.navigation_execution_status())
+        .flatten();
+    NavigationStatusResponse {
+        schema_version: NAVIGATION_STATUS_SCHEMA_VERSION.to_string(),
+        mission_id: mission_id.to_string(),
+        idempotency_key: record.identity.idempotency_key.clone(),
+        ok: record.status.ok,
+        active: record.status.active,
+        status: record.status.status.clone(),
+        message: record.status.message.clone(),
+        expected_map: record.identity.expected_map.clone(),
+        active_map: harness.active_map_identity(),
+        deadline_ms: record.identity.deadline_ms,
+        readiness: harness.navigation_readiness(&record.identity.expected_map),
+        terminal_reason: record
+            .terminal_reason
+            .or_else(|| execution.as_ref().and_then(|status| status.terminal_reason)),
+        goal: record.status.goal.clone(),
+        path: record.status.path.clone(),
+        feedback: execution.and_then(|status| status.feedback),
+    }
+}
+
+fn terminal_reason_for_planner(status: &PlannerStatus) -> Option<NavigationTerminalReason> {
+    if status.active {
+        return None;
+    }
+    match status.status.as_str() {
+        "reached" => Some(NavigationTerminalReason::Reached),
+        "cancelled" | "stopped" | "estop" => Some(NavigationTerminalReason::Cancelled),
+        "map-changed" => Some(NavigationTerminalReason::MapChanged),
+        "approval-lost" | "authorization-lost" | "token-expired" => {
+            Some(NavigationTerminalReason::AuthorizationLost)
+        }
+        "unsupported" | "gate-disabled" => Some(NavigationTerminalReason::ExecutorUnavailable),
+        "rejected" => Some(NavigationTerminalReason::Rejected),
+        _ if !status.ok => Some(NavigationTerminalReason::SafetyStop),
+        _ => None,
+    }
 }
 
 fn navigation_error(status: StatusCode, message: &str) -> Response {
@@ -3247,6 +3323,7 @@ mod tests {
     use std::fs;
 
     use axum::{
+        body::to_bytes,
         extract::State,
         http::{header::AUTHORIZATION, HeaderMap, HeaderValue, StatusCode},
         Json,
@@ -3255,14 +3332,16 @@ mod tests {
 
     use super::{
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
-        compute_authorized, localization_authorized, localization_update, motors_stop_verified,
-        navigation_goal_cancel, navigation_goal_submit, navigation_status,
-        validate_agent_console_capability, AgentCapabilityReq, CameraRuntimeState,
-        NavigationGoalReq, NavigationStatusQuery, CAMERA_RUNTIME_STATE, NAVIGATION_HTTP_STATE,
+        compute_authorized, localization_authorized, localization_update, mapping_lifecycle,
+        mapping_status, motors_stop_verified, navigation_goal_cancel, navigation_goal_submit,
+        navigation_status, validate_agent_console_capability, AgentCapabilityReq,
+        CameraRuntimeState, NavigationStatusQuery, CAMERA_RUNTIME_STATE, NAVIGATION_HTTP_STATE,
     };
     use crate::{
         agent_runtime::{AgentRuntime, AgentSessionStore, CapabilityPermissions},
-        Harness, HarnessConfig, LocalizationProviderUpdate,
+        Harness, HarnessConfig, LocalizationProviderUpdate, MapIdentity, MappingLifecycleAction,
+        MappingLifecycleRequest, NavigationGoalRequest, NavigationStatusResponse,
+        NavigationTerminalReason, MAPPING_LIFECYCLE_SCHEMA_VERSION, NAVIGATION_GOAL_SCHEMA_VERSION,
     };
     use tokio::sync::Mutex;
 
@@ -3281,12 +3360,13 @@ mod tests {
             runtime.active_mission_id = None;
         }
         let harness = Harness::new(HarnessConfig::default()).unwrap();
-        let request = NavigationGoalReq {
-            schema_version: "leash.navigation-goal.v1".to_string(),
+        let request = NavigationGoalRequest {
+            schema_version: NAVIGATION_GOAL_SCHEMA_VERSION.to_string(),
             mission_id: "http-navigation-test".to_string(),
             idempotency_key: "http-navigation-test:plan-1".to_string(),
             token: "explicit-test-token".to_string(),
             approval: true,
+            expected_map: sim_map_identity(),
             frame_id: "map".to_string(),
             x_m: 0.25,
             y_m: 0.0,
@@ -3306,6 +3386,12 @@ mod tests {
         )
         .await;
         assert_eq!(status.status(), StatusCode::OK);
+        let body = to_bytes(status.into_body(), usize::MAX).await.unwrap();
+        let status: NavigationStatusResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status.schema_version, "leash.navigation-status.v2");
+        assert_eq!(status.expected_map, sim_map_identity());
+        assert_eq!(status.active_map, Some(sim_map_identity()));
+        assert!(status.readiness.ready);
         let cancelled =
             navigation_goal_cancel(axum::extract::Path(request.mission_id), State(harness)).await;
         assert_eq!(cancelled.status(), StatusCode::OK);
@@ -3323,12 +3409,13 @@ mod tests {
         }
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         let mission_id = "http-navigation-deadline-test".to_string();
-        let request = NavigationGoalReq {
-            schema_version: "leash.navigation-goal.v1".to_string(),
+        let request = NavigationGoalRequest {
+            schema_version: NAVIGATION_GOAL_SCHEMA_VERSION.to_string(),
             mission_id: mission_id.clone(),
             idempotency_key: "http-navigation-deadline-test:plan-1".to_string(),
             token: "explicit-test-token".to_string(),
             approval: true,
+            expected_map: sim_map_identity(),
             frame_id: "map".to_string(),
             x_m: 0.25,
             y_m: 0.0,
@@ -3343,17 +3430,26 @@ mod tests {
 
         let runtime = NAVIGATION_HTTP_STATE.lock();
         assert!(runtime.active_mission_id.is_none());
-        assert!(!runtime.goals.get(&mission_id).unwrap().status.active);
+        let record = runtime.goals.get(&mission_id).unwrap();
+        assert!(!record.status.active);
+        assert_eq!(
+            record.terminal_reason,
+            Some(NavigationTerminalReason::DeadlineExceeded)
+        );
     }
 
     #[test]
     fn navigation_http_goal_rejects_non_low_speed_and_expired_deadline() {
-        let mut request = NavigationGoalReq {
-            schema_version: "leash.navigation-goal.v1".to_string(),
+        let mut request = NavigationGoalRequest {
+            schema_version: NAVIGATION_GOAL_SCHEMA_VERSION.to_string(),
             mission_id: "invalid-navigation-test".to_string(),
             idempotency_key: "invalid-navigation-test:plan-1".to_string(),
             token: "explicit-test-token".to_string(),
             approval: true,
+            expected_map: MapIdentity {
+                frame_id: "odom".to_string(),
+                ..sim_map_identity()
+            },
             frame_id: "odom".to_string(),
             x_m: 1.0,
             y_m: 0.0,
@@ -3365,6 +3461,34 @@ mod tests {
         request.speed_mode = crate::types::SpeedMode::Low;
         request.deadline_ms = super::camera_now_ms().saturating_sub(1);
         assert!(super::validate_navigation_goal(&request).is_err());
+    }
+
+    fn sim_map_identity() -> MapIdentity {
+        MapIdentity {
+            map_id: "sim-local".to_string(),
+            map_revision: "sim-grid-v1".to_string(),
+            frame_id: "map".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn mapping_http_reports_lineage_and_rejects_runtime_lifecycle_control() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let status = mapping_status(State(harness.clone())).await.0;
+        assert_eq!(status.schema_version, "leash.mapping-status.v1");
+        assert_eq!(status.active_map, Some(sim_map_identity()));
+        assert!(!status.lifecycle_control_supported);
+
+        let response = mapping_lifecycle(
+            State(harness),
+            Json(MappingLifecycleRequest {
+                schema_version: MAPPING_LIFECYCLE_SCHEMA_VERSION.to_string(),
+                action: MappingLifecycleAction::Load,
+                map_id: Some("warehouse".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]

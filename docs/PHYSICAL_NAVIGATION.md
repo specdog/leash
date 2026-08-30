@@ -19,15 +19,17 @@ sensor contracts.
 
 ```mermaid
 flowchart LR
-  path["Goal / path provider"] --> request["planner or patrol request"]
+  path["Nav2 goal / path / feedback executor"] --> request["planner or patrol request"]
   localization["LocalizationProvider\ntracking + fresh"] --> guard["Leash physical navigation guard"]
   lidar["RangeScanAdapter\navailable + fresh + clear"] --> guard
   request --> policy["Capability policy\ntoken + approval"]
   compile["Cargo feature\nphysical-navigation"] --> guard
   runtime["Runtime opt-in\nallow_physical_navigation"] --> guard
   policy --> guard
-  guard --> limiter["Low speed cap\n10 Hz maximum"]
-  limiter --> driver["MobileBaseAdapter"]
+  guard --> nav2["Nav2 goal / cancel"]
+  nav2 --> proposal["fresh velocity proposal"]
+  proposal --> limiter["CPU safety supervisor\nLow speed cap"]
+  limiter --> driver["single MobileBaseAdapter owner"]
   driver --> motors["Physical implementation"]
   stop["deadman / stop / e-stop / token / provider / lidar / distance"] --> zero["zero-speed stop + cancel"]
   zero --> driver
@@ -35,10 +37,11 @@ flowchart LR
 
 ## Owned boundaries
 
-Path, localization, mapping, and sensor providers produce data. They never own
-actuation. Leash owns policy, the authorization lease, readiness checks, speed
-and command-rate limits, cancellation, and the final `MobileBaseAdapter` call.
-The implementation owns its device protocol and calibration.
+Path, localization, mapping, sensor, and Nav2 providers produce data or bounded
+proposals. They never own actuation. Leash owns policy, the authorization
+lease, readiness checks, speed limits, cancellation, the CPU safety supervisor,
+and the final `MobileBaseAdapter` call. The implementation owns its device
+protocol and calibration.
 
 Every physical navigation start requires:
 
@@ -51,10 +54,13 @@ Every physical navigation start requires:
 - an available lidar sample no more than 500 ms old;
 - no lidar return at or below the minimum clearance;
 - no latched e-stop, prior deadman stop, or soft-distance limit.
+- an injected Nav2 goal/cancel/path/feedback executor that reports ready.
 
-Physical planner commands are forced to the low speed cap and limited to 10 Hz,
-even if a goal or provider requests a higher mode. Simulation remains
-deterministic. Replay remains non-actuating.
+Physical planner goals are forced to the low speed mode. Nav2 velocity remains
+a proposal and must still pass through Leash's CPU safety and motor-owner path.
+Without that complete bridge, readiness is explicitly `unsupported` and no
+straight-line fallback is attempted. Simulation remains deterministic. Replay
+remains non-actuating.
 
 ## Cancellation contract
 
@@ -74,11 +80,12 @@ Use this before adding robot-specific field values:
 - [ ] Supply token but omit approval; verify policy rejection and zero motor command.
 - [ ] Test unavailable, stale, lost, malformed, and disconnected localization.
 - [ ] Test missing, stale, malformed, disconnected, and blocked lidar.
-- [ ] Verify high-speed requests are reduced to the low cap.
-- [ ] Verify planner calls cannot exceed 10 Hz at the driver boundary.
+- [ ] Omit the Nav2 executor; verify readiness is `unsupported` and motors remain zero.
+- [ ] Verify high-speed requests are reduced to the low mode.
+- [ ] Verify Nav2 velocity proposals still pass through CPU safety and the single motor owner.
 - [ ] During active motion, expire/replace the token and revoke approval; verify zero speed.
 - [ ] During active motion, trigger deadman, stop, e-stop, and soft-distance limit; verify cancellation.
-- [ ] Replace the active map; verify saved waypoint map identity is checked before execution.
+- [ ] Replace the active map; verify the active mission is cancelled and reports `map-changed`.
 - [ ] Run simulation and replay proofs; verify replay never calls physical actuation.
 - [ ] Run clippy, all feature-matrix jobs, schemas, `scripts/smoke-all.sh`, and package verification.
 

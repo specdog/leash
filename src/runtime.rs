@@ -45,11 +45,16 @@ use crate::{
         LocalizationProviderStatus, LocalizationProviderUpdate,
         DEFAULT_LOCALIZATION_STALE_AFTER_MS,
     },
+    mapping::MappingStatus,
     memory::{
         default_spatial_memory_path, SpatialMemoryQuery, SpatialMemoryStore, SpatialMemoryTag,
     },
     module::{default_module_graph, ModuleCoordinator, ModuleGraph},
-    navigation::{navigation_path_for_memory, NavigationStore, PatrolZoneSpec, WaypointSpec},
+    navigation::{
+        navigation_path_for_memory, NavigationExecutionStatus, NavigationExecutor,
+        NavigationExecutorKind, NavigationReadiness, NavigationStore, PatrolZoneSpec,
+        UnsupportedNavigationExecutor, WaypointSpec,
+    },
     perception::PerceptionRuntime,
     replay::{replay_telemetry_source, ReplayPlayback},
     transport::{new_stream_transport, StreamSubscriber, StreamTransport},
@@ -90,8 +95,6 @@ const PLANNER_ORIGIN_X_M: f64 = -0.5;
 const PLANNER_ORIGIN_Y_M: f64 = -0.5;
 const PLANNER_BLOCKED_CELLS: &[(usize, usize)] = &[(1, 1)];
 const PLANNER_STEP_CMD: f64 = 0.2;
-#[cfg(feature = "physical-navigation")]
-const PHYSICAL_NAV_COMMAND_INTERVAL_MS: u64 = 100;
 #[cfg(feature = "physical-navigation")]
 const PHYSICAL_NAV_SENSOR_FRESH_MS: u128 = 500;
 #[cfg(feature = "physical-navigation")]
@@ -448,7 +451,7 @@ impl ActionEvidenceState {
 struct PhysicalNavigationLease {
     token: String,
     approval: bool,
-    last_command_at: Option<Instant>,
+    expected_map: MapIdentity,
 }
 
 impl Default for CommandState {
@@ -590,6 +593,7 @@ pub struct Harness {
     calibration: Arc<Mutex<Option<CalibrationLease>>>,
     spatial_memory: Arc<SpatialMemoryStore>,
     navigation: Arc<NavigationStore>,
+    navigation_executor: Arc<dyn NavigationExecutor>,
     perception: PerceptionRuntime,
     agent_seq: Arc<AtomicU64>,
     replay: Option<ReplayPlayback>,
@@ -611,6 +615,18 @@ impl Harness {
         Self::new_inner(config, None)
     }
 
+    /// Construct a runtime with an explicit physical navigation backend.
+    ///
+    /// The backend is expected to bridge goal, cancel, path, and feedback to
+    /// Nav2. It does not receive motor ownership; drive proposals remain subject
+    /// to Leash's normal CPU safety and adapter gates.
+    pub fn new_with_navigation_executor(
+        config: HarnessConfig,
+        navigation_executor: Arc<dyn NavigationExecutor>,
+    ) -> Result<Self> {
+        Self::new_inner_with_driver(config, None, None, Some(navigation_executor))
+    }
+
     #[cfg(test)]
     pub(crate) fn new_with_memory_path(config: HarnessConfig, path: PathBuf) -> Result<Self> {
         Self::new_inner(config, Some(path))
@@ -618,17 +634,31 @@ impl Harness {
 
     #[cfg(all(test, feature = "physical-navigation"))]
     pub(crate) fn new_with_test_driver(config: HarnessConfig) -> Result<Self> {
-        Self::new_inner_with_driver(config, None, Some(Arc::new(SimDriver)))
+        Self::new_inner_with_driver(config, None, Some(Arc::new(SimDriver)), None)
+    }
+
+    #[cfg(all(test, feature = "physical-navigation"))]
+    pub(crate) fn new_with_test_driver_and_navigation_executor(
+        config: HarnessConfig,
+        navigation_executor: Arc<dyn NavigationExecutor>,
+    ) -> Result<Self> {
+        Self::new_inner_with_driver(
+            config,
+            None,
+            Some(Arc::new(SimDriver)),
+            Some(navigation_executor),
+        )
     }
 
     fn new_inner(config: HarnessConfig, memory_path: Option<PathBuf>) -> Result<Self> {
-        Self::new_inner_with_driver(config, memory_path, None)
+        Self::new_inner_with_driver(config, memory_path, None, None)
     }
 
     fn new_inner_with_driver(
         config: HarnessConfig,
         memory_path: Option<PathBuf>,
         driver_override: Option<Arc<dyn RobotDriver>>,
+        navigation_executor: Option<Arc<dyn NavigationExecutor>>,
     ) -> Result<Self> {
         config.validate()?;
         let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
@@ -732,6 +762,8 @@ impl Harness {
             calibration: Arc::new(Mutex::new(None)),
             spatial_memory,
             navigation,
+            navigation_executor: navigation_executor
+                .unwrap_or_else(|| Arc::new(UnsupportedNavigationExecutor)),
             perception: PerceptionRuntime::fake(),
             agent_seq: Arc::new(AtomicU64::new(0)),
             replay,
@@ -804,6 +836,129 @@ impl Harness {
 
     pub fn localization_provider_status(&self) -> LocalizationProviderStatus {
         self.localization_provider.snapshot(now_ms()).status
+    }
+
+    pub fn mapping_status(&self) -> MappingStatus {
+        MappingStatus::from_snapshot(&self.localization_provider.snapshot(now_ms()))
+    }
+
+    pub fn active_map_identity(&self) -> Option<MapIdentity> {
+        self.mapping_status().active_map
+    }
+
+    pub fn navigation_readiness(&self, expected_map: &MapIdentity) -> NavigationReadiness {
+        let now = now_ms();
+        let snapshot = self.localization_provider.snapshot(now);
+        let active_map = &snapshot.localization.map;
+        let map_matches = active_map == expected_map;
+        let localization_tracking = snapshot.status.state
+            == crate::localization::LocalizationProviderState::Tracking
+            && snapshot.localization.health.status == LocalizationStatus::Tracking
+            && snapshot.localization.pose.is_some();
+        let command = self.command.lock();
+        let deadman_clear = !command.stopped_by_deadman;
+        let estop_clear = !command.estop;
+        let soft_odometry_clear = !command.soft_odometry_limited;
+        drop(command);
+
+        if self.config.profile == Profile::Sim {
+            let ready = map_matches
+                && localization_tracking
+                && deadman_clear
+                && estop_clear
+                && soft_odometry_clear;
+            return NavigationReadiness {
+                ready,
+                executor: NavigationExecutorKind::SimGrid,
+                executor_supported: true,
+                map_matches,
+                localization_tracking,
+                lidar_available: true,
+                lidar_fresh: true,
+                collision_clear: true,
+                deadman_clear,
+                estop_clear,
+                message: if ready {
+                    "simulation navigation is ready".to_string()
+                } else {
+                    "simulation navigation map or localization is not ready".to_string()
+                },
+            };
+        }
+
+        #[cfg(feature = "physical-navigation")]
+        {
+            let executor = self.navigation_executor.readiness();
+            let executor_supported = self.navigation_executor.kind()
+                != NavigationExecutorKind::Unsupported
+                && executor.ok;
+            let range_scan = self.raw.read().range_scan.clone();
+            let lidar_available = range_scan.status == crate::types::SensorDataStatus::Available
+                && range_scan.sample.is_some();
+            let lidar_fresh = range_scan
+                .last_ms
+                .is_some_and(|last_ms| now.saturating_sub(last_ms) <= PHYSICAL_NAV_SENSOR_FRESH_MS);
+            let collision_clear = range_scan.sample.as_ref().is_some_and(|scan| {
+                scan.ranges_m
+                    .iter()
+                    .flatten()
+                    .all(|range| *range > PHYSICAL_NAV_MIN_CLEARANCE_M)
+            });
+            let runtime_gates = self.config.allow_physical_navigation
+                && self.physical_actuation_enabled()
+                && crate::stack::adapter_profile_for_profile(self.config.profile).category
+                    == crate::stack::AdapterCategory::MobileBase
+                && self.calibration.lock().is_none()
+                && !matches!(
+                    self.config.policy_mode,
+                    crate::config::PolicyMode::DryRun | crate::config::PolicyMode::Deny
+                );
+            let ready = runtime_gates
+                && executor_supported
+                && map_matches
+                && localization_tracking
+                && lidar_available
+                && lidar_fresh
+                && collision_clear
+                && deadman_clear
+                && estop_clear
+                && soft_odometry_clear;
+            NavigationReadiness {
+                ready,
+                executor: self.navigation_executor.kind(),
+                executor_supported,
+                map_matches,
+                localization_tracking,
+                lidar_available,
+                lidar_fresh,
+                collision_clear,
+                deadman_clear,
+                estop_clear,
+                message: if ready {
+                    "physical Nav2 navigation is ready".to_string()
+                } else if !runtime_gates {
+                    "physical navigation runtime gates are disabled".to_string()
+                } else if !executor_supported {
+                    executor.message
+                } else if !map_matches {
+                    "active map identity does not match the requested map".to_string()
+                } else {
+                    "physical navigation safety inputs are not ready".to_string()
+                },
+            }
+        }
+
+        #[cfg(not(feature = "physical-navigation"))]
+        {
+            let mut readiness = NavigationReadiness::unsupported(
+                "physical navigation requires the 'physical-navigation' compile-time feature",
+            );
+            readiness.map_matches = map_matches;
+            readiness.localization_tracking = localization_tracking;
+            readiness.deadman_clear = deadman_clear;
+            readiness.estop_clear = estop_clear;
+            readiness
+        }
     }
 
     pub fn cognition_status(&self) -> CognitionStatusV1 {
@@ -930,6 +1085,13 @@ impl Harness {
         self.planner.lock().clone()
     }
 
+    pub fn navigation_execution_status(&self) -> Option<NavigationExecutionStatus> {
+        self.config
+            .profile
+            .is_physical()
+            .then(|| self.navigation_executor.status())
+    }
+
     pub fn set_planner_goal(&self, goal: PlannerGoal) -> Result<PlannerStatus> {
         if self.config.profile != Profile::Sim {
             return Err(anyhow!("planner is only available for the sim profile"));
@@ -995,16 +1157,43 @@ impl Harness {
         token: Option<&str>,
         approval: bool,
     ) -> Result<PlannerStatus> {
+        #[cfg(feature = "physical-navigation")]
+        if self.config.profile.is_physical() {
+            // Preserve the authorization/gate error ordering even when no map
+            // or physical executor is configured yet.
+            self.validate_physical_navigation_authorization(token, approval)?;
+        }
+        let expected_map = self
+            .active_map_identity()
+            .ok_or_else(|| anyhow!("navigation requires an active map identity"))?;
+        self.set_navigation_goal_authorized(goal, expected_map, token, approval)
+    }
+
+    pub fn set_navigation_goal_authorized(
+        &self,
+        goal: PlannerGoal,
+        expected_map: MapIdentity,
+        token: Option<&str>,
+        approval: bool,
+    ) -> Result<PlannerStatus> {
         if !self.config.profile.is_physical() {
+            if self.config.profile != Profile::Sim {
+                return Err(anyhow!("planner is only available for the sim profile"));
+            }
+            if self.active_map_identity().as_ref() != Some(&expected_map) {
+                return Err(anyhow!(
+                    "navigation expected map identity does not match the active map"
+                ));
+            }
             return self.set_planner_goal(goal);
         }
         #[cfg(feature = "physical-navigation")]
         {
-            self.set_physical_planner_goal(goal, token, approval)
+            self.set_physical_planner_goal(goal, expected_map, token, approval)
         }
         #[cfg(not(feature = "physical-navigation"))]
         {
-            let _ = (goal, token, approval);
+            let _ = (goal, expected_map, token, approval);
             Err(anyhow!(
                 "physical planner requires the 'physical-navigation' compile-time feature"
             ))
@@ -1286,6 +1475,7 @@ impl Harness {
     fn set_physical_planner_goal(
         &self,
         mut goal: PlannerGoal,
+        expected_map: MapIdentity,
         token: Option<&str>,
         approval: bool,
     ) -> Result<PlannerStatus> {
@@ -1304,6 +1494,11 @@ impl Harness {
                 current.frame_id
             ));
         }
+        if snapshot.localization.map != expected_map {
+            return Err(anyhow!(
+                "physical navigation expected map identity does not match the active provider map"
+            ));
+        }
         if !goal.x_m.is_finite() || !goal.y_m.is_finite() {
             return Err(anyhow!("physical planner goal coordinates must be finite"));
         }
@@ -1313,40 +1508,25 @@ impl Harness {
             ));
         }
         goal.speed_mode = SpeedMode::Low;
-        let ts_ms = now_ms();
-        let path = VisualizationPath {
-            ts_ms,
-            frame_id: goal.frame_id.clone(),
-            poses: vec![
-                current,
-                Pose2d {
-                    ts_ms,
-                    frame_id: goal.frame_id.clone(),
-                    x_m: goal.x_m,
-                    y_m: goal.y_m,
-                    yaw_rad: 0.0,
-                },
-            ],
-        };
+        let readiness = self.navigation_executor.readiness();
+        if self.navigation_executor.kind() == NavigationExecutorKind::Unsupported || !readiness.ok {
+            return Err(anyhow!("{}", readiness.message));
+        }
+        let execution = self.navigation_executor.submit(&goal, &expected_map)?;
+        if !execution.ok {
+            return Err(anyhow!("{}", execution.message));
+        }
         *self.physical_navigation_lease.lock() = Some(PhysicalNavigationLease {
             token,
             approval,
-            last_command_at: None,
+            expected_map,
         });
         {
             let mut command = self.command.lock();
             command.stopped_by_deadman = false;
             command.speed_mode = SpeedMode::Low;
         }
-        *self.planner.lock() = PlannerStatus {
-            ok: true,
-            active: true,
-            status: "active".to_string(),
-            message: "physical planner goal accepted through safety gate".to_string(),
-            goal: Some(goal),
-            path,
-            last_drive: None,
-        };
+        *self.planner.lock() = planner_status_from_execution(goal, execution);
         self.planner_step();
         Ok(self.planner_status())
     }
@@ -1361,7 +1541,12 @@ impl Harness {
         let token = self.validate_physical_navigation_authorization(token, approval)?;
         let snapshot = self.physical_navigation_snapshot()?;
         let goal = physical_patrol_goal(strategy, &snapshot)?;
-        let planner = self.set_physical_planner_goal(goal.clone(), Some(&token), approval)?;
+        let planner = self.set_physical_planner_goal(
+            goal.clone(),
+            snapshot.localization.map,
+            Some(&token),
+            approval,
+        )?;
         let mut patrol = self.patrol.lock();
         patrol.status = patrol_status(PatrolStatusUpdate {
             ok: planner.ok,
@@ -1409,7 +1594,12 @@ impl Harness {
             tolerance_m: waypoint.tolerance_m,
             speed_mode: SpeedMode::Low,
         };
-        let planner = self.set_physical_planner_goal(goal.clone(), Some(&token), approval)?;
+        let planner = self.set_physical_planner_goal(
+            goal.clone(),
+            snapshot.localization.map,
+            Some(&token),
+            approval,
+        )?;
         let mut patrol = self.patrol.lock();
         patrol.status = patrol_status(PatrolStatusUpdate {
             ok: planner.ok,
@@ -1533,7 +1723,15 @@ impl Harness {
     fn clear_physical_navigation_lease(&self) {
         #[cfg(feature = "physical-navigation")]
         {
-            *self.physical_navigation_lease.lock() = None;
+            let had_lease = self.physical_navigation_lease.lock().take().is_some();
+            if had_lease && self.config.profile.is_physical() {
+                if let Err(error) = self.navigation_executor.cancel() {
+                    warn!(
+                        ?error,
+                        "physical navigation executor cancel failed while clearing lease"
+                    );
+                }
+            }
         }
     }
 
@@ -2689,7 +2887,7 @@ impl Harness {
     }
 
     #[cfg(feature = "physical-navigation")]
-    fn physical_planner_step(&self, goal: PlannerGoal, path: VisualizationPath) {
+    fn physical_planner_step(&self, goal: PlannerGoal, _path: VisualizationPath) {
         let current_lease = { self.physical_navigation_lease.lock().clone() };
         let lease = match current_lease {
             Some(lease) if lease.approval => lease,
@@ -2725,65 +2923,40 @@ impl Harness {
                 return;
             }
         };
-        let current = snapshot
-            .localization
-            .pose
-            .as_ref()
-            .expect("readiness requires a pose")
-            .pose
-            .clone();
-        if distance2d(current.x_m, current.y_m, goal.x_m, goal.y_m) <= goal.tolerance_m {
-            self.cancel_planner_state("reached", "physical planner goal reached");
-            let _ = self.stop_without_planner_cancel();
+        if snapshot.localization.map != lease.expected_map {
+            self.fail_physical_navigation(
+                "map-changed",
+                "physical navigation stopped because the active map identity changed",
+            );
             return;
         }
-        {
-            let mut lease = self.physical_navigation_lease.lock();
-            let Some(lease) = lease.as_mut() else {
-                return;
-            };
-            if lease.last_command_at.is_some_and(|last| {
-                last.elapsed() < Duration::from_millis(PHYSICAL_NAV_COMMAND_INTERVAL_MS)
-            }) {
-                return;
-            }
-            lease.last_command_at = Some(Instant::now());
+
+        let execution = self.navigation_executor.status();
+        if execution.active && execution.ok {
+            *self.planner.lock() = planner_status_from_execution(goal, execution);
+            return;
         }
-        let next = path
-            .poses
-            .iter()
-            .find(|pose| distance2d(current.x_m, current.y_m, pose.x_m, pose.y_m) > 0.05)
-            .cloned()
-            .unwrap_or_else(|| Pose2d {
-                ts_ms: now_ms(),
-                frame_id: goal.frame_id.clone(),
-                x_m: goal.x_m,
-                y_m: goal.y_m,
-                yaw_rad: 0.0,
-            });
-        let (left, right) = planner_drive_command(&current, &next);
-        match self.drive(Some(&lease.token), left, right, Some(SpeedMode::Low)) {
-            Ok(outcome) if outcome.soft_odometry_limited => {
-                self.fail_physical_navigation(
-                    "limited",
-                    "physical navigation stopped by soft odometry limit",
-                );
-            }
-            Ok(outcome) => {
-                let mut planner = self.planner.lock();
-                planner.last_drive = Some(outcome);
-                planner.ok = true;
-                planner.active = true;
-                planner.status = "active".to_string();
-                planner.message = "physical planner driving through safety gate".to_string();
-            }
-            Err(error) => {
-                self.fail_physical_navigation(
-                    "safety-stop",
-                    &format!("physical navigation drive stopped: {error}"),
-                );
-            }
+
+        let status = execution.status.clone();
+        let message = execution.message.clone();
+        if let Err(error) = self.stop_without_planner_cancel() {
+            self.clear_physical_navigation_lease();
+            self.cancel_planner_state(
+                "safety-stop",
+                &format!("physical navigation terminal zero command failed: {error}"),
+            );
+            self.cancel_patrol_state(
+                "safety-stop",
+                "physical navigation terminal zero command failed",
+            );
+            return;
         }
+        *self.planner.lock() = planner_status_from_execution(goal, execution);
+        if status == "reached" {
+            return;
+        }
+        self.clear_physical_navigation_lease();
+        self.cancel_patrol_state(&status, &message);
     }
 
     fn fail_physical_navigation(&self, status: &str, message: &str) {
@@ -2951,7 +3124,12 @@ impl Harness {
                 return;
             }
         };
-        match self.set_physical_planner_goal(goal.clone(), Some(&lease.token), lease.approval) {
+        match self.set_physical_planner_goal(
+            goal.clone(),
+            lease.expected_map,
+            Some(&lease.token),
+            lease.approval,
+        ) {
             Ok(planner) => {
                 let mut patrol = self.patrol.lock();
                 patrol.status.goal = Some(goal);
@@ -3986,6 +4164,22 @@ fn planner_drive_command(current: &Pose2d, next: &Pose2d) -> (f64, f64) {
     }
 }
 
+#[cfg(feature = "physical-navigation")]
+fn planner_status_from_execution(
+    goal: PlannerGoal,
+    execution: NavigationExecutionStatus,
+) -> PlannerStatus {
+    PlannerStatus {
+        ok: execution.ok,
+        active: execution.active,
+        status: execution.status,
+        message: execution.message,
+        goal: Some(goal),
+        path: execution.path,
+        last_drive: None,
+    }
+}
+
 fn distance2d(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
 }
@@ -4157,6 +4351,95 @@ fn now_ns() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "physical-navigation")]
+    struct TestNavigationExecutor {
+        state: Mutex<NavigationExecutionStatus>,
+        last_goal: Mutex<Option<(PlannerGoal, MapIdentity)>>,
+        cancels: AtomicU64,
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    impl Default for TestNavigationExecutor {
+        fn default() -> Self {
+            Self {
+                state: Mutex::new(NavigationExecutionStatus {
+                    ok: true,
+                    active: false,
+                    status: "ready".to_string(),
+                    message: "test Nav2 executor ready".to_string(),
+                    path: VisualizationPath::default(),
+                    feedback: None,
+                    terminal_reason: None,
+                }),
+                last_goal: Mutex::new(None),
+                cancels: AtomicU64::new(0),
+            }
+        }
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    impl NavigationExecutor for TestNavigationExecutor {
+        fn kind(&self) -> NavigationExecutorKind {
+            NavigationExecutorKind::Nav2
+        }
+
+        fn readiness(&self) -> NavigationExecutionStatus {
+            NavigationExecutionStatus {
+                ok: true,
+                active: false,
+                status: "ready".to_string(),
+                message: "test Nav2 executor ready".to_string(),
+                path: VisualizationPath::default(),
+                feedback: None,
+                terminal_reason: None,
+            }
+        }
+
+        fn submit(
+            &self,
+            goal: &PlannerGoal,
+            expected_map: &MapIdentity,
+        ) -> Result<NavigationExecutionStatus> {
+            *self.last_goal.lock() = Some((goal.clone(), expected_map.clone()));
+            let status = NavigationExecutionStatus {
+                ok: true,
+                active: true,
+                status: "active".to_string(),
+                message: "test Nav2 goal accepted".to_string(),
+                path: VisualizationPath {
+                    ts_ms: now_ms(),
+                    frame_id: goal.frame_id.clone(),
+                    poses: vec![Pose2d {
+                        ts_ms: now_ms(),
+                        frame_id: goal.frame_id.clone(),
+                        x_m: goal.x_m,
+                        y_m: goal.y_m,
+                        yaw_rad: 0.0,
+                    }],
+                },
+                feedback: None,
+                terminal_reason: None,
+            };
+            *self.state.lock() = status.clone();
+            Ok(status)
+        }
+
+        fn cancel(&self) -> Result<NavigationExecutionStatus> {
+            self.cancels.fetch_add(1, Ordering::Relaxed);
+            let mut status = self.state.lock();
+            status.ok = true;
+            status.active = false;
+            status.status = "cancelled".to_string();
+            status.message = "test Nav2 goal cancelled".to_string();
+            status.terminal_reason = Some(crate::navigation::NavigationTerminalReason::Cancelled);
+            Ok(status.clone())
+        }
+
+        fn status(&self) -> NavigationExecutionStatus {
+            self.state.lock().clone()
+        }
+    }
 
     #[cfg(feature = "waveshare-ugv")]
     type RecordedCommands = Arc<Mutex<Vec<(f64, f64)>>>;
@@ -4820,16 +5103,24 @@ mod tests {
 
     #[cfg(feature = "physical-navigation")]
     fn physical_navigation_harness() -> Harness {
-        let harness = Harness::new_with_test_driver(HarnessConfig {
-            profile: Profile::WaveshareUgv,
-            allow_untokened_drive: false,
-            allow_physical_actuation: true,
-            allow_physical_navigation: true,
-            deadman_ms: 5_000,
-            soft_odometry_limit_m: 1.0,
-            policy_mode: crate::config::PolicyMode::RequireApproval,
-            ..HarnessConfig::default()
-        })
+        physical_navigation_harness_with_executor(Arc::new(TestNavigationExecutor::default()))
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    fn physical_navigation_harness_with_executor(executor: Arc<dyn NavigationExecutor>) -> Harness {
+        let harness = Harness::new_with_test_driver_and_navigation_executor(
+            HarnessConfig {
+                profile: Profile::WaveshareUgv,
+                allow_untokened_drive: false,
+                allow_physical_actuation: true,
+                allow_physical_navigation: true,
+                deadman_ms: 5_000,
+                soft_odometry_limit_m: 1.0,
+                policy_mode: crate::config::PolicyMode::RequireApproval,
+                ..HarnessConfig::default()
+            },
+            executor,
+        )
         .unwrap();
         let ts_ms = now_ms();
         let raw = RawTelemetry::sim();
@@ -4986,18 +5277,46 @@ mod tests {
 
     #[cfg(feature = "physical-navigation")]
     #[tokio::test]
-    async fn physical_navigation_caps_and_rate_limits_planner_commands() {
-        let harness = physical_navigation_harness();
+    async fn physical_navigation_fails_closed_without_a_nav2_executor() {
+        let harness =
+            physical_navigation_harness_with_executor(Arc::new(UnsupportedNavigationExecutor));
+        let readiness = harness.navigation_readiness(&MapIdentity {
+            map_id: "sim-local".to_string(),
+            map_revision: "sim-grid-v1".to_string(),
+            frame_id: "map".to_string(),
+        });
+        assert!(!readiness.ready);
+        assert_eq!(readiness.executor, NavigationExecutorKind::Unsupported);
+        assert!(harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap_err()
+            .to_string()
+            .contains("configured Nav2"));
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn physical_navigation_delegates_to_nav2_without_direct_drive() {
+        let executor = Arc::new(TestNavigationExecutor::default());
+        let harness = physical_navigation_harness_with_executor(executor.clone());
         let status = harness
             .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
             .unwrap();
-        let first = status.last_drive.unwrap();
-        assert!(first.left.abs() <= SpeedMode::Low.cap());
-        assert!(first.right.abs() <= SpeedMode::Low.cap());
-        assert_eq!(first.speed_mode, SpeedMode::Low);
-        let first_command_at = harness.command.lock().last_cmd_at;
+        assert!(status.active);
+        assert!(status.last_drive.is_none());
+        let (submitted, expected_map) = executor.last_goal.lock().clone().unwrap();
+        assert_eq!(submitted.speed_mode, SpeedMode::Low);
+        assert_eq!(expected_map.map_revision, "sim-grid-v1");
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
         harness.planner_step();
-        assert_eq!(harness.command.lock().last_cmd_at, first_command_at);
+        assert!(harness.planner_status().active);
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+        harness.cancel_planner_goal().unwrap();
+        assert_eq!(executor.cancels.load(Ordering::Relaxed), 1);
     }
 
     #[cfg(feature = "physical-navigation")]
@@ -5044,6 +5363,26 @@ mod tests {
             .localization_provider
             .mark_disconnected("provider disconnected");
         assert_physical_navigation_stopped(&harness, "tracking localization");
+
+        let harness = physical_navigation_harness();
+        harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap();
+        let telemetry = harness.telemetry();
+        let mut replacement = LocalizationProviderUpdate::from_telemetry(2, &telemetry);
+        replacement.localization.map.map_revision = "replacement-map".to_string();
+        replacement.map.map_revision = "replacement-map".to_string();
+        replacement.map.grid_revision = "replacement-grid".to_string();
+        replacement.occupancy_grid.metadata = replacement.map.clone();
+        replacement.costmap.metadata = replacement.map.clone();
+        harness
+            .localization_provider
+            .apply_at(replacement, now_ms())
+            .unwrap();
+        harness
+            .update_range_scan_status(simulated_range_scan(now_ms()))
+            .unwrap();
+        assert_physical_navigation_stopped(&harness, "map identity changed");
 
         let harness = physical_navigation_harness();
         harness

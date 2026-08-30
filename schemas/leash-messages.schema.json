@@ -6287,6 +6287,174 @@
       "title": "MapMetadata",
       "type": "object"
     },
+    "MappingLifecycleAction": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "start-new",
+        "stop",
+        "save",
+        "load"
+      ],
+      "title": "MappingLifecycleAction",
+      "type": "string"
+    },
+    "MappingLifecycleRequest": {
+      "$defs": {
+        "MappingLifecycleAction": {
+          "enum": [
+            "start-new",
+            "stop",
+            "save",
+            "load"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/MappingLifecycleAction"
+        },
+        "map_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schema_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "action"
+      ],
+      "title": "MappingLifecycleRequest",
+      "type": "object"
+    },
+    "MappingLifecycleState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "initializing",
+        "tracking",
+        "degraded",
+        "stale",
+        "disconnected",
+        "failed",
+        "unavailable"
+      ],
+      "title": "MappingLifecycleState",
+      "type": "string"
+    },
+    "MappingStatus": {
+      "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "MappingLifecycleState": {
+          "enum": [
+            "initializing",
+            "tracking",
+            "degraded",
+            "stale",
+            "disconnected",
+            "failed",
+            "unavailable"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active_map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "grid_revision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_update_ms": {
+          "default": null,
+          "format": "uint128",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lifecycle_control_supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provider_instance_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/MappingLifecycleState"
+        }
+      },
+      "required": [
+        "schema_version",
+        "ok",
+        "lifecycle_control_supported",
+        "state",
+        "provider",
+        "message"
+      ],
+      "title": "MappingStatus",
+      "type": "object"
+    },
     "McpCallResponse": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -7106,6 +7274,704 @@
         "cleared"
       ],
       "title": "MotionEventKind",
+      "type": "string"
+    },
+    "NavigationExecutionStatus": {
+      "$defs": {
+        "NavigationFeedback": {
+          "properties": {
+            "current_pose": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "distance_remaining_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "received_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "current_pose",
+            "distance_remaining_m",
+            "received_at_ms"
+          ],
+          "type": "object"
+        },
+        "NavigationTerminalReason": {
+          "enum": [
+            "reached",
+            "cancelled",
+            "deadline-exceeded",
+            "map-changed",
+            "authorization-lost",
+            "safety-stop",
+            "executor-unavailable",
+            "rejected"
+          ],
+          "type": "string"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "feedback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavigationFeedback"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath",
+          "default": {
+            "frame_id": "",
+            "poses": [],
+            "ts_ms": 0
+          }
+        },
+        "status": {
+          "type": "string"
+        },
+        "terminal_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavigationTerminalReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "ok",
+        "active",
+        "status",
+        "message"
+      ],
+      "title": "NavigationExecutionStatus",
+      "type": "object"
+    },
+    "NavigationExecutorKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "sim-grid",
+        "nav2",
+        "unsupported"
+      ],
+      "title": "NavigationExecutorKind",
+      "type": "string"
+    },
+    "NavigationFeedback": {
+      "$defs": {
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "current_pose": {
+          "$ref": "#/$defs/Pose2d"
+        },
+        "distance_remaining_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "received_at_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "current_pose",
+        "distance_remaining_m",
+        "received_at_ms"
+      ],
+      "title": "NavigationFeedback",
+      "type": "object"
+    },
+    "NavigationGoalRequest": {
+      "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "boolean"
+        },
+        "deadline_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_map": {
+          "$ref": "#/$defs/MapIdentity"
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "speed_mode": {
+          "$ref": "#/$defs/SpeedMode"
+        },
+        "token": {
+          "type": "string"
+        },
+        "tolerance_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "x_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "y_m": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "schema_version",
+        "mission_id",
+        "idempotency_key",
+        "token",
+        "approval",
+        "expected_map",
+        "frame_id",
+        "x_m",
+        "y_m",
+        "tolerance_m",
+        "speed_mode",
+        "deadline_ms"
+      ],
+      "title": "NavigationGoalRequest",
+      "type": "object"
+    },
+    "NavigationReadiness": {
+      "$defs": {
+        "NavigationExecutorKind": {
+          "enum": [
+            "sim-grid",
+            "nav2",
+            "unsupported"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "collision_clear": {
+          "type": "boolean"
+        },
+        "deadman_clear": {
+          "type": "boolean"
+        },
+        "estop_clear": {
+          "type": "boolean"
+        },
+        "executor": {
+          "$ref": "#/$defs/NavigationExecutorKind"
+        },
+        "executor_supported": {
+          "type": "boolean"
+        },
+        "lidar_available": {
+          "type": "boolean"
+        },
+        "lidar_fresh": {
+          "type": "boolean"
+        },
+        "localization_tracking": {
+          "type": "boolean"
+        },
+        "map_matches": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ready",
+        "executor",
+        "executor_supported",
+        "map_matches",
+        "localization_tracking",
+        "lidar_available",
+        "lidar_fresh",
+        "collision_clear",
+        "deadman_clear",
+        "estop_clear",
+        "message"
+      ],
+      "title": "NavigationReadiness",
+      "type": "object"
+    },
+    "NavigationStatusResponse": {
+      "$defs": {
+        "MapIdentity": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "map_id": {
+              "type": "string"
+            },
+            "map_revision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "map_id",
+            "map_revision",
+            "frame_id"
+          ],
+          "type": "object"
+        },
+        "NavigationExecutorKind": {
+          "enum": [
+            "sim-grid",
+            "nav2",
+            "unsupported"
+          ],
+          "type": "string"
+        },
+        "NavigationFeedback": {
+          "properties": {
+            "current_pose": {
+              "$ref": "#/$defs/Pose2d"
+            },
+            "distance_remaining_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "received_at_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "current_pose",
+            "distance_remaining_m",
+            "received_at_ms"
+          ],
+          "type": "object"
+        },
+        "NavigationReadiness": {
+          "properties": {
+            "collision_clear": {
+              "type": "boolean"
+            },
+            "deadman_clear": {
+              "type": "boolean"
+            },
+            "estop_clear": {
+              "type": "boolean"
+            },
+            "executor": {
+              "$ref": "#/$defs/NavigationExecutorKind"
+            },
+            "executor_supported": {
+              "type": "boolean"
+            },
+            "lidar_available": {
+              "type": "boolean"
+            },
+            "lidar_fresh": {
+              "type": "boolean"
+            },
+            "localization_tracking": {
+              "type": "boolean"
+            },
+            "map_matches": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "ready": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ready",
+            "executor",
+            "executor_supported",
+            "map_matches",
+            "localization_tracking",
+            "lidar_available",
+            "lidar_fresh",
+            "collision_clear",
+            "deadman_clear",
+            "estop_clear",
+            "message"
+          ],
+          "type": "object"
+        },
+        "NavigationTerminalReason": {
+          "enum": [
+            "reached",
+            "cancelled",
+            "deadline-exceeded",
+            "map-changed",
+            "authorization-lost",
+            "safety-stop",
+            "executor-unavailable",
+            "rejected"
+          ],
+          "type": "string"
+        },
+        "PlannerGoal": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "speed_mode": {
+              "$ref": "#/$defs/SpeedMode"
+            },
+            "tolerance_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "tolerance_m",
+            "speed_mode"
+          ],
+          "type": "object"
+        },
+        "Pose2d": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "x_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "y_m": {
+              "format": "double",
+              "type": "number"
+            },
+            "yaw_rad": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "frame_id",
+            "x_m",
+            "y_m",
+            "yaw_rad"
+          ],
+          "type": "object"
+        },
+        "SpeedMode": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "VisualizationPath": {
+          "properties": {
+            "frame_id": {
+              "type": "string"
+            },
+            "poses": {
+              "items": {
+                "$ref": "#/$defs/Pose2d"
+              },
+              "type": "array"
+            },
+            "ts_ms": {
+              "default": 0,
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "frame_id",
+            "poses"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "active_map": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deadline_ms": {
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_map": {
+          "$ref": "#/$defs/MapIdentity"
+        },
+        "feedback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavigationFeedback"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlannerGoal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "$ref": "#/$defs/VisualizationPath",
+          "default": {
+            "frame_id": "",
+            "poses": [],
+            "ts_ms": 0
+          }
+        },
+        "readiness": {
+          "$ref": "#/$defs/NavigationReadiness"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "terminal_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NavigationTerminalReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "schema_version",
+        "mission_id",
+        "idempotency_key",
+        "ok",
+        "active",
+        "status",
+        "message",
+        "expected_map",
+        "deadline_ms",
+        "readiness"
+      ],
+      "title": "NavigationStatusResponse",
+      "type": "object"
+    },
+    "NavigationTerminalReason": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "reached",
+        "cancelled",
+        "deadline-exceeded",
+        "map-changed",
+        "authorization-lost",
+        "safety-stop",
+        "executor-unavailable",
+        "rejected"
+      ],
+      "title": "NavigationTerminalReason",
       "type": "string"
     },
     "NetworkStreamFrame": {

@@ -23,6 +23,9 @@ use leash_harness::{
         LocalizationProviderSnapshot, LocalizationProviderState, LocalizationProviderStatus,
         LocalizationProviderUpdate,
     },
+    mapping::{
+        MappingLifecycleAction, MappingLifecycleRequest, MappingLifecycleState, MappingStatus,
+    },
     mcp::{
         McpCallResponse, McpModuleToolMap, McpProtocolCallResult, McpProtocolTool,
         McpProtocolToolList, McpStatus, McpTextContent, McpToolDescriptor, McpToolList,
@@ -30,6 +33,11 @@ use leash_harness::{
     module::{
         ModuleGraph, ModuleHealth, ModuleInfo, ModuleState, StackBlueprintMetadata,
         StreamDescriptor, StreamDirection,
+    },
+    navigation::{
+        NavigationExecutionStatus, NavigationExecutorKind, NavigationFeedback,
+        NavigationGoalRequest, NavigationReadiness, NavigationStatusResponse,
+        NavigationTerminalReason,
     },
     replay::{ReplayEvent, ReplayEventKind},
     stack::{AdapterCategory, AdapterMaturity, AdapterProfile},
@@ -159,6 +167,10 @@ fn schema_document() -> Result<Value> {
     insert::<LocalizationProviderStatus>(&mut schemas, "LocalizationProviderStatus")?;
     insert::<LocalizationProviderUpdate>(&mut schemas, "LocalizationProviderUpdate")?;
     insert::<LocalizationProviderSnapshot>(&mut schemas, "LocalizationProviderSnapshot")?;
+    insert::<MappingLifecycleAction>(&mut schemas, "MappingLifecycleAction")?;
+    insert::<MappingLifecycleRequest>(&mut schemas, "MappingLifecycleRequest")?;
+    insert::<MappingLifecycleState>(&mut schemas, "MappingLifecycleState")?;
+    insert::<MappingStatus>(&mut schemas, "MappingStatus")?;
     insert::<CalibrationPhase>(&mut schemas, "CalibrationPhase")?;
     insert::<CalibrationEnterRequest>(&mut schemas, "CalibrationEnterRequest")?;
     insert::<CalibrationEnterResult>(&mut schemas, "CalibrationEnterResult")?;
@@ -208,6 +220,13 @@ fn schema_document() -> Result<Value> {
     insert::<VerifiedZeroEvidence>(&mut schemas, "VerifiedZeroEvidence")?;
     insert::<PlannerGoal>(&mut schemas, "PlannerGoal")?;
     insert::<PlannerStatus>(&mut schemas, "PlannerStatus")?;
+    insert::<NavigationExecutorKind>(&mut schemas, "NavigationExecutorKind")?;
+    insert::<NavigationReadiness>(&mut schemas, "NavigationReadiness")?;
+    insert::<NavigationTerminalReason>(&mut schemas, "NavigationTerminalReason")?;
+    insert::<NavigationFeedback>(&mut schemas, "NavigationFeedback")?;
+    insert::<NavigationExecutionStatus>(&mut schemas, "NavigationExecutionStatus")?;
+    insert::<NavigationGoalRequest>(&mut schemas, "NavigationGoalRequest")?;
+    insert::<NavigationStatusResponse>(&mut schemas, "NavigationStatusResponse")?;
     insert::<PatrolStrategy>(&mut schemas, "PatrolStrategy")?;
     insert::<PatrolStatus>(&mut schemas, "PatrolStatus")?;
     insert::<SavedWaypoint>(&mut schemas, "SavedWaypoint")?;

@@ -1462,7 +1462,7 @@ mod tests {
             .to_string();
         assert!(error.contains("pilot token"));
 
-        let started = registry
+        let error = registry
             .invoke_value(
                 "planner_set_goal",
                 json!({
@@ -1473,10 +1473,10 @@ mod tests {
                     "speed_mode": "high"
                 }),
             )
-            .unwrap();
-        assert_eq!(started["active"], true);
-        assert_eq!(started["goal"]["speed_mode"], "low");
-        assert!(harness.planner_status().last_drive.is_some());
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("configured Nav2"));
+        assert!(harness.planner_status().last_drive.is_none());
     }
 
     #[tokio::test]

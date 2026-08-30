@@ -13,12 +13,214 @@ use crate::{
     config::HarnessConfig,
     memory::default_spatial_memory_path,
     types::{
-        MapIdentity, PatrolZone, PatrolZoneList, SavedWaypoint, SavedWaypointList,
-        ZoneBoundaryPoint,
+        MapIdentity, PatrolZone, PatrolZoneList, PlannerGoal, Pose2d, SavedWaypoint,
+        SavedWaypointList, SpeedMode, VisualizationPath, ZoneBoundaryPoint,
     },
 };
 
 pub const NAVIGATION_FORMAT: &str = "leash-navigation-v1";
+pub const NAVIGATION_GOAL_SCHEMA_VERSION: &str = "leash.navigation-goal.v2";
+pub const NAVIGATION_STATUS_SCHEMA_VERSION: &str = "leash.navigation-status.v2";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct NavigationGoalRequest {
+    pub schema_version: String,
+    pub mission_id: String,
+    pub idempotency_key: String,
+    pub token: String,
+    pub approval: bool,
+    pub expected_map: MapIdentity,
+    pub frame_id: String,
+    pub x_m: f64,
+    pub y_m: f64,
+    pub tolerance_m: f64,
+    pub speed_mode: SpeedMode,
+    pub deadline_ms: u128,
+}
+
+impl NavigationGoalRequest {
+    pub fn planner_goal(&self) -> PlannerGoal {
+        PlannerGoal {
+            frame_id: self.frame_id.clone(),
+            x_m: self.x_m,
+            y_m: self.y_m,
+            tolerance_m: self.tolerance_m,
+            speed_mode: SpeedMode::Low,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum NavigationExecutorKind {
+    SimGrid,
+    Nav2,
+    #[default]
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct NavigationReadiness {
+    pub ready: bool,
+    pub executor: NavigationExecutorKind,
+    pub executor_supported: bool,
+    pub map_matches: bool,
+    pub localization_tracking: bool,
+    pub lidar_available: bool,
+    pub lidar_fresh: bool,
+    pub collision_clear: bool,
+    pub deadman_clear: bool,
+    pub estop_clear: bool,
+    pub message: String,
+}
+
+impl NavigationReadiness {
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            ready: false,
+            executor: NavigationExecutorKind::Unsupported,
+            executor_supported: false,
+            map_matches: false,
+            localization_tracking: false,
+            lidar_available: false,
+            lidar_fresh: false,
+            collision_clear: false,
+            deadman_clear: false,
+            estop_clear: false,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum NavigationTerminalReason {
+    Reached,
+    Cancelled,
+    DeadlineExceeded,
+    MapChanged,
+    AuthorizationLost,
+    SafetyStop,
+    ExecutorUnavailable,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct NavigationFeedback {
+    pub current_pose: Pose2d,
+    pub distance_remaining_m: f64,
+    pub received_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct NavigationExecutionStatus {
+    pub ok: bool,
+    pub active: bool,
+    pub status: String,
+    pub message: String,
+    #[serde(default)]
+    pub path: VisualizationPath,
+    #[serde(default)]
+    pub feedback: Option<NavigationFeedback>,
+    #[serde(default)]
+    pub terminal_reason: Option<NavigationTerminalReason>,
+}
+
+impl NavigationExecutionStatus {
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            active: false,
+            status: "unsupported".to_string(),
+            message: message.into(),
+            path: VisualizationPath::default(),
+            feedback: None,
+            terminal_reason: Some(NavigationTerminalReason::ExecutorUnavailable),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct NavigationStatusResponse {
+    pub schema_version: String,
+    pub mission_id: String,
+    pub idempotency_key: String,
+    pub ok: bool,
+    pub active: bool,
+    pub status: String,
+    pub message: String,
+    pub expected_map: MapIdentity,
+    #[serde(default)]
+    pub active_map: Option<MapIdentity>,
+    pub deadline_ms: u128,
+    pub readiness: NavigationReadiness,
+    #[serde(default)]
+    pub terminal_reason: Option<NavigationTerminalReason>,
+    #[serde(default)]
+    pub goal: Option<PlannerGoal>,
+    #[serde(default)]
+    pub path: VisualizationPath,
+    #[serde(default)]
+    pub feedback: Option<NavigationFeedback>,
+}
+
+/// Physical navigation backend. Implementations may bridge to Nav2, but must
+/// never write motors directly; velocity proposals still pass through Leash's
+/// CPU safety supervisor and motor owner.
+pub trait NavigationExecutor: Send + Sync {
+    fn kind(&self) -> NavigationExecutorKind;
+
+    fn readiness(&self) -> NavigationExecutionStatus;
+
+    fn submit(
+        &self,
+        goal: &PlannerGoal,
+        expected_map: &MapIdentity,
+    ) -> Result<NavigationExecutionStatus>;
+
+    fn cancel(&self) -> Result<NavigationExecutionStatus>;
+
+    fn status(&self) -> NavigationExecutionStatus;
+}
+
+#[derive(Debug, Default)]
+pub struct UnsupportedNavigationExecutor;
+
+impl NavigationExecutor for UnsupportedNavigationExecutor {
+    fn kind(&self) -> NavigationExecutorKind {
+        NavigationExecutorKind::Unsupported
+    }
+
+    fn readiness(&self) -> NavigationExecutionStatus {
+        NavigationExecutionStatus::unsupported(
+            "physical navigation requires a configured Nav2 goal/cancel/feedback executor",
+        )
+    }
+
+    fn submit(
+        &self,
+        _goal: &PlannerGoal,
+        _expected_map: &MapIdentity,
+    ) -> Result<NavigationExecutionStatus> {
+        Ok(self.readiness())
+    }
+
+    fn cancel(&self) -> Result<NavigationExecutionStatus> {
+        Ok(self.readiness())
+    }
+
+    fn status(&self) -> NavigationExecutionStatus {
+        self.readiness()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct WaypointSpec {
@@ -469,6 +671,52 @@ fn now_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_v2_contract_pins_map_and_never_echoes_token() {
+        let request: NavigationGoalRequest = serde_json::from_value(serde_json::json!({
+            "schema_version": NAVIGATION_GOAL_SCHEMA_VERSION,
+            "mission_id": "coverage-1",
+            "idempotency_key": "coverage-1:goal-1",
+            "token": "secret-pilot-token",
+            "approval": true,
+            "expected_map": {
+                "map_id": "warehouse",
+                "map_revision": "revision-a",
+                "frame_id": "map"
+            },
+            "frame_id": "map",
+            "x_m": 1.0,
+            "y_m": 2.0,
+            "tolerance_m": 0.2,
+            "speed_mode": "low",
+            "deadline_ms": 1234
+        }))
+        .unwrap();
+        assert_eq!(request.expected_map.map_revision, "revision-a");
+
+        let response = NavigationStatusResponse {
+            schema_version: NAVIGATION_STATUS_SCHEMA_VERSION.to_string(),
+            mission_id: request.mission_id,
+            idempotency_key: request.idempotency_key,
+            ok: false,
+            active: false,
+            status: "unsupported".to_string(),
+            message: "Nav2 executor unavailable".to_string(),
+            expected_map: request.expected_map,
+            active_map: None,
+            deadline_ms: request.deadline_ms,
+            readiness: NavigationReadiness::unsupported("Nav2 executor unavailable"),
+            terminal_reason: Some(NavigationTerminalReason::ExecutorUnavailable),
+            goal: None,
+            path: VisualizationPath::default(),
+            feedback: None,
+        };
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["schema_version"], NAVIGATION_STATUS_SCHEMA_VERSION);
+        assert!(value.get("token").is_none());
+        assert_eq!(value["terminal_reason"], "executor-unavailable");
+    }
 
     #[test]
     fn waypoint_and_zone_crud_persists_and_preserves_references() {
