@@ -45,6 +45,7 @@ use crate::agent_runtime::{
     CapabilityPermissions,
 };
 use crate::capability::{InvocationOrigin, SafetyClass};
+use crate::compute::{ComputeApiError, ComputeApiErrorKind, ComputeJobRequest};
 use crate::gateway::{GatewayCommand, TransportGateway};
 use crate::runtime::{
     CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
@@ -299,7 +300,12 @@ pub fn router(harness: Harness) -> Router {
         .route("/action-evidence", get(action_evidence))
         .route("/evidence/action/applied", get(action_evidence))
         .route("/telemetry/compact", get(compact_telemetry))
-        .route("/telemetry/qualia-inputs", get(qualia_inputs))
+        .route("/telemetry/spatial-inputs", get(spatial_inputs))
+        .route("/compute/capabilities", get(compute_capabilities))
+        .route("/compute/jobs", post(compute_submit))
+        .route("/compute/jobs/:job_id", get(compute_get))
+        .route("/compute/jobs/:job_id/cancel", post(compute_cancel))
+        .route("/events/compute", get(sse_compute))
         .route("/cognition/status", get(cognition_status))
         .route("/runtime-v2/status", get(runtime_v2_status))
         .route("/cognition/snapshot", get(cognition_snapshot))
@@ -596,8 +602,138 @@ async fn compact_telemetry(State(harness): State<Harness>) -> Json<Value> {
     Json(compact_telemetry_value(&harness))
 }
 
-async fn qualia_inputs(State(harness): State<Harness>) -> Json<Value> {
-    Json(harness.qualia_inputs())
+async fn spatial_inputs(State(harness): State<Harness>) -> Json<Value> {
+    Json(harness.spatial_inputs())
+}
+
+async fn compute_capabilities(State(harness): State<Harness>, headers: HeaderMap) -> Response {
+    if let Err(response) = compute_authorized(&headers) {
+        return response;
+    }
+    Json(harness.compute().capabilities()).into_response()
+}
+
+async fn compute_submit(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = compute_authorized(&headers) {
+        return response;
+    }
+    if body.len() > 1_048_576 {
+        return compute_error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "compute request exceeds 1 MiB",
+        );
+    }
+    let request = match serde_json::from_slice::<ComputeJobRequest>(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return compute_error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("invalid compute request: {error}"),
+            )
+        }
+    };
+    match harness.compute().submit(request) {
+        Ok(response) => (StatusCode::ACCEPTED, Json(response)).into_response(),
+        Err(error) => compute_api_error_response(error),
+    }
+}
+
+async fn compute_get(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    AxumPath(job_id): AxumPath<String>,
+) -> Response {
+    if let Err(response) = compute_authorized(&headers) {
+        return response;
+    }
+    match harness.compute().get(&job_id) {
+        Ok(job) => Json(job).into_response(),
+        Err(error) => compute_api_error_response(error),
+    }
+}
+
+async fn compute_cancel(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    AxumPath(job_id): AxumPath<String>,
+) -> Response {
+    if let Err(response) = compute_authorized(&headers) {
+        return response;
+    }
+    match harness.compute().cancel(&job_id) {
+        Ok(job) => Json(job).into_response(),
+        Err(error) => compute_api_error_response(error),
+    }
+}
+
+async fn sse_compute(State(harness): State<Harness>, headers: HeaderMap) -> Response {
+    if let Err(response) = compute_authorized(&headers) {
+        return response;
+    }
+    let receiver = harness.compute().subscribe();
+    let stream = stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(event) => {
+                    let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+                    return Some((
+                        Ok::<_, Infallible>(Event::default().event("compute").data(data)),
+                        receiver,
+                    ));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keepalive"),
+        )
+        .into_response()
+}
+
+fn compute_authorized(headers: &HeaderMap) -> Result<(), Response> {
+    let expected = match env::var("LEASH_COMPUTE_TOKEN_FILE")
+        .map_err(anyhow::Error::from)
+        .and_then(|path| read_ingress_token(&path, "compute"))
+    {
+        Ok(token) => token,
+        Err(error) => {
+            return Err(compute_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &format!("compute API is disabled; set LEASH_COMPUTE_TOKEN_FILE: {error}"),
+            ))
+        }
+    };
+    if !bearer_authorized(headers, &expected) {
+        return Err(compute_error_response(
+            StatusCode::UNAUTHORIZED,
+            "compute API authorization failed",
+        ));
+    }
+    Ok(())
+}
+
+fn compute_api_error_response(error: ComputeApiError) -> Response {
+    let status = match error.kind {
+        ComputeApiErrorKind::Invalid => StatusCode::BAD_REQUEST,
+        ComputeApiErrorKind::Conflict => StatusCode::CONFLICT,
+        ComputeApiErrorKind::NotFound => StatusCode::NOT_FOUND,
+        ComputeApiErrorKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ComputeApiErrorKind::QueueFull => StatusCode::TOO_MANY_REQUESTS,
+    };
+    compute_error_response(status, &error.to_string())
+}
+
+fn compute_error_response(status: StatusCode, error: &str) -> Response {
+    (status, Json(json!({"ok": false, "error": error}))).into_response()
 }
 
 fn compact_telemetry_value(harness: &Harness) -> Value {
@@ -2759,7 +2895,7 @@ mod tests {
 
     use super::{
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
-        localization_authorized, localization_update, motors_stop_verified,
+        compute_authorized, localization_authorized, localization_update, motors_stop_verified,
         validate_agent_console_capability, AgentCapabilityReq, CameraRuntimeState,
         CAMERA_RUNTIME_STATE,
     };
@@ -2770,9 +2906,10 @@ mod tests {
     use tokio::sync::Mutex;
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+    static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
-    async fn compact_telemetry_keeps_qualia_inputs_and_drops_dense_surfaces() {
+    async fn compact_telemetry_keeps_spatial_inputs_and_drops_dense_surfaces() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         let value = compact_telemetry_value(&harness);
         assert_eq!(
@@ -2792,12 +2929,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn qualia_inputs_omit_voxels_and_keep_relative_odometry_contract() {
+    async fn spatial_inputs_omit_voxels_and_keep_relative_odometry_contract() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
-        let value = harness.qualia_inputs();
+        let value = harness.spatial_inputs();
         assert_eq!(
             value.get("schema_version").and_then(|value| value.as_str()),
-            Some("leash.telemetry.qualia-inputs.v1")
+            Some("leash.telemetry.spatial-inputs.v1")
         );
         assert!(value.get("ts_ms").is_some());
         assert!(value.get("sensors").is_some());
@@ -2910,6 +3047,35 @@ mod tests {
             HeaderValue::from_static("Bearer bridge-secret"),
         );
         assert!(localization_authorized(&headers, "bridge-secret"));
+    }
+
+    #[tokio::test]
+    async fn compute_api_fails_closed_and_requires_its_scoped_bearer_token() {
+        let _guard = COMPUTE_ENV_LOCK.lock().await;
+        std::env::remove_var("LEASH_COMPUTE_TOKEN_FILE");
+        assert_eq!(
+            compute_authorized(&HeaderMap::new()).unwrap_err().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        let token_path =
+            std::env::temp_dir().join(format!("leash-compute-token-{}", std::process::id()));
+        fs::write(&token_path, "compute-secret\n").unwrap();
+        std::env::set_var("LEASH_COMPUTE_TOKEN_FILE", &token_path);
+        assert_eq!(
+            compute_authorized(&HeaderMap::new()).unwrap_err().status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer compute-secret"),
+        );
+        compute_authorized(&headers).unwrap();
+
+        std::env::remove_var("LEASH_COMPUTE_TOKEN_FILE");
+        fs::remove_file(token_path).unwrap();
     }
 
     #[tokio::test]

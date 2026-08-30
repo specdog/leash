@@ -49,6 +49,48 @@ extern "C" __global__ void lidar_transform(
     valid[index] = 1;
 }
 
+extern "C" __global__ void spatial_window_transform(
+    const float* ranges_m,
+    const uint32_t* scan_indices,
+    const uint32_t* local_indices,
+    const float* angle_min_rad,
+    const float* angle_increment_rad,
+    const float* range_min_m,
+    const float* range_max_m,
+    const int32_t* clockwise,
+    const float* pose_x_m,
+    const float* pose_y_m,
+    const float* pose_yaw_rad,
+    float* x_m,
+    float* y_m,
+    uint8_t* valid,
+    uint32_t count
+) {
+    const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= count) {
+        return;
+    }
+    const uint32_t scan = scan_indices[index];
+    const float range = ranges_m[index];
+    if (!isfinite(range)
+        || range < range_min_m[scan]
+        || range > range_max_m[scan]) {
+        x_m[index] = 0.0f;
+        y_m[index] = 0.0f;
+        valid[index] = 0;
+        return;
+    }
+    const float direction = clockwise[scan] != 0 ? -1.0f : 1.0f;
+    const float angle = pose_yaw_rad[scan]
+        + direction * (
+            angle_min_rad[scan]
+            + static_cast<float>(local_indices[index]) * angle_increment_rad[scan]
+        );
+    x_m[index] = pose_x_m[scan] + range * cosf(angle);
+    y_m[index] = pose_y_m[scan] + range * sinf(angle);
+    valid[index] = 1;
+}
+
 extern "C" __global__ void collision_sector_reduce(
     const float* ranges_m,
     uint32_t* minimum_range_bits,

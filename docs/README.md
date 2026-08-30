@@ -17,6 +17,7 @@ flowchart TB
   docs --> defaultBranch["DEFAULT_BRANCH_RECOVERY.md\ndefault-branch audit and recovery proof"]
   docs --> sensors["SENSORS.md\ngeneric range-scan and IMU contracts"]
   docs --> localization["LOCALIZATION.md\nversioned pose, covariance, map, and health wire contract"]
+  docs --> compute["COMPUTE_API.md\nauthenticated asynchronous advisory compute"]
   localization --> providers["LOCALIZATION_PROVIDERS.md\ngeneric provider extension boundary"]
 
   bot --> service["systemd user service\n~/.config/systemd/user/leash.service"]
@@ -40,3 +41,4 @@ flowchart TB
 - `SENSORS.md`: middleware-neutral planar range-scan and IMU units, frames, validation, and status behavior.
 - `LOCALIZATION.md`: versioned map identity, pose/covariance, health, visualization, and replay behavior.
 - `LOCALIZATION_PROVIDERS.md`: in-process, simulation, replay, and non-blocking external localization provider extension guide.
+- `COMPUTE_API.md`: generic authenticated job lifecycle, temporal spatial evidence, CUDA qualification, and safety boundary.

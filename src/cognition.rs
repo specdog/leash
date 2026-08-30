@@ -12,8 +12,8 @@ use tokio::sync::broadcast;
 
 use crate::{accelerator::AcceleratorStatus, config::AcceleratorBackend, types::TelemetryFrame};
 
-pub const COGNITION_CONTRACT_VERSION: &str = "qualia.cognition.v1";
-pub const COGNITION_STATE_VERSION: &str = "qualia.cognition-state.v1";
+pub const COGNITION_CONTRACT_VERSION: &str = "leash.cognition.v1";
+pub const COGNITION_STATE_VERSION: &str = "leash.cognition-state.v1";
 pub const COGNITION_STATE_DIM: usize = 1_024;
 pub const COGNITION_BOUNDARY_TIMEOUT_MS: u128 = 500;
 pub const COGNITION_CHECKPOINT_INTERVAL_MS: u128 = 60_000;
@@ -114,7 +114,7 @@ impl SemanticPriorV1 {
             bail!("semantic prior confidence must be finite and within 0..=1");
         }
         if self.target_layer != 6 {
-            bail!("semantic priors may only target Qualia layer 6");
+            bail!("semantic priors may only target cognition layer 6");
         }
         if self.expires_at_ms <= self.created_at_ms || self.expires_at_ms <= now_ms {
             bail!("semantic prior is expired or has an invalid lifetime");
@@ -505,7 +505,7 @@ impl CognitionRuntime {
     }
 
     pub fn submit_boundary(&self, frame: CognitionBoundaryFrameV1, now_ms: u128) -> Result<()> {
-        validate_boundary(&frame, now_ms, "qualia", "leash", 3)?;
+        validate_boundary(&frame, now_ms, "planner", "leash", 3)?;
         let mut state = self.state.lock();
         state.top_down.copy_from_slice(&frame.latent);
         state.top_down_precision = frame.precision;
@@ -1004,7 +1004,7 @@ fn boundary_from_layer(layer: &LayerState, now_ms: u128) -> CognitionBoundaryFra
         ts_ms: now_ms,
         expires_at_ms: now_ms.saturating_add(COGNITION_BOUNDARY_TIMEOUT_MS),
         source: "leash".to_string(),
-        destination: "qualia".to_string(),
+        destination: "planner".to_string(),
         layer: 2,
         sequence: layer.sequence,
         precision: layer.precision,
@@ -1112,12 +1112,12 @@ mod tests {
         let layer = LayerState::new(2);
         let now = now_ms();
         let mut frame = boundary_from_layer(&layer, now);
-        frame.source = "qualia".to_string();
+        frame.source = "planner".to_string();
         frame.destination = "leash".to_string();
         frame.layer = 3;
-        validate_boundary(&frame, now, "qualia", "leash", 3).unwrap();
+        validate_boundary(&frame, now, "planner", "leash", 3).unwrap();
         frame.state_digest = "bad".to_string();
-        assert!(validate_boundary(&frame, now, "qualia", "leash", 3).is_err());
+        assert!(validate_boundary(&frame, now, "planner", "leash", 3).is_err());
     }
 
     #[test]

@@ -1,12 +1,12 @@
 {
   "schema_version": "leash.cuda-artifact.v1",
   "source": "kernels/leash_kernels.cu",
-  "source_sha256": "ffb6710f9611cf8984bbe44511e33a0d73e7564bba8e1f4b75987a8e888462be",
+  "source_sha256": "51caacb9e0e1cf25b208def75e911b54288e96916c6d9cb833c4a932b320105b",
   "artifact": "leash_kernels.fatbin",
-  "artifact_sha256": "c96e10ac48d9b8e58fc9f31eb5cdf58ad5cb907ddd0c49d98784344e86a640a4",
-  "artifact_bytes": 39080,
-  "cuda_sdk": "12.9.0",
-  "nvcc": "Build cuda_12.9.r12.9/compiler.35813241_0",
+  "artifact_sha256": "dd060fb7c82787d2c3a979d9761b7435a697169ef44b74c188834fa1166fb5fc",
+  "artifact_bytes": 47552,
+  "cuda_sdk": "12.8.0",
+  "nvcc": "Build cuda_12.8.r12.8/compiler.35583870_0",
   "target": {
     "native": "sm_87",
     "ptx": "compute_87"
@@ -21,6 +21,7 @@
   "symbols": [
     "project_occupancy",
     "lidar_transform",
+    "spatial_window_transform",
     "collision_sector_reduce",
     "normalize_rgb_u8",
     "predictive_step",
@@ -31,30 +32,24 @@
     "byte_identical": true
   },
   "target_validation": {
-    "date": "2026-08-29",
-    "latest_validation_commit": "44ced55",
+    "date": null,
+    "latest_validation_commit": null,
     "device": "NVIDIA Jetson Orin NX Engineering Reference Developer Kit",
     "architecture": "aarch64",
     "compute_capability": "8.7",
     "rust": "1.94.1",
     "cudarc": "0.19.8",
-    "driver_probe": {
-      "kernels_passed": 6,
-      "no_motion": true
-    },
-    "rust_executor_probe": {
-      "active_backend": "cuda",
-      "cpu_parity_jobs_passed": 312,
-      "circuit_open": false,
-      "no_motion": true
-    },
-    "root_harness_probe": {
-      "profile": "sim",
-      "release": true,
-      "cuda_selection_test_passed": true,
-      "authoritative_cognition_checkpoint_restore_passed": true,
-      "legacy_nvrtc_paths_present": false,
-      "no_motion": true
-    }
+    "status": "pending exact-artifact validation on Jetson",
+    "no_motion": true
+  },
+  "host_validation": {
+    "date": "2026-08-30",
+    "device": "NVIDIA GeForce RTX 4090",
+    "compute_capability": "8.9",
+    "driver": "591.74",
+    "spatial_window_points": 11520,
+    "cpu_cuda_tolerance_m": 0.0001,
+    "result": "passed",
+    "no_motion": true
   }
 }

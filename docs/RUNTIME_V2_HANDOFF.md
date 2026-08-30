@@ -202,7 +202,7 @@ and retain the resulting candidate configuration hash.
   final CUDA deployment succeeded over Wi-Fi, so the USB gadget connection is
   no longer required for management. Network identity and credentials were
   supplied out of band and are intentionally not recorded in the repository.
-- Live source: `/home/jetson/leash-qualia-combined-1f004d6`
+- Live source: private deployment workspace (path intentionally redacted)
 - Live binary: `/home/jetson/.local/bin/leash`
 - Candidate and build work are isolated under `/tmp`; private deployment proof
   remains under the user's state directory.

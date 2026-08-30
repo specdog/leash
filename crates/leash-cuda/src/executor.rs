@@ -12,7 +12,8 @@ use std::{
 
 use crate::{
     collision_sector_reduce_cpu, lidar_transform_cpu, normalize_rgb_u8_cpu, predictive_step_cpu,
-    project_occupancy_cpu, CollisionSector, ComputeInputError, LidarPoint,
+    project_occupancy_cpu, spatial_window_transform_cpu, CollisionSector, ComputeInputError,
+    LidarPoint, SpatialScan,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,6 +130,9 @@ pub enum ComputeJob {
         sector_center_rad: f32,
         sector_half_width_rad: f32,
     },
+    SpatialWindowTransform {
+        scans: Vec<SpatialScan>,
+    },
     NormalizeRgbU8 {
         input: Vec<u8>,
         mean: [f32; 3],
@@ -164,6 +168,7 @@ pub enum ComputeResult {
         lidar: Vec<LidarPoint>,
         collision: CollisionSector,
     },
+    SpatialWindow(Vec<LidarPoint>),
     NormalizedRgb(Vec<f32>),
     Predictive(PredictiveState),
     CognitionLoaded,
@@ -391,6 +396,17 @@ pub struct JobTicket {
     result: Receiver<Result<ComputeResult, WorkError>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct JobCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl JobCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 impl JobTicket {
     pub const fn id(&self) -> JobId {
         self.id
@@ -398,6 +414,12 @@ impl JobTicket {
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn cancellation(&self) -> JobCancellation {
+        JobCancellation {
+            cancelled: Arc::clone(&self.cancelled),
+        }
     }
 
     pub fn wait(self) -> Result<ComputeResult, WorkError> {
@@ -495,6 +517,9 @@ impl Backend for CpuBackend {
                     sector_half_width_rad,
                 )?,
             }),
+            ComputeJob::SpatialWindowTransform { scans } => Ok(ComputeResult::SpatialWindow(
+                spatial_window_transform_cpu(&scans)?,
+            )),
             ComputeJob::NormalizeRgbU8 {
                 input,
                 mean,
@@ -1326,6 +1351,53 @@ mod tests {
             ))
         );
         assert!(!executor.status().circuit_open);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_temporal_spatial_window_matches_cpu_when_a_device_is_present() {
+        let device_count = std::panic::catch_unwind(cudarc::driver::CudaContext::device_count)
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(0);
+        if device_count == 0 {
+            return;
+        }
+        let executor = ComputeExecutor::start_cuda(ExecutorConfig::default()).unwrap();
+        let scans = (0..32)
+            .map(|scan_index| SpatialScan {
+                ranges_m: (0..360)
+                    .map(|index| 0.5 + (index % 100) as f32 * 0.01)
+                    .collect(),
+                angle_min_rad: -core::f32::consts::PI,
+                angle_increment_rad: core::f32::consts::TAU / 360.0,
+                range_min_m: 0.05,
+                range_max_m: 12.0,
+                clockwise: false,
+                pose_x_m: scan_index as f32 * 0.01,
+                pose_y_m: scan_index as f32 * -0.005,
+                pose_yaw_rad: scan_index as f32 * 0.002,
+            })
+            .collect::<Vec<_>>();
+        let expected = spatial_window_transform_cpu(&scans).unwrap();
+        let actual = executor
+            .submit(
+                JobPriority::Interactive,
+                Some(Instant::now() + Duration::from_secs(2)),
+                ComputeJob::SpatialWindowTransform { scans },
+            )
+            .unwrap()
+            .wait()
+            .unwrap();
+        let ComputeResult::SpatialWindow(actual) = actual else {
+            panic!("unexpected spatial result")
+        };
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.valid, expected.valid);
+            assert!((actual.x_m - expected.x_m).abs() <= 1.0e-4);
+            assert!((actual.y_m - expected.y_m).abs() <= 1.0e-4);
+        }
     }
 
     fn cognition_checkpoint_fixture(

@@ -64,7 +64,7 @@ mavlink-drone = []
 manipulator = []
 physical-navigation = []
 bridge-compat = ["http"]
-cuda = ["dep:leash-cuda", "leash-cuda/cuda"]
+cuda = ["leash-cuda/cuda"]
 webrtc = ["http", "dep:webrtc"]
 v4l2-camera = ["http", "dep:v4l"]
 
@@ -80,7 +80,7 @@ tokio = { version = "1.43", features = ["io-util", "macros", "net", "process", "
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 leash-gateway = { path = "crates/leash-gateway", version = "0.1.0" }
-leash-cuda = { path = "crates/leash-cuda", version = "0.1.0", optional = true }
+leash-cuda = { path = "crates/leash-cuda", version = "0.1.0" }
 leash-core = { path = "crates/leash-core", version = "0.1.0", optional = true }
 leash-runtime = { path = "crates/leash-runtime", version = "0.1.0", optional = true }
 leash-waveshare = { path = "crates/leash-waveshare", version = "0.1.0", optional = true }

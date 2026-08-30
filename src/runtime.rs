@@ -602,6 +602,7 @@ pub struct Harness {
     physical_navigation_lease: Arc<Mutex<Option<PhysicalNavigationLease>>>,
     coordinator: Arc<RwLock<ModuleCoordinator>>,
     accelerator: AcceleratorStatus,
+    compute: crate::compute::ComputeRuntime,
     cognition: CognitionRuntime,
 }
 
@@ -709,6 +710,7 @@ impl Harness {
         let stream_transport = new_stream_transport(config.stream_transport);
         let action_producer_epoch = now_ns().saturating_add(instance_id).max(1);
         let cognition = CognitionRuntime::new(&accelerator, &config.role);
+        let compute = crate::compute::ComputeRuntime::new(&accelerator);
         let harness = Self {
             config,
             started_at: Instant::now(),
@@ -742,6 +744,7 @@ impl Harness {
             physical_navigation_lease: Arc::new(Mutex::new(None)),
             coordinator: Arc::new(RwLock::new(coordinator)),
             accelerator,
+            compute,
             cognition,
         };
         harness.spawn_deadman();
@@ -757,6 +760,10 @@ impl Harness {
 
     pub fn config(&self) -> &HarnessConfig {
         &self.config
+    }
+
+    pub fn compute(&self) -> &crate::compute::ComputeRuntime {
+        &self.compute
     }
 
     pub fn applied_action_evidence(
@@ -1612,6 +1619,12 @@ impl Harness {
                 "GET /action-evidence".to_string(),
                 "GET /evidence/action/applied".to_string(),
                 "GET /telemetry/compact".to_string(),
+                "GET /telemetry/spatial-inputs".to_string(),
+                "GET /compute/capabilities".to_string(),
+                "POST /compute/jobs".to_string(),
+                "GET /compute/jobs/:job_id".to_string(),
+                "POST /compute/jobs/:job_id/cancel".to_string(),
+                "GET /events/compute".to_string(),
                 "GET /cognition/status".to_string(),
                 "GET /cognition/snapshot".to_string(),
                 "GET /events/cognition".to_string(),
@@ -1751,19 +1764,19 @@ impl Harness {
         self.telemetry_with_vision(telemetry)
     }
 
-    /// Lightweight sensor and pose evidence for high-cadence Qualia ingest.
+    /// Lightweight sensor and pose evidence for high-cadence external ingest.
     ///
     /// This intentionally excludes occupancy and voxel projection. The full
     /// telemetry route remains the source for visualization surfaces, while
     /// this path cannot synchronously launch CUDA work on every sensor poll.
-    pub fn qualia_inputs(&self) -> Value {
+    pub fn spatial_inputs(&self) -> Value {
         let now = now_ms();
         #[cfg(feature = "waveshare-ugv")]
         self.refresh_waveshare_sensor_freshness();
         let raw = self.raw.read().clone();
         let localization = self.localization_provider.snapshot(now);
         json!({
-            "schema_version": "leash.telemetry.qualia-inputs.v1",
+            "schema_version": "leash.telemetry.spatial-inputs.v1",
             "ts_ms": now,
             "sensors": sensor_snapshot(&raw),
             "localization": localization.localization,
@@ -3323,6 +3336,7 @@ impl Harness {
                 #[cfg(feature = "waveshare-ugv")]
                 harness.enforce_obstacle_stop();
                 let telemetry = harness.telemetry();
+                harness.compute.record_telemetry(&telemetry);
                 let _ = harness.telemetry_tx.send(telemetry.clone());
                 if let Ok(payload) = serde_json::to_value(harness.telemetry_stream_frame()) {
                     let _ = harness.stream_transport.publish("telemetry", payload);
@@ -5289,7 +5303,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn qualia_observation_endpoints_coexist_with_applied_action_evidence() {
+    async fn spatial_observation_endpoints_coexist_with_applied_action_evidence() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         let endpoints = harness.capabilities().endpoints;
 
@@ -5305,7 +5319,7 @@ mod tests {
         ] {
             assert!(
                 endpoints.iter().any(|endpoint| endpoint == required),
-                "missing required Qualia endpoint {required}"
+                "missing required spatial endpoint {required}"
             );
         }
     }

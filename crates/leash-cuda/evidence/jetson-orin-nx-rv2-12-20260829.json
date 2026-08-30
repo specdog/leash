@@ -53,7 +53,7 @@
     "layer_2_snapshot_cadence_hz": 20,
     "full_checkpoint_state_bytes_excluding_metadata": 45056,
     "full_checkpoint_cadence_ms": 60000,
-    "checkpoint_schema_version": "qualia.cognition-state.v1",
+    "checkpoint_schema_version": "redacted-private-cognition-schema",
     "checkpoint_integrity_digest": "sha256_full_state"
   },
   "benchmark": {

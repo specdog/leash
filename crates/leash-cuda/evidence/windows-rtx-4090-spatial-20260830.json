@@ -1,0 +1,28 @@
+{
+  "schema_version": "leash.cuda-spatial-validation.v1",
+  "date": "2026-08-30",
+  "artifact_sha256": "dd060fb7c82787d2c3a979d9761b7435a697169ef44b74c188834fa1166fb5fc",
+  "artifact_bytes": 47552,
+  "source_sha256": "51caacb9e0e1cf25b208def75e911b54288e96916c6d9cb833c4a932b320105b",
+  "compiler": {
+    "cuda_sdk": "12.8.0",
+    "nvcc": "Build cuda_12.8.r12.8/compiler.35583870_0",
+    "reproducible_builds": 2,
+    "byte_identical": true
+  },
+  "device": {
+    "name": "NVIDIA GeForce RTX 4090",
+    "compute_capability": "8.9",
+    "driver": "591.74"
+  },
+  "test": {
+    "command": "cargo test -p leash-cuda --features cuda cuda_temporal_spatial_window_matches_cpu_when_a_device_is_present -- --nocapture",
+    "kernel": "spatial_window_transform",
+    "scans": 32,
+    "samples_per_scan": 360,
+    "points": 11520,
+    "cpu_cuda_tolerance_m": 0.0001,
+    "result": "passed",
+    "motor_output": "not present"
+  }
+}

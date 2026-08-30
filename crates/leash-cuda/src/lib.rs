@@ -14,7 +14,7 @@ use core::fmt;
 pub use executor::{
     BackendKind, BackendStatus, CognitionLayerMetrics, CognitionLayerSnapshot, CognitionStep,
     ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, ExecutorMetrics, FaultInjection,
-    JobId, JobPriority, JobTicket, PredictiveState, ResidentCognitionCheckpoint,
+    JobCancellation, JobId, JobPriority, JobTicket, PredictiveState, ResidentCognitionCheckpoint,
     ResidentCognitionLayer, StartError, SubmitError, WorkError, RESIDENT_COGNITION_SCHEMA_VERSION,
 };
 pub use gate::{
@@ -25,14 +25,15 @@ pub use gate::{
 
 pub const ARTIFACT_SCHEMA_VERSION: &str = "leash.cuda-artifact.v1";
 pub const ARTIFACT_SHA256: &str =
-    "c96e10ac48d9b8e58fc9f31eb5cdf58ad5cb907ddd0c49d98784344e86a640a4";
-pub const SOURCE_SHA256: &str = "ffb6710f9611cf8984bbe44511e33a0d73e7564bba8e1f4b75987a8e888462be";
+    "dd060fb7c82787d2c3a979d9761b7435a697169ef44b74c188834fa1166fb5fc";
+pub const SOURCE_SHA256: &str = "51caacb9e0e1cf25b208def75e911b54288e96916c6d9cb833c4a932b320105b";
 pub const TARGET_SM: &str = "sm_87";
 pub const TARGET_PTX: &str = "compute_87";
-pub const CUDA_SDK: &str = "12.9.0";
-pub const KERNEL_NAMES: [&str; 6] = [
+pub const CUDA_SDK: &str = "12.8.0";
+pub const KERNEL_NAMES: [&str; 7] = [
     "project_occupancy",
     "lidar_transform",
+    "spatial_window_transform",
     "collision_sector_reduce",
     "normalize_rgb_u8",
     "predictive_step",
@@ -58,7 +59,7 @@ pub const fn artifact() -> KernelArtifact {
     KernelArtifact {
         schema_version: ARTIFACT_SCHEMA_VERSION,
         sha256: ARTIFACT_SHA256,
-        bytes: 39_080,
+        bytes: 47_552,
         cuda_sdk: CUDA_SDK,
         native_target: TARGET_SM,
         ptx_target: TARGET_PTX,
@@ -108,6 +109,19 @@ pub struct LidarPoint {
     pub x_m: f32,
     pub y_m: f32,
     pub valid: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpatialScan {
+    pub ranges_m: Vec<f32>,
+    pub angle_min_rad: f32,
+    pub angle_increment_rad: f32,
+    pub range_min_m: f32,
+    pub range_max_m: f32,
+    pub clockwise: bool,
+    pub pose_x_m: f32,
+    pub pose_y_m: f32,
+    pub pose_yaw_rad: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -178,6 +192,44 @@ pub fn lidar_transform_cpu(
             }
         })
         .collect())
+}
+
+pub fn spatial_window_transform_cpu(
+    scans: &[SpatialScan],
+) -> Result<Vec<LidarPoint>, ComputeInputError> {
+    let point_count = scans.iter().try_fold(0_usize, |total, scan| {
+        total
+            .checked_add(scan.ranges_m.len())
+            .ok_or(ComputeInputError::LengthOverflow)
+    })?;
+    u32::try_from(point_count).map_err(|_| ComputeInputError::LengthOverflow)?;
+
+    let mut output = Vec::with_capacity(point_count);
+    for scan in scans {
+        if !scan.pose_x_m.is_finite()
+            || !scan.pose_y_m.is_finite()
+            || !scan.pose_yaw_rad.is_finite()
+        {
+            return Err(ComputeInputError::InvalidAngles);
+        }
+        let mut points = lidar_transform_cpu(
+            &scan.ranges_m,
+            scan.angle_min_rad,
+            scan.angle_increment_rad,
+            scan.range_min_m,
+            scan.range_max_m,
+            scan.pose_yaw_rad,
+            scan.clockwise,
+        )?;
+        for point in &mut points {
+            if point.valid {
+                point.x_m += scan.pose_x_m;
+                point.y_m += scan.pose_y_m;
+            }
+        }
+        output.extend(points);
+    }
+    Ok(output)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -317,7 +369,7 @@ mod tests {
         let artifact = artifact();
         assert_eq!(artifact.schema_version, "leash.cuda-artifact.v1");
         assert_eq!(artifact.sha256.len(), 64);
-        assert_eq!(artifact.bytes, 39_080);
+        assert_eq!(artifact.bytes, 47_552);
         assert_eq!(artifact.native_target, "sm_87");
         assert_eq!(artifact.ptx_target, "compute_87");
         assert_eq!(artifact.kernels, KERNEL_NAMES);
@@ -367,6 +419,41 @@ mod tests {
             lidar_transform_cpu(&[], 0.0, 0.1, 12.0, 0.05, 0.0, false),
             Err(ComputeInputError::InvalidRangeBounds)
         );
+    }
+
+    #[test]
+    fn cpu_spatial_window_projects_each_scan_into_odom() {
+        let scans = [
+            SpatialScan {
+                ranges_m: vec![1.0, f32::NAN],
+                angle_min_rad: 0.0,
+                angle_increment_rad: 0.1,
+                range_min_m: 0.05,
+                range_max_m: 12.0,
+                clockwise: false,
+                pose_x_m: 2.0,
+                pose_y_m: 3.0,
+                pose_yaw_rad: 0.0,
+            },
+            SpatialScan {
+                ranges_m: vec![2.0],
+                angle_min_rad: 0.0,
+                angle_increment_rad: 0.1,
+                range_min_m: 0.05,
+                range_max_m: 12.0,
+                clockwise: false,
+                pose_x_m: -1.0,
+                pose_y_m: 1.0,
+                pose_yaw_rad: core::f32::consts::FRAC_PI_2,
+            },
+        ];
+        let points = spatial_window_transform_cpu(&scans).unwrap();
+        assert_eq!(points.len(), 3);
+        assert!((points[0].x_m - 3.0).abs() < 1e-6);
+        assert!((points[0].y_m - 3.0).abs() < 1e-6);
+        assert!(!points[1].valid);
+        assert!((points[2].x_m + 1.0).abs() < 1e-5);
+        assert!((points[2].y_m - 3.0).abs() < 1e-5);
     }
 
     #[test]

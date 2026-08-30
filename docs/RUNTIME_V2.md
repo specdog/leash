@@ -445,7 +445,7 @@ weight, and bias buffers across ticks. An all-layer tick uploads 8 KiB of inputs
 and reads at most 36 bytes of metrics; the 4 KiB layer-2 latent returns at its
 declared 20 Hz boundary cadence, and the full 45,056-byte state returns only at
 the 60-second checkpoint cadence or an explicit checkpoint request. The
-integrity-digested `qualia.cognition-state.v1` checkpoint restores in both
+integrity-digested `leash.cognition-state.v1` checkpoint restores in both
 CPU-to-CUDA and CUDA-to-CPU directions. The exact Orin probe passed 100
 randomized resident ticks and 312 total jobs, while the root runtime proved one
 advance per layer and CUDA-to-CPU restore. CUDA remained slower at both measured

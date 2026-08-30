@@ -3,7 +3,7 @@
   "captured_on": "2026-08-29",
   "upstream_base": "0426ab1",
   "deployed_source": {
-    "label": "leash-qualia-combined-1f004d6",
+    "label": "private-deployment-workspace",
     "git_metadata_present": false,
     "files": 75,
     "sorted_file_manifest_sha256": "304d726805ae7f4651dac17b7a8b1ce17a8ab09407c4781f104a4dc22b6f770c"

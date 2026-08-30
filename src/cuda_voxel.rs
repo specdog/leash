@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, ensure, Context, Result};
 use leash_cuda::{
     BackendStatus, ComputeExecutor, ComputeJob, ComputeResult, ExecutorConfig, JobPriority,
-    WorkError,
+    JobTicket, WorkError,
 };
 
 const COMPUTE_DEADLINE: Duration = Duration::from_millis(100);
@@ -53,14 +53,23 @@ pub fn project_occupancy(cells: &[i8], depth: u32) -> Result<Vec<i32>> {
 }
 
 pub(crate) fn execute(job: ComputeJob) -> Result<ComputeResult> {
-    let ticket = executor()?
-        .submit(
-            JobPriority::Interactive,
-            Some(Instant::now() + COMPUTE_DEADLINE),
-            job,
-        )
-        .context("submit work to the shared CUDA executor")?;
-    ticket.wait().map_err(work_error)
+    submit(
+        JobPriority::Interactive,
+        Some(Instant::now() + COMPUTE_DEADLINE),
+        job,
+    )?
+    .wait()
+    .map_err(work_error)
+}
+
+pub(crate) fn submit(
+    priority: JobPriority,
+    deadline: Option<Instant>,
+    job: ComputeJob,
+) -> Result<JobTicket> {
+    executor()?
+        .submit(priority, deadline, job)
+        .context("submit work to the shared CUDA executor")
 }
 
 pub(crate) fn backend_status() -> Result<BackendStatus> {

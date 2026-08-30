@@ -1586,7 +1586,7 @@ pub struct VerifiedZeroEvidence {
     pub statement: String,
 }
 
-pub const APPLIED_ACTION_SCHEMA_VERSION: &str = "qualia.applied-action.v1";
+pub const APPLIED_ACTION_SCHEMA_VERSION: &str = "leash.applied-action.v1";
 pub const APPLIED_ACTION_PAGE_SCHEMA_VERSION: &str = "leash.applied-action-page.v1";
 
 /// One completed interval of post-safety differential-drive authority.

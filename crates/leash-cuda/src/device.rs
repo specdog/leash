@@ -14,7 +14,7 @@ use crate::{
         CognitionStep, ComputeJob, ComputeResult, PredictiveState, ResidentCognitionCheckpoint,
         ResidentCognitionLayer, WorkError,
     },
-    CollisionSector, ComputeInputError, LidarPoint, PREBUILT_FATBIN,
+    CollisionSector, ComputeInputError, LidarPoint, SpatialScan, PREBUILT_FATBIN,
 };
 
 #[derive(Debug)]
@@ -52,6 +52,7 @@ pub(crate) struct CudaBackend {
     stream: Arc<CudaStream>,
     project_occupancy: CudaFunction,
     lidar_transform: CudaFunction,
+    spatial_window_transform: CudaFunction,
     collision_sector_reduce: CudaFunction,
     normalize_rgb: CudaFunction,
     predictive_step: CudaFunction,
@@ -62,6 +63,16 @@ pub(crate) struct CudaBackend {
     lidar_x: CudaSlice<f32>,
     lidar_y: CudaSlice<f32>,
     lidar_valid: CudaSlice<u8>,
+    spatial_scan_indices: CudaSlice<u32>,
+    spatial_local_indices: CudaSlice<u32>,
+    spatial_angle_min: CudaSlice<f32>,
+    spatial_angle_increment: CudaSlice<f32>,
+    spatial_range_min: CudaSlice<f32>,
+    spatial_range_max: CudaSlice<f32>,
+    spatial_clockwise: CudaSlice<i32>,
+    spatial_pose_x: CudaSlice<f32>,
+    spatial_pose_y: CudaSlice<f32>,
+    spatial_pose_yaw: CudaSlice<f32>,
     collision_minimum_bits: CudaSlice<u32>,
     collision_sample_count: CudaSlice<u32>,
     rgb_input: CudaSlice<u8>,
@@ -94,6 +105,9 @@ impl CudaBackend {
         let lidar_transform = module
             .load_function("lidar_transform")
             .map_err(|error| device_error("load lidar_transform", error))?;
+        let spatial_window_transform = module
+            .load_function("spatial_window_transform")
+            .map_err(|error| device_error("load spatial_window_transform", error))?;
         let collision_sector_reduce = module
             .load_function("collision_sector_reduce")
             .map_err(|error| device_error("load collision_sector_reduce", error))?;
@@ -114,6 +128,16 @@ impl CudaBackend {
             lidar_x: allocate_one(&stream, "lidar x")?,
             lidar_y: allocate_one(&stream, "lidar y")?,
             lidar_valid: allocate_one(&stream, "lidar validity")?,
+            spatial_scan_indices: allocate_one(&stream, "spatial scan indices")?,
+            spatial_local_indices: allocate_one(&stream, "spatial local indices")?,
+            spatial_angle_min: allocate_one(&stream, "spatial angle minimums")?,
+            spatial_angle_increment: allocate_one(&stream, "spatial angle increments")?,
+            spatial_range_min: allocate_one(&stream, "spatial range minimums")?,
+            spatial_range_max: allocate_one(&stream, "spatial range maximums")?,
+            spatial_clockwise: allocate_one(&stream, "spatial scan directions")?,
+            spatial_pose_x: allocate_one(&stream, "spatial pose x")?,
+            spatial_pose_y: allocate_one(&stream, "spatial pose y")?,
+            spatial_pose_yaw: allocate_one(&stream, "spatial pose yaw")?,
             collision_minimum_bits: allocate_one(&stream, "collision minimum")?,
             collision_sample_count: allocate_one(&stream, "collision sample count")?,
             rgb_input: allocate_one(&stream, "RGB input")?,
@@ -130,6 +154,7 @@ impl CudaBackend {
             stream,
             project_occupancy,
             lidar_transform,
+            spatial_window_transform,
             collision_sector_reduce,
             normalize_rgb,
             predictive_step,
@@ -339,6 +364,191 @@ impl CudaBackend {
             min_range_m: (sample_count != 0).then(|| f32::from_bits(minimum_bits)),
             sample_count,
         })
+    }
+
+    fn spatial_window(&mut self, scans: &[SpatialScan]) -> Result<Vec<LidarPoint>, WorkError> {
+        let point_count = scans.iter().try_fold(0_usize, |total, scan| {
+            total
+                .checked_add(scan.ranges_m.len())
+                .ok_or(ComputeInputError::LengthOverflow)
+        })?;
+        let count = u32::try_from(point_count)
+            .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
+        if point_count == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut ranges = Vec::with_capacity(point_count);
+        let mut scan_indices = Vec::with_capacity(point_count);
+        let mut local_indices = Vec::with_capacity(point_count);
+        let mut angle_min = Vec::with_capacity(scans.len());
+        let mut angle_increment = Vec::with_capacity(scans.len());
+        let mut range_min = Vec::with_capacity(scans.len());
+        let mut range_max = Vec::with_capacity(scans.len());
+        let mut clockwise = Vec::with_capacity(scans.len());
+        let mut pose_x = Vec::with_capacity(scans.len());
+        let mut pose_y = Vec::with_capacity(scans.len());
+        let mut pose_yaw = Vec::with_capacity(scans.len());
+        for (scan_index, scan) in scans.iter().enumerate() {
+            if !scan.range_min_m.is_finite()
+                || !scan.range_max_m.is_finite()
+                || scan.range_min_m < 0.0
+                || scan.range_max_m < scan.range_min_m
+            {
+                return Err(ComputeInputError::InvalidRangeBounds.into());
+            }
+            if !scan.angle_min_rad.is_finite()
+                || !scan.angle_increment_rad.is_finite()
+                || !scan.pose_x_m.is_finite()
+                || !scan.pose_y_m.is_finite()
+                || !scan.pose_yaw_rad.is_finite()
+            {
+                return Err(ComputeInputError::InvalidAngles.into());
+            }
+            let scan_index = u32::try_from(scan_index)
+                .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?;
+            for (local_index, range) in scan.ranges_m.iter().copied().enumerate() {
+                ranges.push(range);
+                scan_indices.push(scan_index);
+                local_indices.push(
+                    u32::try_from(local_index)
+                        .map_err(|_| WorkError::InvalidInput(ComputeInputError::LengthOverflow))?,
+                );
+            }
+            angle_min.push(scan.angle_min_rad);
+            angle_increment.push(scan.angle_increment_rad);
+            range_min.push(scan.range_min_m);
+            range_max.push(scan.range_max_m);
+            clockwise.push(i32::from(scan.clockwise));
+            pose_x.push(scan.pose_x_m);
+            pose_y.push(scan.pose_y_m);
+            pose_yaw.push(scan.pose_yaw_rad);
+        }
+
+        ensure_capacity(&self.stream, &mut self.lidar_ranges, point_count)?;
+        ensure_capacity(&self.stream, &mut self.lidar_x, point_count)?;
+        ensure_capacity(&self.stream, &mut self.lidar_y, point_count)?;
+        ensure_capacity(&self.stream, &mut self.lidar_valid, point_count)?;
+        ensure_capacity(&self.stream, &mut self.spatial_scan_indices, point_count)?;
+        ensure_capacity(&self.stream, &mut self.spatial_local_indices, point_count)?;
+        ensure_capacity(&self.stream, &mut self.spatial_angle_min, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_angle_increment, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_range_min, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_range_max, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_clockwise, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_pose_x, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_pose_y, scans.len())?;
+        ensure_capacity(&self.stream, &mut self.spatial_pose_yaw, scans.len())?;
+
+        macro_rules! upload {
+            ($source:expr, $target:expr, $name:literal) => {
+                self.stream
+                    .memcpy_htod($source, $target)
+                    .map_err(|error| backend_error($name, error))?
+            };
+        }
+        upload!(&ranges, &mut self.lidar_ranges, "upload spatial ranges");
+        upload!(
+            &scan_indices,
+            &mut self.spatial_scan_indices,
+            "upload spatial scan indices"
+        );
+        upload!(
+            &local_indices,
+            &mut self.spatial_local_indices,
+            "upload spatial local indices"
+        );
+        upload!(
+            &angle_min,
+            &mut self.spatial_angle_min,
+            "upload spatial angle minimums"
+        );
+        upload!(
+            &angle_increment,
+            &mut self.spatial_angle_increment,
+            "upload spatial angle increments"
+        );
+        upload!(
+            &range_min,
+            &mut self.spatial_range_min,
+            "upload spatial range minimums"
+        );
+        upload!(
+            &range_max,
+            &mut self.spatial_range_max,
+            "upload spatial range maximums"
+        );
+        upload!(
+            &clockwise,
+            &mut self.spatial_clockwise,
+            "upload spatial scan directions"
+        );
+        upload!(&pose_x, &mut self.spatial_pose_x, "upload spatial pose x");
+        upload!(&pose_y, &mut self.spatial_pose_y, "upload spatial pose y");
+        upload!(
+            &pose_yaw,
+            &mut self.spatial_pose_yaw,
+            "upload spatial pose yaw"
+        );
+
+        {
+            let ranges = self.lidar_ranges.slice(..point_count);
+            let scan_indices = self.spatial_scan_indices.slice(..point_count);
+            let local_indices = self.spatial_local_indices.slice(..point_count);
+            let angle_min = self.spatial_angle_min.slice(..scans.len());
+            let angle_increment = self.spatial_angle_increment.slice(..scans.len());
+            let range_min = self.spatial_range_min.slice(..scans.len());
+            let range_max = self.spatial_range_max.slice(..scans.len());
+            let clockwise = self.spatial_clockwise.slice(..scans.len());
+            let pose_x = self.spatial_pose_x.slice(..scans.len());
+            let pose_y = self.spatial_pose_y.slice(..scans.len());
+            let pose_yaw = self.spatial_pose_yaw.slice(..scans.len());
+            let mut x = self.lidar_x.slice_mut(..point_count);
+            let mut y = self.lidar_y.slice_mut(..point_count);
+            let mut valid = self.lidar_valid.slice_mut(..point_count);
+            unsafe {
+                self.stream
+                    .launch_builder(&self.spatial_window_transform)
+                    .arg(&ranges)
+                    .arg(&scan_indices)
+                    .arg(&local_indices)
+                    .arg(&angle_min)
+                    .arg(&angle_increment)
+                    .arg(&range_min)
+                    .arg(&range_max)
+                    .arg(&clockwise)
+                    .arg(&pose_x)
+                    .arg(&pose_y)
+                    .arg(&pose_yaw)
+                    .arg(&mut x)
+                    .arg(&mut y)
+                    .arg(&mut valid)
+                    .arg(&count)
+                    .launch(LaunchConfig::for_num_elems(count))
+            }
+            .map_err(|error| backend_error("launch spatial_window_transform", error))?;
+        }
+        let x = self
+            .stream
+            .clone_dtoh(&self.lidar_x.slice(..point_count))
+            .map_err(|error| backend_error("download spatial x", error))?;
+        let y = self
+            .stream
+            .clone_dtoh(&self.lidar_y.slice(..point_count))
+            .map_err(|error| backend_error("download spatial y", error))?;
+        let valid = self
+            .stream
+            .clone_dtoh(&self.lidar_valid.slice(..point_count))
+            .map_err(|error| backend_error("download spatial validity", error))?;
+        Ok(x.into_iter()
+            .zip(y)
+            .zip(valid)
+            .map(|((x_m, y_m), valid)| LidarPoint {
+                x_m,
+                y_m,
+                valid: valid != 0,
+            })
+            .collect())
     }
 
     fn normalize_rgb(
@@ -765,6 +975,9 @@ impl Backend for CudaBackend {
                 )?;
                 Ok(ComputeResult::Spatial { lidar, collision })
             }
+            ComputeJob::SpatialWindowTransform { scans } => self
+                .spatial_window(&scans)
+                .map(ComputeResult::SpatialWindow),
             ComputeJob::NormalizeRgbU8 {
                 input,
                 mean,

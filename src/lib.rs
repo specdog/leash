@@ -11,6 +11,7 @@ pub mod agent_runtime;
 pub mod calibration;
 pub mod capability;
 pub mod cognition;
+pub mod compute;
 pub mod config;
 #[cfg(feature = "cuda")]
 mod cuda_voxel;
