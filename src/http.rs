@@ -1528,7 +1528,8 @@ async fn camera_stream() -> Result<Response, HttpError> {
             (receiver, true),
             |(mut receiver, emit_current)| async move {
                 if emit_current {
-                    if let Some(frame) = receiver.borrow_and_update().clone() {
+                    let frame = receiver.borrow_and_update().clone();
+                    if let Some(frame) = frame {
                         return Some((
                             Ok::<Bytes, Infallible>(frame.multipart()),
                             (receiver, false),
@@ -1539,7 +1540,8 @@ async fn camera_stream() -> Result<Response, HttpError> {
                     match time::timeout(Duration::from_millis(100), receiver.changed()).await {
                         Err(_) => continue,
                         Ok(Ok(())) => {
-                            if let Some(frame) = receiver.borrow_and_update().clone() {
+                            let frame = receiver.borrow_and_update().clone();
+                            if let Some(frame) = frame {
                                 return Some((
                                     Ok::<Bytes, Infallible>(frame.multipart()),
                                     (receiver, false),
