@@ -1,9 +1,12 @@
 # Camera Capture And Streaming
 
 Leash gives snapshots, MJPEG, native V4L2 capture, and WebRTC one camera
-ownership boundary. Only one capture or stream may own the device at a time.
-Concurrent callers receive `camera is busy` instead of opening a second encoder
-or racing the active stream.
+ownership boundary. With native V4L2 enabled, one persistent capture hub owns
+the device and publishes only the latest JPEG through a non-blocking fan-out.
+Snapshots, the operator stream, and visual-odometry consumers can subscribe at
+the same time without opening the camera again or retaining a frame queue.
+FFmpeg and WebRTC retain their single-owner guard where a shared native capture
+is not available.
 
 ## Build
 
@@ -32,6 +35,11 @@ Add camera values to `~/.config/leash/leash.env`, then restart `leash.service`.
 Start conservatively on a Jetson or USB camera, for example `1280x720` at `10`
 FPS. Confirm supported modes with `v4l2-ctl --list-formats-ext -d /dev/video0`;
 unsupported size/FPS combinations may be rounded or rejected by the driver.
+
+Every native MJPEG part carries `X-Leash-Sequence`,
+`X-Leash-Captured-At-Ms`, and `X-Leash-Monotonic-Ns`. Consumers must preserve
+those values instead of inventing processing-time timestamps. A slow subscriber
+skips intermediate frames; it cannot backpressure capture or grow memory.
 
 ## WebRTC encoder settings
 
@@ -74,12 +82,11 @@ curl -s -X POST http://127.0.0.1:8000/camera/stream/recover
 ```
 
 `GET /camera/stream/health` (also `/camera/health`) reports device availability,
-the active owner (`snapshot`, `mjpeg`, or `webrtc`), start time, recovery
+the active owner (`v4l2-hub`, `snapshot`, `mjpeg`, or `webrtc`), start time, recovery
 generation/count, and the last 16 sanitized failure reasons. `/camera/status`
 includes the same object as `stream_health`.
 
-`POST /camera/stream/recover` advances the recovery generation. An active MJPEG
-or WebRTC stream observes the new generation, stops its capture process, releases
-the single-owner guard, and can then be reconnected by the operator. Recovery is
-safe to call while idle; it does not touch motors, serial ownership, or actuation
-policy.
+`POST /camera/stream/recover` advances the recovery generation and stops the
+native hub or active FFmpeg/WebRTC owner. The next subscriber creates one clean
+capture owner. Recovery is safe to call while idle; it does not touch motors,
+serial ownership, or actuation policy.

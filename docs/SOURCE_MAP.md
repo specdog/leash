@@ -34,6 +34,9 @@ vendor calibration, ROS installation, or deployment credential.
   calibration, localization, and supervised field-proof material.
 - `implementations/waveshare-ugv/ros2/`: pinned, read-only ROS 2 Humble bridge,
   EKF/SLAM configuration, map lifecycle, and implementation-owned soak proof.
+- `implementations/waveshare-ugv/cuvslam-mono/`: pinned Jetson cuVSLAM worker
+  consuming Leash camera fan-out and returning advisory, unanchored visual
+  odometry without camera or motor ownership.
 - `examples/waveshare-ugv/`: minimal runnable physical-adapter example that
   links back to the canonical implementation.
 

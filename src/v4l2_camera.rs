@@ -1,13 +1,16 @@
 use std::{
     env,
-    sync::mpsc as std_mpsc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, LazyLock, Mutex,
+    },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
 use axum::body::Bytes;
-use tokio::{sync::mpsc, task, time};
+use tokio::{sync::watch, time};
 use v4l::{
     buffer::Type,
     format::FourCC,
@@ -23,6 +26,100 @@ const STREAM_READY_TIMEOUT: Duration = Duration::from_secs(4);
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(4);
 const BUFFER_COUNT: u32 = 4;
 const MJPEG_BOUNDARY: &str = "leashframe";
+const MAX_FRAME_AGE: Duration = Duration::from_secs(2);
+
+static CAMERA_HUB: LazyLock<Mutex<Option<Arc<CameraHub>>>> = LazyLock::new(|| Mutex::new(None));
+
+#[derive(Debug, Clone)]
+pub(crate) struct MjpegFrame {
+    jpeg: Bytes,
+    sequence: u64,
+    captured_at_ms: u128,
+    monotonic_ns: u128,
+}
+
+impl MjpegFrame {
+    pub(crate) fn jpeg(&self) -> Bytes {
+        self.jpeg.clone()
+    }
+
+    pub(crate) fn multipart(&self) -> Bytes {
+        multipart_jpeg_frame(
+            &self.jpeg,
+            self.sequence,
+            self.captured_at_ms,
+            self.monotonic_ns,
+        )
+    }
+
+    fn fresh(&self) -> bool {
+        now_ms().saturating_sub(self.captured_at_ms) <= MAX_FRAME_AGE.as_millis()
+    }
+}
+
+#[derive(Debug)]
+struct CameraHub {
+    device: String,
+    frames: watch::Sender<Option<MjpegFrame>>,
+    stop: AtomicBool,
+    alive: AtomicBool,
+    sequence: AtomicU64,
+}
+
+impl CameraHub {
+    fn start(device: String) -> Result<Arc<Self>> {
+        let (frames, _) = watch::channel(None);
+        let hub = Arc::new(Self {
+            device,
+            frames,
+            stop: AtomicBool::new(false),
+            alive: AtomicBool::new(true),
+            sequence: AtomicU64::new(0),
+        });
+        let worker = Arc::clone(&hub);
+        thread::Builder::new()
+            .name("leash-v4l2-hub".to_string())
+            .spawn(move || {
+                if let Err(error) = worker.capture() {
+                    tracing::warn!(error = %error, "V4L2 camera hub stopped");
+                }
+                worker.alive.store(false, Ordering::Release);
+            })
+            .context("spawn V4L2 camera hub")?;
+        Ok(hub)
+    }
+
+    fn capture(&self) -> Result<()> {
+        let dev = configured_device(&self.device)?;
+        let mut stream = MmapStream::with_buffers(&dev, Type::VideoCapture, BUFFER_COUNT)
+            .context("create V4L2 mmap capture stream")?;
+        let started = Instant::now();
+        while !self.stop.load(Ordering::Acquire) {
+            let (frame, _) = stream.next().context("capture V4L2 MJPEG frame")?;
+            let jpeg =
+                jpeg_frame(frame).ok_or_else(|| anyhow!("V4L2 capture returned non-JPEG frame"))?;
+            let sequence = self
+                .sequence
+                .fetch_add(1, Ordering::AcqRel)
+                .saturating_add(1);
+            self.frames.send_replace(Some(MjpegFrame {
+                jpeg: Bytes::copy_from_slice(jpeg),
+                sequence,
+                captured_at_ms: now_ms(),
+                monotonic_ns: started.elapsed().as_nanos(),
+            }));
+        }
+        Ok(())
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<MjpegFrame>> {
+        self.frames.subscribe()
+    }
+
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
+}
 
 pub(crate) fn enabled() -> bool {
     let backend = env_value("LEASH_CAMERA_BACKEND").unwrap_or_else(|| "auto".to_string());
@@ -39,105 +136,70 @@ pub(crate) fn enabled() -> bool {
 }
 
 pub(crate) async fn capture_mjpeg_frame(device: String) -> Result<Bytes> {
-    let handle = task::spawn_blocking(move || {
-        let dev = configured_device(&device)?;
-        let mut stream = MmapStream::with_buffers(&dev, Type::VideoCapture, BUFFER_COUNT)
-            .context("create V4L2 mmap capture stream")?;
-        let (frame, _) = stream.next().context("capture V4L2 MJPEG frame")?;
-        let jpeg =
-            jpeg_frame(frame).ok_or_else(|| anyhow!("V4L2 capture returned non-JPEG frame"))?;
-        Ok::<_, anyhow::Error>(Bytes::copy_from_slice(jpeg))
-    });
-
-    time::timeout(SNAPSHOT_TIMEOUT, handle)
-        .await
-        .map_err(|_| anyhow!("V4L2 camera snapshot timed out"))?
-        .context("join V4L2 snapshot worker")?
+    let mut receiver = camera_hub(device)?.subscribe();
+    let frame = wait_for_frame(&mut receiver, SNAPSHOT_TIMEOUT).await?;
+    Ok(frame.jpeg())
 }
 
-pub(crate) async fn start_mjpeg_stream(device: String) -> Result<mpsc::Receiver<Bytes>> {
-    let (sender, receiver) = mpsc::channel(8);
-    let (ready_sender, ready_receiver) = std_mpsc::sync_channel(1);
-
-    thread::Builder::new()
-        .name("leash-v4l2-mjpeg".to_string())
-        .spawn(move || {
-            if let Err(error) = run_mjpeg_stream(device, sender, ready_sender) {
-                tracing::warn!(error = %error, "V4L2 MJPEG stream stopped");
-            }
-        })
-        .context("spawn V4L2 MJPEG stream worker")?;
-
-    let ready = time::timeout(
-        STREAM_READY_TIMEOUT,
-        task::spawn_blocking(move || ready_receiver.recv()),
-    )
-    .await
-    .map_err(|_| anyhow!("V4L2 camera stream produced no frame"))?
-    .context("join V4L2 stream readiness worker")?
-    .map_err(|_| anyhow!("V4L2 stream worker exited before first frame"))?;
-
-    ready.map_err(|message| anyhow!(message))?;
+pub(crate) async fn start_mjpeg_stream(
+    device: String,
+) -> Result<watch::Receiver<Option<MjpegFrame>>> {
+    let mut receiver = camera_hub(device)?.subscribe();
+    let _ = wait_for_frame(&mut receiver, STREAM_READY_TIMEOUT).await?;
     Ok(receiver)
 }
 
-fn run_mjpeg_stream(
-    device: String,
-    sender: mpsc::Sender<Bytes>,
-    ready_sender: std_mpsc::SyncSender<Result<(), String>>,
-) -> Result<()> {
-    let dev = match configured_device(&device) {
-        Ok(dev) => dev,
-        Err(error) => {
-            let _ = ready_sender.send(Err(error.to_string()));
-            return Err(error);
-        }
-    };
-    let mut stream = match MmapStream::with_buffers(&dev, Type::VideoCapture, BUFFER_COUNT) {
-        Ok(stream) => stream,
-        Err(error) => {
-            let message = format!("create V4L2 mmap capture stream: {error}");
-            let _ = ready_sender.send(Err(message.clone()));
-            return Err(anyhow!(message));
-        }
-    };
-
-    let mut announced_ready = false;
-    let requested_fps = camera_framerate().unwrap_or(DEFAULT_FRAMERATE).max(1);
-    let publish_interval = Duration::from_secs_f64(1.0 / f64::from(requested_fps));
-    let mut last_published = None::<Instant>;
-    loop {
-        let (frame, _) = match stream.next() {
-            Ok(frame) => frame,
-            Err(error) => {
-                if !announced_ready {
-                    let _ = ready_sender.send(Err(format!("capture V4L2 MJPEG frame: {error}")));
-                }
-                return Err(anyhow!("capture V4L2 MJPEG frame: {error}"));
-            }
-        };
-        let Some(jpeg) = jpeg_frame(frame) else {
-            if !announced_ready {
-                let _ = ready_sender.send(Err("V4L2 capture returned non-JPEG frame".to_string()));
-            }
-            return Err(anyhow!("V4L2 capture returned non-JPEG frame"));
-        };
-
-        let captured_at = Instant::now();
-        if last_published.is_some_and(|instant| instant.elapsed() < publish_interval) {
-            continue;
-        }
-
-        let chunk = multipart_jpeg_frame(jpeg);
-        if sender.blocking_send(chunk).is_err() {
-            return Ok(());
-        }
-        last_published = Some(captured_at);
-        if !announced_ready {
-            announced_ready = true;
-            let _ = ready_sender.send(Ok(()));
-        }
+pub(crate) fn recover() {
+    if let Some(hub) = CAMERA_HUB.lock().expect("camera hub lock").take() {
+        hub.stop();
     }
+}
+
+pub(crate) fn hub_active() -> bool {
+    CAMERA_HUB
+        .lock()
+        .expect("camera hub lock")
+        .as_ref()
+        .is_some_and(|hub| hub.alive.load(Ordering::Acquire))
+}
+
+fn camera_hub(device: String) -> Result<Arc<CameraHub>> {
+    let mut current = CAMERA_HUB.lock().expect("camera hub lock");
+    if let Some(hub) = current.as_ref() {
+        if hub.device == device && hub.alive.load(Ordering::Acquire) {
+            return Ok(Arc::clone(hub));
+        }
+        hub.stop();
+    }
+    let hub = CameraHub::start(device)?;
+    *current = Some(Arc::clone(&hub));
+    Ok(hub)
+}
+
+async fn wait_for_frame(
+    receiver: &mut watch::Receiver<Option<MjpegFrame>>,
+    timeout: Duration,
+) -> Result<MjpegFrame> {
+    if let Some(frame) = receiver.borrow().clone().filter(MjpegFrame::fresh) {
+        return Ok(frame);
+    }
+    time::timeout(timeout, async {
+        loop {
+            receiver
+                .changed()
+                .await
+                .map_err(|_| anyhow!("V4L2 camera hub stopped before producing a frame"))?;
+            if let Some(frame) = receiver
+                .borrow_and_update()
+                .clone()
+                .filter(MjpegFrame::fresh)
+            {
+                return Ok(frame);
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("V4L2 camera hub produced no fresh frame"))?
 }
 
 fn configured_device(device: &str) -> Result<Device> {
@@ -197,10 +259,22 @@ fn jpeg_frame(frame: &[u8]) -> Option<&[u8]> {
     Some(&jpeg[..end])
 }
 
-fn multipart_jpeg_frame(frame: &[u8]) -> Bytes {
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn multipart_jpeg_frame(
+    frame: &[u8],
+    sequence: u64,
+    captured_at_ms: u128,
+    monotonic_ns: u128,
+) -> Bytes {
     let header = format!(
-        "--{MJPEG_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
-        frame.len()
+        "--{MJPEG_BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nX-Leash-Sequence: {sequence}\r\nX-Leash-Captured-At-Ms: {captured_at_ms}\r\nX-Leash-Monotonic-Ns: {monotonic_ns}\r\n\r\n",
+        frame.len(),
     );
     let mut chunk = Vec::with_capacity(header.len() + frame.len() + 2);
     chunk.extend_from_slice(header.as_bytes());

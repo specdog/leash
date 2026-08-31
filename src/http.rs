@@ -63,7 +63,10 @@ use crate::{
     },
     runtime::Harness,
     transport::StreamRecvError,
-    types::{PlannerStatus, SpeedMode, VerifiedZeroEvidence, ZeroCommandReason},
+    types::{
+        PlannerStatus, SpeedMode, VerifiedZeroEvidence, VisualOdometryState, VisualOdometryStatus,
+        VisualOdometryUpdate, ZeroCommandReason, VISUAL_ODOMETRY_UPDATE_VERSION,
+    },
     LocalizationProviderUpdate,
 };
 
@@ -73,10 +76,133 @@ static CAMERA_RUNTIME_STATE: LazyLock<ParkingMutex<CameraRuntimeState>> =
     LazyLock::new(|| ParkingMutex::new(CameraRuntimeState::default()));
 static NAVIGATION_HTTP_STATE: LazyLock<ParkingMutex<NavigationHttpState>> =
     LazyLock::new(|| ParkingMutex::new(NavigationHttpState::default()));
+static VISUAL_ODOMETRY_HTTP_STATE: LazyLock<ParkingMutex<VisualOdometryHttpState>> =
+    LazyLock::new(|| ParkingMutex::new(VisualOdometryHttpState::default()));
 
 const CAMERA_FAILURE_HISTORY_LIMIT: usize = 16;
 const NAVIGATION_MAX_GOALS: usize = 256;
 const INGRESS_TOKEN_FILE_MAX_BYTES: u64 = 16 * 1_024;
+const VISUAL_ODOMETRY_STALE_MS: u128 = 1_500;
+const VISUAL_ODOMETRY_MAX_CLOCK_SKEW_MS: u128 = 5_000;
+const VISUAL_ODOMETRY_MAX_TEXT_BYTES: usize = 256;
+const VISUAL_ODOMETRY_MAX_OBSERVATIONS: u32 = 100_000;
+
+#[derive(Debug, Default)]
+struct VisualOdometryHttpState {
+    latest: Option<VisualOdometryUpdate>,
+    received_at_ms: Option<u128>,
+    rejected_updates: u64,
+}
+
+impl VisualOdometryHttpState {
+    fn apply(&mut self, update: VisualOdometryUpdate, now_ms: u128) -> Result<(), String> {
+        if update.schema_version != VISUAL_ODOMETRY_UPDATE_VERSION {
+            return self.reject("unsupported visual odometry schema");
+        }
+        for (field, value) in [
+            ("provider", update.provider.as_str()),
+            ("provider_epoch", update.provider_epoch.as_str()),
+            ("calibration_id", update.calibration_id.as_str()),
+            ("gpu_backend", update.gpu_backend.as_str()),
+        ] {
+            if value.trim().is_empty() || value.len() > VISUAL_ODOMETRY_MAX_TEXT_BYTES {
+                return self.reject(&format!("{field} is empty or oversized"));
+            }
+        }
+        if update.scale_status != "unanchored" {
+            return self.reject("monocular visual odometry scale_status must be unanchored");
+        }
+        if update.sequence == 0 || update.monotonic_ns == 0 {
+            return self
+                .reject("visual odometry sequence and monotonic timestamp must be positive");
+        }
+        if update.captured_at_ms > now_ms.saturating_add(VISUAL_ODOMETRY_MAX_CLOCK_SKEW_MS)
+            || now_ms.saturating_sub(update.captured_at_ms) > VISUAL_ODOMETRY_MAX_CLOCK_SKEW_MS
+        {
+            return self.reject("visual odometry capture timestamp is stale or in the future");
+        }
+        if let Some(previous) = self.latest.as_ref() {
+            if previous.provider_epoch == update.provider_epoch
+                && (update.sequence <= previous.sequence
+                    || update.monotonic_ns <= previous.monotonic_ns)
+            {
+                return self.reject("visual odometry update is out of order");
+            }
+        }
+        if update.tracked_observations > VISUAL_ODOMETRY_MAX_OBSERVATIONS
+            || !update.input_fps.is_finite()
+            || !(0.0..=240.0).contains(&update.input_fps)
+            || !update.processing_ms.is_finite()
+            || !(0.0..=10_000.0).contains(&update.processing_ms)
+        {
+            return self.reject("visual odometry metrics are non-finite or out of bounds");
+        }
+        if matches!(update.state, VisualOdometryState::Tracking) && update.pose.is_none() {
+            return self.reject("tracking visual odometry update requires a pose");
+        }
+        if let Some(pose) = update.pose.as_ref() {
+            if pose
+                .translation_scale_units
+                .iter()
+                .any(|value| !value.is_finite())
+            {
+                return self.reject("visual odometry translation is non-finite");
+            }
+            let rotation = pose.rotation_xyzw;
+            let norm_squared = rotation.x * rotation.x
+                + rotation.y * rotation.y
+                + rotation.z * rotation.z
+                + rotation.w * rotation.w;
+            if !norm_squared.is_finite() || !(0.81..=1.21).contains(&norm_squared) {
+                return self.reject("visual odometry rotation is not a normalized quaternion");
+            }
+        }
+        self.latest = Some(update);
+        self.received_at_ms = Some(now_ms);
+        Ok(())
+    }
+
+    fn reject<T>(&mut self, message: &str) -> Result<T, String> {
+        self.rejected_updates = self.rejected_updates.saturating_add(1);
+        Err(message.to_string())
+    }
+
+    fn snapshot(&self, now_ms: u128) -> VisualOdometryStatus {
+        let age_ms = self
+            .received_at_ms
+            .map(|received_at_ms| now_ms.saturating_sub(received_at_ms));
+        let stale = age_ms.is_some_and(|age_ms| age_ms > VISUAL_ODOMETRY_STALE_MS);
+        let state = if stale {
+            VisualOdometryState::Stale
+        } else {
+            self.latest
+                .as_ref()
+                .map(|update| update.state)
+                .unwrap_or_default()
+        };
+        let ok = state == VisualOdometryState::Tracking;
+        VisualOdometryStatus {
+            schema_version: VISUAL_ODOMETRY_UPDATE_VERSION.to_string(),
+            ok,
+            state,
+            received_at_ms: self.received_at_ms,
+            age_ms,
+            latest: self.latest.clone(),
+            rejected_updates: self.rejected_updates,
+            message: match state {
+                VisualOdometryState::Tracking => {
+                    "monocular CUDA tracking is live; translation scale remains unanchored"
+                }
+                VisualOdometryState::Stale => {
+                    "visual odometry updates are stale; LiDAR and odometry remain authoritative"
+                }
+                VisualOdometryState::Unavailable => "visual odometry has not reported yet",
+                _ => "visual odometry is advisory and currently degraded",
+            }
+            .to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct NavigationHttpState {
@@ -385,6 +511,10 @@ pub fn router(harness: Harness) -> Router {
         .route("/events/cognition", get(sse_cognition))
         .route("/localization", get(localization_status))
         .route("/localization/update", post(localization_update))
+        .route(
+            "/visual-odometry",
+            get(visual_odometry_status).post(visual_odometry_update),
+        )
         .route("/mapping/status", get(mapping_status))
         .route("/mapping/lifecycle", post(mapping_lifecycle))
         .route("/events/telemetry", get(sse_telemetry))
@@ -1013,6 +1143,49 @@ async fn localization_update(
         .into_response()
 }
 
+async fn visual_odometry_status() -> Json<VisualOdometryStatus> {
+    Json(VISUAL_ODOMETRY_HTTP_STATE.lock().snapshot(camera_now_ms()))
+}
+
+async fn visual_odometry_update(
+    headers: HeaderMap,
+    Json(update): Json<VisualOdometryUpdate>,
+) -> Response {
+    let expected = match visual_odometry_ingress_token() {
+        Ok(token) => token,
+        Err(error) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"ok": false, "error": error.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    if !bearer_authorized(&headers, &expected) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"ok": false, "error": "visual odometry ingress authorization failed"})),
+        )
+            .into_response();
+    }
+    let now_ms = camera_now_ms();
+    if let Err(error) = VISUAL_ODOMETRY_HTTP_STATE.lock().apply(update, now_ms) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": error})),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ok": true,
+            "visual_odometry": VISUAL_ODOMETRY_HTTP_STATE.lock().snapshot(now_ms)
+        })),
+    )
+        .into_response()
+}
+
 fn localization_ingress_token() -> Result<String> {
     let path = env::var("LEASH_LOCALIZATION_INGRESS_TOKEN_FILE").map_err(|_| {
         anyhow::anyhow!(
@@ -1020,6 +1193,17 @@ fn localization_ingress_token() -> Result<String> {
         )
     })?;
     read_ingress_token(&path, "localization")
+}
+
+fn visual_odometry_ingress_token() -> Result<String> {
+    let path = env::var("LEASH_VISUAL_ODOMETRY_INGRESS_TOKEN_FILE")
+        .or_else(|_| env::var("LEASH_LOCALIZATION_INGRESS_TOKEN_FILE"))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "visual odometry ingress is disabled; set LEASH_VISUAL_ODOMETRY_INGRESS_TOKEN_FILE"
+            )
+        })?;
+    read_ingress_token(&path, "visual odometry")
 }
 
 fn read_ingress_token(path: &str, name: &str) -> Result<String> {
@@ -1121,11 +1305,23 @@ async fn camera_stream_health() -> Json<crate::types::CameraStreamHealth> {
 }
 
 async fn camera_stream_recover() -> Json<crate::types::CameraRecoveryResponse> {
+    #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+    crate::v4l2_camera::recover();
     Json(CAMERA_RUNTIME_STATE.lock().recover())
 }
 
 fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
-    CAMERA_RUNTIME_STATE.lock().health(camera_device_path())
+    #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+    let mut health = CAMERA_RUNTIME_STATE.lock().health(camera_device_path());
+    #[cfg(not(all(feature = "v4l2-camera", target_os = "linux")))]
+    let health = CAMERA_RUNTIME_STATE.lock().health(camera_device_path());
+    #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
+    if crate::v4l2_camera::hub_active() {
+        health.ok = health.device_available;
+        health.status = "active".to_string();
+        health.active_owner = Some("v4l2-hub".to_string());
+    }
+    health
 }
 
 async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
@@ -1236,14 +1432,13 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         camera_record_failure("snapshot", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("snapshot")?;
 
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
         let frame = crate::v4l2_camera::capture_mjpeg_frame(device)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("capture-failed");
+                camera_record_failure("snapshot", "capture-failed");
             })?;
         let mut response = frame.into_response();
         response
@@ -1252,6 +1447,7 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("snapshot")?;
     let plan = FfmpegV4l2CameraAdapter.capture_plan(&device, &camera_input_config());
     let mut child = TokioCommand::new(&plan.program)
         .args(&plan.args)
@@ -1320,32 +1516,38 @@ async fn camera_stream() -> Result<Response, HttpError> {
         camera_record_failure("mjpeg", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("mjpeg")?;
 
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
         let receiver = crate::v4l2_camera::start_mjpeg_stream(device)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("stream-start-failed");
+                camera_record_failure("mjpeg", "stream-start-failed");
             })?;
         let stream = stream::unfold(
-            (receiver, camera_guard),
-            |(mut receiver, camera_guard)| async move {
-                loop {
-                    if camera_guard.recovery_requested() {
-                        return None;
+            (receiver, true),
+            |(mut receiver, emit_current)| async move {
+                if emit_current {
+                    if let Some(frame) = receiver.borrow_and_update().clone() {
+                        return Some((
+                            Ok::<Bytes, Infallible>(frame.multipart()),
+                            (receiver, false),
+                        ));
                     }
-                    match time::timeout(Duration::from_millis(100), receiver.recv()).await {
+                }
+                loop {
+                    match time::timeout(Duration::from_millis(100), receiver.changed()).await {
                         Err(_) => continue,
-                        Ok(Some(chunk)) => {
-                            return Some((
-                                Ok::<Bytes, Infallible>(chunk),
-                                (receiver, camera_guard),
-                            ));
+                        Ok(Ok(())) => {
+                            if let Some(frame) = receiver.borrow_and_update().clone() {
+                                return Some((
+                                    Ok::<Bytes, Infallible>(frame.multipart()),
+                                    (receiver, false),
+                                ));
+                            }
                         }
-                        Ok(None) => {
-                            camera_guard.record_failure("stream-ended");
+                        Ok(Err(_)) => {
+                            camera_record_failure("mjpeg", "stream-ended");
                             return None;
                         }
                     }
@@ -1364,6 +1566,7 @@ async fn camera_stream() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("mjpeg")?;
     let plan =
         FfmpegV4l2CameraAdapter.stream_plan(&device, &camera_input_config(), camera_stream_codec());
     let mut command = TokioCommand::new(&plan.program);
@@ -3581,6 +3784,7 @@ mod tests {
     };
     use serde_json::json;
 
+    use super::VisualOdometryHttpState;
     use super::{
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
         compute_authorized, drive, legacy_physical_control_allowed, localization_authorized,
@@ -3590,13 +3794,15 @@ mod tests {
         read_ingress_token, validate_agent_console_capability, AgentCapabilityReq,
         CameraRuntimeState, DriveReq, NavigationStatusQuery, OperatorLeaseIssuer, PilotTokenReq,
         CAMERA_RUNTIME_STATE, INGRESS_TOKEN_FILE_MAX_BYTES, NAVIGATION_HTTP_STATE,
+        VISUAL_ODOMETRY_STALE_MS,
     };
     use crate::{
         agent_runtime::{AgentRuntime, AgentSessionStore, CapabilityPermissions},
         Harness, HarnessConfig, LocalizationProviderUpdate, MapIdentity, MappingLifecycleAction,
         MappingLifecycleRequest, NavigationGoalRequest, NavigationReadinessQuery,
         NavigationReadinessResponse, NavigationStatusResponse, NavigationTerminalReason,
-        MAPPING_LIFECYCLE_SCHEMA_VERSION, NAVIGATION_GOAL_SCHEMA_VERSION,
+        VisualOdometryState, VisualOdometryUpdate, MAPPING_LIFECYCLE_SCHEMA_VERSION,
+        NAVIGATION_GOAL_SCHEMA_VERSION, VISUAL_ODOMETRY_UPDATE_VERSION,
     };
     use tokio::sync::Mutex;
 
@@ -4240,6 +4446,57 @@ mod tests {
             HeaderValue::from_static("Bearer bridge-secret"),
         );
         assert!(localization_authorized(&headers, "bridge-secret"));
+    }
+
+    fn visual_update(sequence: u64, captured_at_ms: u128) -> VisualOdometryUpdate {
+        VisualOdometryUpdate {
+            schema_version: VISUAL_ODOMETRY_UPDATE_VERSION.to_string(),
+            provider: "cuvslam-mono-17.0.0".to_string(),
+            provider_epoch: "test-epoch".to_string(),
+            sequence,
+            captured_at_ms,
+            monotonic_ns: u128::from(sequence) * 33_333_333,
+            calibration_id: "xitech-fisheye".to_string(),
+            state: VisualOdometryState::Tracking,
+            pose: Some(crate::types::VisualOdometryPose {
+                translation_scale_units: [0.1, 0.0, 0.0],
+                rotation_xyzw: crate::types::Quaternion {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    w: 1.0,
+                },
+            }),
+            tracked_observations: 120,
+            input_fps: 30.0,
+            processing_ms: 8.0,
+            dropped_frames: 0,
+            gpu_backend: "cuda".to_string(),
+            scale_status: "unanchored".to_string(),
+        }
+    }
+
+    #[test]
+    fn visual_odometry_is_monotonic_bounded_and_explicitly_unanchored() {
+        let mut state = VisualOdometryHttpState::default();
+        let now_ms = 20_000;
+        state.apply(visual_update(1, now_ms), now_ms).unwrap();
+        let status = state.snapshot(now_ms + 100);
+        assert!(status.ok);
+        assert_eq!(status.state, VisualOdometryState::Tracking);
+        assert_eq!(status.latest.as_ref().unwrap().scale_status, "unanchored");
+
+        assert!(state
+            .apply(visual_update(1, now_ms + 1), now_ms + 1)
+            .is_err());
+        let mut metric_claim = visual_update(2, now_ms + 2);
+        metric_claim.scale_status = "metric".to_string();
+        assert!(state.apply(metric_claim, now_ms + 2).is_err());
+        assert_eq!(state.rejected_updates, 2);
+
+        let stale = state.snapshot(now_ms + VISUAL_ODOMETRY_STALE_MS + 1);
+        assert!(!stale.ok);
+        assert_eq!(stale.state, VisualOdometryState::Stale);
     }
 
     #[tokio::test]

@@ -33,6 +33,7 @@ flowchart TB
 - `SOURCE_MAP.md`: canonical Leash source map and the library/UGV implementation boundary.
 - `MCP_HTTP.md`: MCP Streamable HTTP requests, safety behavior, and legacy REST compatibility.
 - `CAMERA.md`: camera ownership, health and recovery routes, capture settings, and Jetson encoder tuning.
+- `VISUAL_ODOMETRY.md`: authenticated advisory monocular odometry, unanchored scale, and cuVSLAM sidecar boundary.
 - `NAVIGATION.md`: persistent waypoints and patrol zones, sim/replay execution, operator controls, and passive motion events.
 - `PHYSICAL_NAVIGATION.md`: compile/runtime gates, policy lease, freshness/cancellation behavior, and generic physical-navigation smoke checklist.
 - `ADAPTERS.md`: mobile-base, gimbal, and camera contracts plus the second-UGV implementation checklist.

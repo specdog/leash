@@ -510,6 +510,73 @@ pub struct LocalizationFrame {
     pub health: LocalizationHealth,
 }
 
+pub const VISUAL_ODOMETRY_UPDATE_VERSION: &str = "leash.visual-odometry.v1";
+
+fn default_visual_odometry_version() -> String {
+    VISUAL_ODOMETRY_UPDATE_VERSION.to_string()
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum VisualOdometryState {
+    Initializing,
+    Tracking,
+    Degraded,
+    Lost,
+    Stale,
+    Failed,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VisualOdometryPose {
+    /// Monocular translation in tracker scale units. These values are never meters.
+    pub translation_scale_units: [f64; 3],
+    pub rotation_xyzw: Quaternion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VisualOdometryUpdate {
+    #[serde(default = "default_visual_odometry_version")]
+    pub schema_version: String,
+    pub provider: String,
+    pub provider_epoch: String,
+    pub sequence: u64,
+    pub captured_at_ms: u128,
+    pub monotonic_ns: u128,
+    pub calibration_id: String,
+    pub state: VisualOdometryState,
+    #[serde(default)]
+    pub pose: Option<VisualOdometryPose>,
+    pub tracked_observations: u32,
+    pub input_fps: f64,
+    pub processing_ms: f64,
+    pub dropped_frames: u64,
+    pub gpu_backend: String,
+    /// Monocular v1 is intentionally always `unanchored`.
+    pub scale_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct VisualOdometryStatus {
+    pub schema_version: String,
+    pub ok: bool,
+    pub state: VisualOdometryState,
+    #[serde(default)]
+    pub received_at_ms: Option<u128>,
+    #[serde(default)]
+    pub age_ms: Option<u128>,
+    #[serde(default)]
+    pub latest: Option<VisualOdometryUpdate>,
+    pub rejected_updates: u64,
+    pub message: String,
+}
+
 impl Default for LocalizationFrame {
     fn default() -> Self {
         Self {

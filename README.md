@@ -220,6 +220,9 @@ existing local tools. See [the MCP HTTP guide](docs/MCP_HTTP.md).
 | `POST /stop` | Shared stop path |
 | `POST /estop` | Shared latching e-stop path |
 | `GET /camera/snapshot` | One bounded JPEG snapshot |
+| `GET /camera/stream.mjpg` | Shared latest-frame MJPEG fan-out |
+| `GET /visual-odometry` | Advisory monocular tracking status |
+| `POST /visual-odometry` | Authenticated bounded visual-odometry update |
 | `GET /sensors` | Typed sensor status |
 
 ### Record and replay
@@ -301,5 +304,4 @@ binaries, then creates a draft GitHub release.
 ## License
 
 MIT
-
 

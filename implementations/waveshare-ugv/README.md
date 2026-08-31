@@ -12,12 +12,28 @@ flowchart LR
   safety --> base["Waveshare mobile-base adapter"]
   leash --> camera["camera adapter"]
   leash --> sensors["lidar and IMU adapters"]
+  camera --> vision["cuVSLAM monocular advisory worker"]
+  vision --> leash
   sensors --> localization["localization/map provider"]
   localization --> leash
 
   localization -. "pose and paths only" .-> safety
   localization -. "no direct motor access" .-> base
+  vision -. "unanchored pose only" .-> safety
+  vision -. "no direct camera or motor access" .-> base
 ```
+
+## Monocular cuVSLAM advisory worker
+
+[`cuvslam-mono/`](cuvslam-mono/) is the short-path Jetson visual-odometry
+worker. It subscribes to Leash's timestamped MJPEG fan-out, runs the pinned
+NVIDIA cuVSLAM wheel on CUDA, and posts the versioned result to
+`POST /visual-odometry`. It stores no images and never opens `/dev/video*` or a
+motor device. Monocular translation remains explicitly `unanchored`; LiDAR and
+wheel odometry stay authoritative for collision checks and measured travel.
+
+Use [`cuvslam-mono/README.md`](cuvslam-mono/README.md) for the private token,
+measured calibration, build, and stationary verification steps.
 
 ## Deployment baseline and rollback
 

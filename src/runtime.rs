@@ -1937,6 +1937,8 @@ impl Harness {
                 "POST /cognition/checkpoint".to_string(),
                 "GET /localization".to_string(),
                 "POST /localization/update".to_string(),
+                "GET /visual-odometry".to_string(),
+                "POST /visual-odometry".to_string(),
                 "GET /events/telemetry".to_string(),
                 "GET /sse/telemetry".to_string(),
                 "GET /sensors".to_string(),
