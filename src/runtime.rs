@@ -2968,7 +2968,7 @@ impl Harness {
 
     pub fn estop(&self) -> Result<()> {
         self.clear_calibration_lease();
-        (|| -> Result<()> {
+        let result = {
             let mut gate = self.motion_gate.lock();
             gate.stop_epoch = gate.stop_epoch.saturating_add(1);
             gate.planner_epoch = None;
@@ -2994,7 +2994,8 @@ impl Harness {
             drop(command);
             self.clear_physical_navigation_lease();
             result
-        })()
+        };
+        result
     }
 
     fn current_sim_pose(&self, ts_ms: u128) -> Pose2d {
@@ -3190,7 +3191,6 @@ impl Harness {
         };
         if let Err(error) = stop_result {
             warn!(?error, "physical navigation terminal zero command failed");
-            return;
         }
     }
 
