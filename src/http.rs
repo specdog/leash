@@ -3399,15 +3399,21 @@ async fn drive(
     Json(req): Json<DriveReq>,
 ) -> Result<Json<Value>, HttpError> {
     require_mutating_origin(&headers)?;
-    require_legacy_physical_control(&harness, peer)?;
-    let response =
-        TransportGateway::new(harness, InvocationOrigin::Http).execute(GatewayCommand::Drive {
+    require_operator_lease_issuer(
+        &harness,
+        peer,
+        &headers,
+        req.token.as_deref().unwrap_or_default(),
+    )?;
+    let response = TransportGateway::new(harness, InvocationOrigin::OperatorHttp).execute(
+        GatewayCommand::Drive {
             token: req.token,
             left: req.left,
             right: req.right,
             speed_mode: req.speed_mode,
             approval: req.approval,
-        })?;
+        },
+    )?;
     Ok(Json(serde_json::to_value(response)?))
 }
 
@@ -4050,7 +4056,7 @@ mod tests {
 
     #[cfg(feature = "physical-navigation")]
     #[tokio::test]
-    async fn remote_bearer_issues_only_a_bounded_canonical_pilot_lease() {
+    async fn remote_bearer_gates_bounded_navigation_and_reactive_drive() {
         let _guard = OPERATOR_ENV_LOCK.lock().await;
         let _navigation_guard = NAVIGATION_TEST_LOCK.lock().await;
         {
@@ -4188,10 +4194,10 @@ mod tests {
         .await;
         assert_ne!(authenticated_goal.status(), StatusCode::UNAUTHORIZED);
 
-        let drive_error = drive(
+        let unauthenticated_drive_error = drive(
             remote,
             State(harness.clone()),
-            headers.clone(),
+            HeaderMap::new(),
             Json(DriveReq {
                 token: Some("mission-session".to_string()),
                 left: 0.1,
@@ -4204,7 +4210,26 @@ mod tests {
         .unwrap_err()
         .0
         .to_string();
-        assert!(drive_error.contains("legacy physical control"));
+        assert!(unauthenticated_drive_error.contains("operator bearer token"));
+
+        let drive_response = drive(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(DriveReq {
+                token: Some("mission-session".to_string()),
+                left: 0.1,
+                right: 0.1,
+                speed_mode: Some(crate::types::SpeedMode::Low),
+                approval: Some(true),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(drive_response["ok"], true);
+        assert!(!drive_response.to_string().contains("operator-secret"));
+        assert!(!drive_response.to_string().contains("mission-session"));
 
         let navigation_error = harness
             .set_planner_goal_authorized(

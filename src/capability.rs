@@ -51,6 +51,7 @@ pub enum InvocationOrigin {
     Runtime,
     Cli,
     Http,
+    OperatorHttp,
     Mcp,
     Agent,
 }
@@ -61,6 +62,7 @@ impl InvocationOrigin {
             Self::Runtime => "runtime",
             Self::Cli => "cli",
             Self::Http => "http",
+            Self::OperatorHttp => "operator-http",
             Self::Mcp => "mcp",
             Self::Agent => "agent",
         }
