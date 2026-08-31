@@ -1424,26 +1424,33 @@ pub(crate) fn scan_blocks_drive(
     left: f64,
     right: f64,
 ) -> bool {
-    if status.status != SensorDataStatus::Available
-        || left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON
-    {
+    if left.abs() <= f64::EPSILON && right.abs() <= f64::EPSILON {
         return false;
+    }
+    if !left.is_finite()
+        || !right.is_finite()
+        || !threshold_m.is_finite()
+        || threshold_m < 0.0
+        || status.status != SensorDataStatus::Available
+    {
+        return true;
     }
     let Some(scan) = status.sample.as_ref() else {
-        return false;
+        return true;
     };
-    let close_at_any_bearing = || {
-        scan.ranges_m
-            .iter()
-            .flatten()
-            .any(|range| *range <= threshold_m)
-    };
+    if scan.validate().is_err() {
+        return true;
+    }
     let linear = (left + right) * 0.5;
     if linear.abs() <= f64::EPSILON {
-        return close_at_any_bearing();
+        return scan
+            .ranges_m
+            .iter()
+            .flatten()
+            .any(|range| *range <= threshold_m);
     }
     if !scan.angle_min_rad.is_finite() || !scan.angle_increment_rad.is_finite() {
-        return close_at_any_bearing();
+        return true;
     }
     let travel_bearing = if linear > 0.0 {
         0.0
@@ -1451,17 +1458,25 @@ pub(crate) fn scan_blocks_drive(
         std::f64::consts::PI
     };
     let half_sector = std::f64::consts::FRAC_PI_3;
-    scan.ranges_m.iter().enumerate().any(|(index, range)| {
-        range.is_some_and(|range| {
-            range <= threshold_m
-                && wrapped_angle_delta(
-                    scan.angle_min_rad + index as f64 * scan.angle_increment_rad,
-                    travel_bearing,
-                )
-                .abs()
-                    <= half_sector
-        })
-    })
+    let mut valid_in_sector = false;
+    for (index, range) in scan.ranges_m.iter().enumerate() {
+        let in_sector = wrapped_angle_delta(
+            scan.angle_min_rad + index as f64 * scan.angle_increment_rad,
+            travel_bearing,
+        )
+        .abs()
+            <= half_sector;
+        if !in_sector {
+            continue;
+        }
+        if let Some(range) = range {
+            valid_in_sector = true;
+            if *range <= threshold_m {
+                return true;
+            }
+        }
+    }
+    !valid_in_sector
 }
 
 fn wrapped_angle_delta(left: f64, right: f64) -> f64 {
@@ -1934,7 +1949,7 @@ mod tests {
         assert!(scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
         scan = with_freshness(scan, 601, 500);
         assert_eq!(scan.status, SensorDataStatus::Stale);
-        assert!(!scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
+        assert!(scan_blocks_drive(&scan, 0.25, 0.1, 0.1));
     }
 
     #[test]
@@ -1971,6 +1986,25 @@ mod tests {
         assert!(scan_blocks_drive(&scan, 0.25, -0.1, -0.1));
         assert!(scan_blocks_drive(&scan, 0.25, -0.1, 0.1));
         assert!(!scan_blocks_drive(&scan, 0.25, 0.0, 0.0));
+
+        let mut no_measurements = scan.clone();
+        no_measurements.sample.as_mut().unwrap().ranges_m.fill(None);
+        assert!(scan_blocks_drive(&no_measurements, 0.25, 0.1, 0.1));
+
+        let mut no_forward_measurements = scan;
+        let sample = no_forward_measurements.sample.as_mut().unwrap();
+        for (index, range) in sample.ranges_m.iter_mut().enumerate() {
+            if wrapped_angle_delta(
+                sample.angle_min_rad + index as f64 * sample.angle_increment_rad,
+                0.0,
+            )
+            .abs()
+                <= std::f64::consts::FRAC_PI_3
+            {
+                *range = None;
+            }
+        }
+        assert!(scan_blocks_drive(&no_forward_measurements, 0.25, 0.1, 0.1));
     }
 
     #[test]

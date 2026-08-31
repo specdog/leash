@@ -100,6 +100,14 @@ impl LocalizationProviderUpdate {
         self.localization
             .validate()
             .map_err(|error| LocalizationProviderError::InvalidLocalization(error.to_string()))?;
+        if !self.map.origin.is_finite()
+            || !self.occupancy_grid.origin.is_finite()
+            || !self.costmap.origin.is_finite()
+            || self.path.poses.iter().any(|pose| !pose.is_finite())
+            || !self.voxel_grid.origin.is_finite()
+        {
+            return Err(LocalizationProviderError::NonFinitePose);
+        }
         if self.localization.map.map_id != self.map.map_id
             || self.localization.map.map_revision != self.map.map_revision
             || self.localization.map.frame_id != self.map.frame_id
@@ -198,6 +206,7 @@ pub enum LocalizationProviderError {
     GridSizeMismatch,
     GridMetadataMismatch,
     PathFrameMismatch,
+    NonFinitePose,
     InvalidVoxelGrid,
     ExternalQueueFull,
     ExternalQueueDisconnected,
@@ -229,6 +238,9 @@ impl std::fmt::Display for LocalizationProviderError {
             }
             Self::PathFrameMismatch => {
                 formatter.write_str("planner path frame does not match map frame")
+            }
+            Self::NonFinitePose => {
+                formatter.write_str("localization provider poses and map origins must be finite")
             }
             Self::InvalidVoxelGrid => {
                 formatter.write_str("voxel grid is malformed or does not match the active map")
@@ -779,6 +791,30 @@ mod tests {
         assert_eq!(
             disconnected.localization.health.status,
             LocalizationStatus::Lost
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_rejects_non_finite_localization_and_map_poses() {
+        let mut non_finite_localization = update(1, "map-a", 100);
+        non_finite_localization
+            .localization
+            .pose
+            .as_mut()
+            .unwrap()
+            .pose
+            .x_m = f64::NAN;
+        assert!(matches!(
+            non_finite_localization.validate().unwrap_err(),
+            LocalizationProviderError::InvalidLocalization(message)
+                if message.contains("must be finite")
+        ));
+
+        let mut non_finite_origin = update(2, "map-a", 110);
+        non_finite_origin.map.origin.y_m = f64::INFINITY;
+        assert_eq!(
+            non_finite_origin.validate().unwrap_err(),
+            LocalizationProviderError::NonFinitePose
         );
     }
 

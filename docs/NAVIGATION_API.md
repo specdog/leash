@@ -19,7 +19,22 @@ E-stop remain authoritative.
 | `POST` | `/mapping/lifecycle` | Versioned lifecycle contract; currently returns `501 Not Implemented` |
 
 The caller must first create a short pilot lease with `POST /pilot/authorize`.
-Goal submission never creates or extends that lease.
+For a remote physical client, Leash reads a deployment-owned bearer secret from
+`LEASH_OPERATOR_AUTH_TOKEN_FILE`; Qualia reads the same secret from
+`QUALIA_LEASH_OPERATOR_TOKEN_FILE` and sends it in the `Authorization` header.
+The file must be a regular, non-symlink UTF-8 file no larger than 16 KiB.
+Bearer-authenticated physical leases are limited to 1–30 seconds. The bearer
+secret authorizes lease issuance; it is distinct from the short session token
+in the JSON body and is never returned in the response. Remote physical goal
+submission must present the bearer again as well as the active session token;
+a leaked or guessed legacy session cannot cross the loopback boundary. Goal
+submission never creates or extends that lease.
+
+Legacy direct physical control is separately disabled by default. Explicitly
+setting `LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL=1` (or the matching CLI flag)
+opens it only to loopback, same-origin callers; it is not required for the
+authenticated canonical navigation lease above. STOP, E-stop, and read-only
+status remain available when legacy control is disabled.
 
 ```json
 {
@@ -89,3 +104,9 @@ safety supervisor and single motor owner. The default physical executor reports
 `executor=unsupported` and rejects goals. The existing ROS boundary does not
 yet provide an outbound Nav2 action client, so enabling physical compile and
 runtime flags alone does not claim goal readiness.
+
+Before replacing `UnsupportedNavigationExecutor`, the real executor must
+provide bounded, two-phase goal acceptance and cancellation semantics. Leash
+serializes submit/cancel with its STOP epoch, so an unbounded executor call
+would otherwise delay STOP completion. This is a hard production prerequisite,
+not supplied by the current release.

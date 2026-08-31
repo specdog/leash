@@ -115,6 +115,7 @@ pub struct HarnessConfig {
     pub allow_untokened_drive: bool,
     pub allow_physical_actuation: bool,
     pub allow_physical_navigation: bool,
+    pub allow_legacy_physical_control: bool,
     pub allow_calibration_motion: bool,
     pub deadman_ms: u64,
     pub soft_odometry_limit_m: f64,
@@ -157,6 +158,8 @@ pub struct PartialHarnessConfig {
     pub allow_physical_actuation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_physical_navigation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_legacy_physical_control: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_calibration_motion: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -263,6 +266,7 @@ struct ConfigBuilder {
     allow_untokened_drive: Resolved<bool>,
     allow_physical_actuation: Resolved<bool>,
     allow_physical_navigation: Resolved<bool>,
+    allow_legacy_physical_control: Resolved<bool>,
     allow_calibration_motion: Resolved<bool>,
     deadman_ms: Resolved<u64>,
     soft_odometry_limit_m: Resolved<f64>,
@@ -295,6 +299,7 @@ impl Default for HarnessConfig {
             allow_untokened_drive: true,
             allow_physical_actuation: false,
             allow_physical_navigation: false,
+            allow_legacy_physical_control: false,
             allow_calibration_motion: false,
             deadman_ms: 400,
             soft_odometry_limit_m: 0.0,
@@ -442,6 +447,11 @@ fn env_overrides(env: &BTreeMap<String, String>) -> anyhow::Result<PartialHarnes
         allow_untokened_drive: parse_env(env, "LEASH_ALLOW_UNTOKENED_DRIVE", parse_bool)?,
         allow_physical_actuation: parse_env(env, "LEASH_ALLOW_PHYSICAL_ACTUATION", parse_bool)?,
         allow_physical_navigation: parse_env(env, "LEASH_ALLOW_PHYSICAL_NAVIGATION", parse_bool)?,
+        allow_legacy_physical_control: parse_env(
+            env,
+            "LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL",
+            parse_bool,
+        )?,
         allow_calibration_motion: parse_env(env, "LEASH_ALLOW_CALIBRATION_MOTION", parse_bool)?,
         deadman_ms: parse_env(env, "LEASH_DEADMAN_MS", parse_u64)?,
         soft_odometry_limit_m: parse_env(env, "LEASH_SOFT_ODOMETRY_LIMIT_M", parse_f64)?,
@@ -558,6 +568,7 @@ fn env_var_for_field(field: &str) -> &'static str {
         "allow_untokened_drive" => "LEASH_ALLOW_UNTOKENED_DRIVE",
         "allow_physical_actuation" => "LEASH_ALLOW_PHYSICAL_ACTUATION",
         "allow_physical_navigation" => "LEASH_ALLOW_PHYSICAL_NAVIGATION",
+        "allow_legacy_physical_control" => "LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL",
         "allow_calibration_motion" => "LEASH_ALLOW_CALIBRATION_MOTION",
         "deadman_ms" => "LEASH_DEADMAN_MS",
         "soft_odometry_limit_m" => "LEASH_SOFT_ODOMETRY_LIMIT_M",
@@ -592,6 +603,9 @@ impl Default for ConfigBuilder {
             allow_untokened_drive: Resolved::defaulted(config.allow_untokened_drive),
             allow_physical_actuation: Resolved::defaulted(config.allow_physical_actuation),
             allow_physical_navigation: Resolved::defaulted(config.allow_physical_navigation),
+            allow_legacy_physical_control: Resolved::defaulted(
+                config.allow_legacy_physical_control,
+            ),
             allow_calibration_motion: Resolved::defaulted(config.allow_calibration_motion),
             deadman_ms: Resolved::defaulted(config.deadman_ms),
             soft_odometry_limit_m: Resolved::defaulted(config.soft_odometry_limit_m),
@@ -663,6 +677,10 @@ impl ConfigBuilder {
         if let Some(value) = partial.allow_physical_navigation {
             self.allow_physical_navigation
                 .set(value, source("allow_physical_navigation"));
+        }
+        if let Some(value) = partial.allow_legacy_physical_control {
+            self.allow_legacy_physical_control
+                .set(value, source("allow_legacy_physical_control"));
         }
         if let Some(value) = partial.allow_calibration_motion {
             self.allow_calibration_motion
@@ -758,6 +776,7 @@ impl ConfigBuilder {
             allow_untokened_drive: self.allow_untokened_drive.value,
             allow_physical_actuation: self.allow_physical_actuation.value,
             allow_physical_navigation: self.allow_physical_navigation.value,
+            allow_legacy_physical_control: self.allow_legacy_physical_control.value,
             allow_calibration_motion: self.allow_calibration_motion.value,
             deadman_ms: self.deadman_ms.value,
             soft_odometry_limit_m: self.soft_odometry_limit_m.value,
@@ -835,6 +854,12 @@ impl ConfigBuilder {
                 json!(config.allow_physical_navigation),
                 self.allow_physical_navigation.source,
                 Some("physical-navigation"),
+            ),
+            field(
+                "allow_legacy_physical_control",
+                json!(config.allow_legacy_physical_control),
+                self.allow_legacy_physical_control.source,
+                Some("legacy-physical-control"),
             ),
             field(
                 "allow_calibration_motion",
@@ -1049,6 +1074,7 @@ mod config_tests {
         assert_eq!(resolved.config.profile, Profile::WaveshareUgv);
         assert!(!resolved.config.allow_untokened_drive);
         assert!(!resolved.config.allow_physical_actuation);
+        assert!(!resolved.config.allow_legacy_physical_control);
         assert_eq!(
             source_for(&resolved, "allow_untokened_drive"),
             "stack:waveshare-ugv"
@@ -1056,6 +1082,28 @@ mod config_tests {
         assert_eq!(
             attention_for(&resolved, "allow_physical_actuation"),
             Some("physical-actuation")
+        );
+    }
+
+    #[test]
+    fn legacy_physical_control_requires_explicit_configuration() {
+        let env = BTreeMap::from([(
+            "LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL".to_string(),
+            "true".to_string(),
+        )]);
+        let resolved = resolve_config(ConfigRequest {
+            config_path: None,
+            stack: None,
+            stack_defaults: PartialHarnessConfig::default(),
+            env,
+            cli: PartialHarnessConfig::default(),
+        })
+        .unwrap();
+
+        assert!(resolved.config.allow_legacy_physical_control);
+        assert_eq!(
+            source_for(&resolved, "allow_legacy_physical_control"),
+            "env:LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL"
         );
     }
 

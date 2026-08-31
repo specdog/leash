@@ -412,6 +412,12 @@ pub struct Pose2d {
     pub yaw_rad: f64,
 }
 
+impl Pose2d {
+    pub fn is_finite(&self) -> bool {
+        self.x_m.is_finite() && self.y_m.is_finite() && self.yaw_rad.is_finite()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct Twist2d {
@@ -548,6 +554,9 @@ impl LocalizationFrame {
             if localized_pose.pose.frame_id != self.map.frame_id {
                 return Err(LocalizationContractError::PoseFrameMismatch);
             }
+            if !localized_pose.pose.is_finite() {
+                return Err(LocalizationContractError::NonFinitePose);
+            }
             if localized_pose.covariance.len() != 9 {
                 return Err(LocalizationContractError::InvalidCovarianceLength);
             }
@@ -583,6 +592,7 @@ pub enum LocalizationContractError {
     MissingError,
     EmptyMapIdentity,
     PoseFrameMismatch,
+    NonFinitePose,
     InvalidCovarianceLength,
     NonFiniteCovariance,
     NegativeCovariance,
@@ -597,6 +607,7 @@ impl std::fmt::Display for LocalizationContractError {
             Self::MissingError => "lost localization state requires an error",
             Self::EmptyMapIdentity => "localized pose requires a complete map identity",
             Self::PoseFrameMismatch => "localized pose frame does not match map frame",
+            Self::NonFinitePose => "localized pose coordinates and yaw must be finite",
             Self::InvalidCovarianceLength => "localized pose covariance must contain 9 values",
             Self::NonFiniteCovariance => "localized pose covariance must be finite",
             Self::NegativeCovariance => "localized pose covariance diagonal cannot be negative",
@@ -1156,6 +1167,9 @@ impl PlanarRangeScan {
         if self.ranges_m.is_empty() {
             return Err(SensorContractError::EmptyScan);
         }
+        if self.ranges_m.iter().all(Option::is_none) {
+            return Err(SensorContractError::NoValidMeasurements);
+        }
         if self.angle_increment_rad == 0.0 {
             return Err(SensorContractError::ZeroAngleIncrement);
         }
@@ -1362,6 +1376,7 @@ pub enum SensorContractError {
     EmptyFrameId,
     NonFinite(&'static str),
     EmptyScan,
+    NoValidMeasurements,
     ZeroAngleIncrement,
     InvalidRangeBounds,
     AngleCountMismatch,
@@ -1385,6 +1400,9 @@ impl std::fmt::Display for SensorContractError {
             Self::EmptyFrameId => write!(formatter, "sensor frame_id cannot be empty"),
             Self::NonFinite(field) => write!(formatter, "sensor field {field} must be finite"),
             Self::EmptyScan => write!(formatter, "range scan cannot be empty"),
+            Self::NoValidMeasurements => {
+                write!(formatter, "range scan must contain a valid measurement")
+            }
             Self::ZeroAngleIncrement => {
                 write!(formatter, "range scan angle increment cannot be zero")
             }
@@ -1900,6 +1918,12 @@ mod tests {
             scan.validate().unwrap_err(),
             SensorContractError::IntensityCountMismatch
         );
+        scan.intensities.push(None);
+        scan.ranges_m.fill(None);
+        assert_eq!(
+            scan.validate().unwrap_err(),
+            SensorContractError::NoValidMeasurements
+        );
     }
 
     #[test]
@@ -2006,6 +2030,12 @@ mod tests {
             LocalizationContractError::UnsupportedVersion
         );
         frame.version = LOCALIZATION_FRAME_VERSION.to_string();
+        frame.pose.as_mut().unwrap().pose.x_m = f64::NAN;
+        assert_eq!(
+            frame.validate().unwrap_err(),
+            LocalizationContractError::NonFinitePose
+        );
+        frame.pose.as_mut().unwrap().pose.x_m = 1.0;
         frame.pose.as_mut().unwrap().covariance.pop();
         assert_eq!(
             frame.validate().unwrap_err(),

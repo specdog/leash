@@ -14,10 +14,10 @@ use axum::{
     body::{Body, Bytes},
     extract::{
         ws::{Message, WebSocket},
-        Form, Path as AxumPath, Query, State, WebSocketUpgrade,
+        ConnectInfo, Form, Path as AxumPath, Query, State, WebSocketUpgrade,
     },
     http::{
-        header::{AUTHORIZATION, CONTENT_TYPE},
+        header::{AUTHORIZATION, CONTENT_TYPE, HOST, ORIGIN},
         HeaderMap, HeaderValue, StatusCode,
     },
     response::{
@@ -46,7 +46,7 @@ use crate::agent_runtime::{
 };
 use crate::capability::{InvocationOrigin, SafetyClass};
 use crate::compute::{ComputeApiError, ComputeApiErrorKind, ComputeJobRequest};
-use crate::gateway::{GatewayCommand, TransportGateway};
+use crate::gateway::{AuthorizationResponse, GatewayCommand, TransportGateway};
 use crate::runtime::{
     CAMERA_PAN_MAX_DEG, CAMERA_PAN_MIN_DEG, CAMERA_TILT_MAX_DEG, CAMERA_TILT_MIN_DEG,
 };
@@ -76,6 +76,7 @@ static NAVIGATION_HTTP_STATE: LazyLock<ParkingMutex<NavigationHttpState>> =
 
 const CAMERA_FAILURE_HISTORY_LIMIT: usize = 16;
 const NAVIGATION_MAX_GOALS: usize = 256;
+const INGRESS_TOKEN_FILE_MAX_BYTES: u64 = 16 * 1_024;
 
 #[derive(Debug, Default)]
 struct NavigationHttpState {
@@ -333,7 +334,11 @@ pub async fn serve_http(harness: Harness, listen: SocketAddr) -> Result<()> {
     let app = router(harness);
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(addr = %listener.local_addr()?, "leash http listening");
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -342,7 +347,11 @@ pub async fn serve_mcp_http(harness: Harness, listen: SocketAddr) -> Result<()> 
     let app = mcp_router(harness);
     let listener = tokio::net::TcpListener::bind(listen).await?;
     tracing::info!(addr = %listener.local_addr()?, "leash mcp http listening");
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -489,10 +498,14 @@ async fn patrol_status(State(harness): State<Harness>) -> Json<crate::types::Pat
 }
 
 async fn patrol_zone_start(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     AxumPath(zone_id): AxumPath<String>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<PatrolZoneStartReq>,
 ) -> Result<Json<crate::types::PatrolStatus>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     Ok(Json(harness.start_patrol_zone(
         &zone_id,
         req.speed_mode.unwrap_or(SpeedMode::Low),
@@ -526,18 +539,22 @@ async fn mcp_modules(State(harness): State<Harness>) -> Json<crate::mcp::McpModu
 
 #[cfg(feature = "mcp")]
 async fn mcp_call(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<McpCallReq>,
 ) -> Result<Json<crate::mcp::McpCallResponse>, HttpError> {
-    Ok(Json(crate::mcp::call_tool(
-        &harness,
-        &req.tool,
-        req.args.unwrap_or_else(|| json!({})),
-    )?))
+    let args = req.args.unwrap_or_else(|| json!({}));
+    if mcp_tool_requires_legacy_physical_control(&harness, &req.tool, &args) {
+        require_mutating_origin(&headers)?;
+        require_legacy_physical_control(&harness, peer)?;
+    }
+    Ok(Json(crate::mcp::call_tool(&harness, &req.tool, args)?))
 }
 
 #[cfg(feature = "mcp")]
 async fn mcp_protocol(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
     headers: HeaderMap,
     Json(req): Json<McpJsonRpcReq>,
@@ -620,6 +637,16 @@ async fn mcp_protocol(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            if mcp_tool_requires_legacy_physical_control(&harness, name, &arguments) {
+                if let Err(error) = require_legacy_physical_control(&harness, peer) {
+                    return mcp_http_error(
+                        StatusCode::FORBIDDEN,
+                        Some(id),
+                        -32001,
+                        &error.0.to_string(),
+                    );
+                }
+            }
             serde_json::to_value(crate::mcp::protocol_call_tool(&harness, name, arguments))
                 .expect("MCP tool result serializes")
         }
@@ -996,8 +1023,25 @@ fn localization_ingress_token() -> Result<String> {
 }
 
 fn read_ingress_token(path: &str, name: &str) -> Result<String> {
-    let token = std::fs::read_to_string(path)
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| anyhow::anyhow!("cannot inspect {name} ingress token file: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        anyhow::bail!("{name} ingress token path must be a regular non-symlink file");
+    }
+    if metadata.len() > INGRESS_TOKEN_FILE_MAX_BYTES {
+        anyhow::bail!("{name} ingress token file exceeds {INGRESS_TOKEN_FILE_MAX_BYTES} bytes");
+    }
+    let file = std::fs::File::open(path)
         .map_err(|error| anyhow::anyhow!("cannot read {name} ingress token file: {error}"))?;
+    let mut limited = std::io::Read::take(file, INGRESS_TOKEN_FILE_MAX_BYTES + 1);
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut limited, &mut bytes)
+        .map_err(|error| anyhow::anyhow!("cannot read {name} ingress token file: {error}"))?;
+    if bytes.len() as u64 > INGRESS_TOKEN_FILE_MAX_BYTES {
+        anyhow::bail!("{name} ingress token file exceeds {INGRESS_TOKEN_FILE_MAX_BYTES} bytes");
+    }
+    let token = String::from_utf8(bytes)
+        .map_err(|_| anyhow::anyhow!("{name} ingress token file must be UTF-8"))?;
     let token = token.trim().to_string();
     if token.is_empty() {
         anyhow::bail!("{name} ingress token file is empty");
@@ -1617,12 +1661,12 @@ async fn dashboard_page(State(harness): State<Harness>) -> Response {
       <span id="dashboard-status"><span class="status-dot {health_dot}"></span>{health_status} / {role} / {profile}</span>
     </div>
     <form class="toolbar" method="post">
-      <input name="token" value="dashboard-token" aria-label="Pilot token">
-      <input type="hidden" name="ttl_secs" value="120">
+      <input name="token" value="" placeholder="Local pilot token" autocomplete="off" aria-label="Pilot token">
+      <input type="hidden" name="ttl_secs" value="30">
       <input type="hidden" name="approval" value="true">
       <select name="speed_mode" aria-label="Speed mode">
-        <option value="low">low</option>
-        <option value="medium" selected>medium</option>
+        <option value="low" selected>low</option>
+        <option value="medium">medium</option>
         <option value="high">high</option>
       </select>
       <button class="primary" type="submit" formaction="/dashboard/authorize">Authorize</button>
@@ -1681,16 +1725,29 @@ async fn dashboard_page(State(harness): State<Harness>) -> Response {
 }
 
 async fn dashboard_authorize(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Form(req): Form<DashboardActionReq>,
 ) -> Redirect {
-    let token = cleaned_token(req.token).unwrap_or_else(|| "dashboard-token".to_string());
+    if let Err(error) = require_mutating_origin(&headers) {
+        harness.record_dashboard_event(format!("authorize error {}", error.0));
+        return Redirect::to("/dashboard");
+    }
+    if let Err(error) = require_legacy_physical_control(&harness, peer) {
+        harness.record_dashboard_event(format!("authorize error {}", error.0));
+        return Redirect::to("/dashboard");
+    }
+    let Some(token) = cleaned_token(req.token) else {
+        harness.record_dashboard_event("authorize error pilot token is required".to_string());
+        return Redirect::to("/dashboard");
+    };
     dashboard_invoke(
         &harness,
         "authorize",
         json!({
             "token": token,
-            "ttl_secs": req.ttl_secs.unwrap_or(120),
+            "ttl_secs": req.ttl_secs.unwrap_or(30).clamp(1, 30),
             "speed_mode": req.speed_mode.unwrap_or_default(),
         }),
     );
@@ -1714,9 +1771,19 @@ async fn dashboard_estop(
 }
 
 async fn dashboard_estop_reset(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Form(req): Form<DashboardActionReq>,
 ) -> Redirect {
+    if let Err(error) = require_mutating_origin(&headers) {
+        harness.record_dashboard_event(format!("estop_reset error {}", error.0));
+        return Redirect::to("/dashboard");
+    }
+    if let Err(error) = require_legacy_physical_control(&harness, peer) {
+        harness.record_dashboard_event(format!("estop_reset error {}", error.0));
+        return Redirect::to("/dashboard");
+    }
     dashboard_invoke(
         &harness,
         "estop_reset",
@@ -2688,9 +2755,13 @@ async fn calibration_status(State(harness): State<Harness>) -> Json<CalibrationS
 }
 
 async fn calibration_enter(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(request): Json<CalibrationEnterRequest>,
 ) -> Result<Json<CalibrationEnterResult>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     let result = tokio::task::spawn_blocking(move || harness.enter_calibration(request))
         .await
         .map_err(|error| anyhow::anyhow!("calibration entry task failed: {error}"))??;
@@ -2708,23 +2779,44 @@ async fn calibration_exit(
 }
 
 async fn pilot_authorize(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<PilotTokenReq>,
 ) -> Result<Json<Value>, HttpError> {
-    let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
-        GatewayCommand::Authorize {
-            token: req.token,
-            ttl_secs: req.ttl_secs,
-            speed_mode: req.speed_mode,
-        },
-    )?;
+    require_mutating_origin(&headers)?;
+    let issuer = require_operator_lease_issuer(&harness, peer, &headers, &req.token)?;
+    let ttl_secs = match issuer {
+        OperatorLeaseIssuer::BearerAuthenticated => {
+            let ttl_secs = req.ttl_secs.unwrap_or(30);
+            if !(1..=30).contains(&ttl_secs) {
+                return Err(HttpError(anyhow::anyhow!(
+                    "bearer-authenticated physical pilot lease ttl_secs must be between 1 and 30"
+                )));
+            }
+            ttl_secs
+        }
+        OperatorLeaseIssuer::Standard => req.ttl_secs.unwrap_or(120),
+    };
+    let speed_mode = req.speed_mode.unwrap_or_default();
+    harness.authorize(req.token, ttl_secs, speed_mode)?;
+    let response = AuthorizationResponse {
+        ok: true,
+        ttl_secs,
+        speed_mode,
+        operator_token: harness.operator_token_status(),
+    };
     Ok(Json(serde_json::to_value(response)?))
 }
 
 async fn pilot_speed_mode(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<SpeedModeReq>,
 ) -> Result<Json<Value>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
         GatewayCommand::SetSpeedMode {
             token: req.token,
@@ -2735,12 +2827,21 @@ async fn pilot_speed_mode(
 }
 
 async fn navigation_goal_submit(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(request): Json<NavigationGoalRequest>,
 ) -> Response {
+    if let Err(error) = require_mutating_origin(&headers) {
+        return error.into_response();
+    }
     if let Err(message) = validate_navigation_goal(&request) {
         return navigation_error(StatusCode::BAD_REQUEST, &message);
     }
+    if let Err(error) = require_operator_lease_issuer(&harness, peer, &headers, &request.token) {
+        return navigation_error(StatusCode::UNAUTHORIZED, &error.0.to_string());
+    }
+    let motion_epoch = harness.motion_epoch();
     let mut runtime = NAVIGATION_HTTP_STATE.lock();
     reconcile_active_navigation(&mut runtime, &harness);
     let identity = NavigationGoalIdentity::from(&request);
@@ -2770,11 +2871,12 @@ async fn navigation_goal_submit(
         );
     }
     let goal = request.planner_goal();
-    let status = match harness.set_navigation_goal_authorized(
+    let status = match harness.set_navigation_goal_authorized_at_epoch(
         goal,
         request.expected_map.clone(),
         Some(&request.token),
         request.approval,
+        motion_epoch,
     ) {
         Ok(status) => status,
         Err(error) => return navigation_error(StatusCode::CONFLICT, &error.to_string()),
@@ -3086,9 +3188,13 @@ fn navigation_error(status: StatusCode, message: &str) -> Response {
 }
 
 async fn drive(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<DriveReq>,
 ) -> Result<Json<Value>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     let response =
         TransportGateway::new(harness, InvocationOrigin::Http).execute(GatewayCommand::Drive {
             token: req.token,
@@ -3101,9 +3207,13 @@ async fn drive(
 }
 
 async fn camera_aim(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     Json(req): Json<CameraAimReq>,
 ) -> Result<Json<Value>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     Ok(Json(
         harness.capability_registry().invoke_value_with_origin(
             "camera_aim",
@@ -3146,9 +3256,13 @@ async fn estop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError>
 }
 
 async fn estop_reset(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(harness): State<Harness>,
+    headers: HeaderMap,
     req: Option<Json<EstopResetReq>>,
 ) -> Result<Json<Value>, HttpError> {
+    require_mutating_origin(&headers)?;
+    require_legacy_physical_control(&harness, peer)?;
     let req = req.map(|Json(req)| req).unwrap_or_default();
     let response = TransportGateway::new(harness, InvocationOrigin::Http).execute(
         GatewayCommand::ResetEStop {
@@ -3293,6 +3407,127 @@ fn stream_error_text(kind: &str, message: &str) -> String {
 #[derive(Debug)]
 struct HttpError(anyhow::Error);
 
+fn require_legacy_physical_control(harness: &Harness, peer: SocketAddr) -> Result<(), HttpError> {
+    legacy_physical_control_allowed(harness.config(), peer)
+        .map_err(|message| HttpError(anyhow::anyhow!(message)))
+}
+
+fn require_operator_lease_issuer(
+    harness: &Harness,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+    requested_session_token: &str,
+) -> Result<OperatorLeaseIssuer, HttpError> {
+    let operator_secret = env::var("LEASH_OPERATOR_AUTH_TOKEN_FILE")
+        .ok()
+        .and_then(|path| read_ingress_token(&path, "operator authorization").ok());
+    let issuer =
+        operator_lease_issuer_allowed(harness.config(), peer, headers, operator_secret.as_deref())
+            .map_err(|message| HttpError(anyhow::anyhow!(message)))?;
+    if issuer == OperatorLeaseIssuer::BearerAuthenticated
+        && operator_secret.as_deref().is_some_and(|operator_secret| {
+            constant_time_eq(
+                requested_session_token.trim().as_bytes(),
+                operator_secret.as_bytes(),
+            )
+        })
+    {
+        return Err(HttpError(anyhow::anyhow!(
+            "pilot session token must be distinct from the operator bearer token"
+        )));
+    }
+    Ok(issuer)
+}
+
+fn operator_lease_issuer_allowed(
+    config: &crate::config::HarnessConfig,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+    operator_secret: Option<&str>,
+) -> Result<OperatorLeaseIssuer, &'static str> {
+    if !config.profile.is_physical() {
+        return Ok(OperatorLeaseIssuer::Standard);
+    }
+    if operator_secret.is_some_and(|expected| bearer_authorized(headers, expected)) {
+        return Ok(OperatorLeaseIssuer::BearerAuthenticated);
+    }
+    legacy_physical_control_allowed(config, peer)
+        .map(|()| OperatorLeaseIssuer::Standard)
+        .map_err(|_| {
+            "physical pilot authorization requires a valid operator bearer token or explicit loopback legacy-control opt-in"
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperatorLeaseIssuer {
+    Standard,
+    BearerAuthenticated,
+}
+
+fn require_mutating_origin(headers: &HeaderMap) -> Result<(), HttpError> {
+    mutating_origin_allowed(headers).map_err(|message| HttpError(anyhow::anyhow!(message)))
+}
+
+fn mutating_origin_allowed(headers: &HeaderMap) -> Result<(), &'static str> {
+    if headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"))
+    {
+        return Err("cross-site mutating control request is not allowed");
+    }
+    let Some(origin) = headers.get(ORIGIN) else {
+        return Ok(());
+    };
+    let origin = origin
+        .to_str()
+        .map_err(|_| "mutating control request has an invalid Origin header")?;
+    let Some(origin_authority) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .and_then(|value| value.split('/').next())
+    else {
+        return Err("mutating control request Origin is not allowed");
+    };
+    let request_authority = headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .ok_or("mutating control request with Origin requires a valid Host header")?;
+    if !origin_authority.eq_ignore_ascii_case(request_authority) {
+        return Err("cross-origin mutating control request is not allowed");
+    }
+    Ok(())
+}
+
+fn legacy_physical_control_allowed(
+    config: &crate::config::HarnessConfig,
+    peer: SocketAddr,
+) -> Result<(), &'static str> {
+    if !config.profile.is_physical() {
+        return Ok(());
+    }
+    if !config.allow_legacy_physical_control {
+        return Err("legacy physical control is disabled; enable it explicitly at deployment");
+    }
+    if !peer.ip().is_loopback() {
+        return Err("legacy physical control is restricted to loopback clients");
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mcp")]
+fn mcp_tool_requires_legacy_physical_control(harness: &Harness, tool: &str, args: &Value) -> bool {
+    tool == "invoke_capability"
+        && args
+            .get("capability")
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                harness
+                    .capability_registry()
+                    .requires_legacy_physical_control(name)
+            })
+}
+
 #[cfg(feature = "mcp")]
 #[derive(Debug, Deserialize)]
 struct McpCallReq {
@@ -3336,11 +3571,11 @@ impl IntoResponse for HttpError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, net::SocketAddr};
 
     use axum::{
         body::to_bytes,
-        extract::State,
+        extract::{ConnectInfo, State},
         http::{header::AUTHORIZATION, HeaderMap, HeaderValue, StatusCode},
         Json,
     };
@@ -3348,11 +3583,13 @@ mod tests {
 
     use super::{
         calibration_enter, calibration_status, camera_activity, compact_telemetry_value,
-        compute_authorized, localization_authorized, localization_update, mapping_lifecycle,
-        mapping_status, motors_stop_verified, navigation_goal_cancel, navigation_goal_submit,
-        navigation_readiness, navigation_status, validate_agent_console_capability,
-        AgentCapabilityReq, CameraRuntimeState, NavigationStatusQuery, CAMERA_RUNTIME_STATE,
-        NAVIGATION_HTTP_STATE,
+        compute_authorized, drive, legacy_physical_control_allowed, localization_authorized,
+        localization_update, mapping_lifecycle, mapping_status, motors_stop_verified,
+        mutating_origin_allowed, navigation_goal_cancel, navigation_goal_submit,
+        navigation_readiness, navigation_status, operator_lease_issuer_allowed, pilot_authorize,
+        read_ingress_token, validate_agent_console_capability, AgentCapabilityReq,
+        CameraRuntimeState, DriveReq, NavigationStatusQuery, OperatorLeaseIssuer, PilotTokenReq,
+        CAMERA_RUNTIME_STATE, INGRESS_TOKEN_FILE_MAX_BYTES, NAVIGATION_HTTP_STATE,
     };
     use crate::{
         agent_runtime::{AgentRuntime, AgentSessionStore, CapabilityPermissions},
@@ -3365,6 +3602,7 @@ mod tests {
 
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
+    static OPERATOR_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static NAVIGATION_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
@@ -3392,9 +3630,21 @@ mod tests {
             speed_mode: crate::types::SpeedMode::Low,
             deadline_ms: super::camera_now_ms() + 10_000,
         };
-        let created = navigation_goal_submit(State(harness.clone()), Json(request.clone())).await;
+        let created = navigation_goal_submit(
+            ConnectInfo("127.0.0.1:4100".parse().unwrap()),
+            State(harness.clone()),
+            HeaderMap::new(),
+            Json(request.clone()),
+        )
+        .await;
         assert_eq!(created.status(), StatusCode::CREATED);
-        let replay = navigation_goal_submit(State(harness.clone()), Json(request.clone())).await;
+        let replay = navigation_goal_submit(
+            ConnectInfo("127.0.0.1:4100".parse().unwrap()),
+            State(harness.clone()),
+            HeaderMap::new(),
+            Json(request.clone()),
+        )
+        .await;
         assert_eq!(replay.status(), StatusCode::OK);
         let status = navigation_status(
             State(harness.clone()),
@@ -3441,7 +3691,13 @@ mod tests {
             speed_mode: crate::types::SpeedMode::Low,
             deadline_ms: super::camera_now_ms() + 150,
         };
-        let created = navigation_goal_submit(State(harness), Json(request)).await;
+        let created = navigation_goal_submit(
+            ConnectInfo("127.0.0.1:4100".parse().unwrap()),
+            State(harness),
+            HeaderMap::new(),
+            Json(request),
+        )
+        .await;
         assert_eq!(created.status(), StatusCode::CREATED);
 
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -3487,6 +3743,279 @@ mod tests {
             map_revision: "sim-grid-v1".to_string(),
             frame_id: "map".to_string(),
         }
+    }
+
+    #[test]
+    fn physical_legacy_control_is_default_off_and_never_remote() {
+        let mut config = HarnessConfig {
+            profile: crate::Profile::WaveshareUgv,
+            ..HarnessConfig::default()
+        };
+        let loopback: SocketAddr = "127.0.0.1:4100".parse().unwrap();
+        let remote: SocketAddr = "192.0.2.10:4100".parse().unwrap();
+
+        assert!(legacy_physical_control_allowed(&config, loopback).is_err());
+        config.allow_legacy_physical_control = true;
+        assert!(legacy_physical_control_allowed(&config, remote).is_err());
+        assert!(legacy_physical_control_allowed(&config, loopback).is_ok());
+    }
+
+    #[test]
+    fn mutating_control_rejects_cross_origin_browser_requests() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("127.0.0.1:8000"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://attacker.example"),
+        );
+        assert!(mutating_origin_allowed(&headers).is_err());
+
+        headers.insert("origin", HeaderValue::from_static("http://127.0.0.1:8000"));
+        assert!(mutating_origin_allowed(&headers).is_ok());
+        assert!(mutating_origin_allowed(&HeaderMap::new()).is_ok());
+    }
+
+    #[test]
+    fn canonical_operator_issuer_requires_bearer_or_local_opt_in() {
+        let config = HarnessConfig {
+            profile: crate::Profile::WaveshareUgv,
+            ..HarnessConfig::default()
+        };
+        let loopback: SocketAddr = "127.0.0.1:4100".parse().unwrap();
+        let remote: SocketAddr = "192.0.2.10:4100".parse().unwrap();
+        let mut headers = HeaderMap::new();
+
+        assert!(operator_lease_issuer_allowed(&config, loopback, &headers, None).is_err());
+        assert!(operator_lease_issuer_allowed(&config, remote, &headers, Some("secret")).is_err());
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer operator-secret"),
+        );
+        assert_eq!(
+            operator_lease_issuer_allowed(&config, remote, &headers, Some("operator-secret"))
+                .unwrap(),
+            OperatorLeaseIssuer::BearerAuthenticated
+        );
+    }
+
+    #[test]
+    fn ingress_token_files_are_bounded_regular_files() {
+        let root = std::env::temp_dir().join(format!(
+            "leash-ingress-token-contract-{}-{}",
+            std::process::id(),
+            super::camera_now_ms()
+        ));
+        fs::create_dir(&root).unwrap();
+        let token_path = root.join("token");
+        fs::write(&token_path, "bounded-secret\n").unwrap();
+        assert_eq!(
+            read_ingress_token(token_path.to_str().unwrap(), "fixture").unwrap(),
+            "bounded-secret"
+        );
+
+        let oversized_path = root.join("oversized");
+        fs::write(
+            &oversized_path,
+            vec![b'x'; INGRESS_TOKEN_FILE_MAX_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(
+            read_ingress_token(oversized_path.to_str().unwrap(), "fixture")
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds")
+        );
+
+        #[cfg(unix)]
+        {
+            let symlink_path = root.join("symlink");
+            std::os::unix::fs::symlink(&token_path, &symlink_path).unwrap();
+            assert!(
+                read_ingress_token(symlink_path.to_str().unwrap(), "fixture")
+                    .unwrap_err()
+                    .to_string()
+                    .contains("non-symlink")
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn remote_bearer_issues_only_a_bounded_canonical_pilot_lease() {
+        let _guard = OPERATOR_ENV_LOCK.lock().await;
+        let _navigation_guard = NAVIGATION_TEST_LOCK.lock().await;
+        {
+            let mut runtime = NAVIGATION_HTTP_STATE.lock();
+            runtime.goals.clear();
+            runtime.idempotency.clear();
+            runtime.order.clear();
+            runtime.active_mission_id = None;
+        }
+        let token_path = std::env::temp_dir().join(format!(
+            "leash-operator-auth-token-{}-{}",
+            std::process::id(),
+            super::camera_now_ms()
+        ));
+        fs::write(&token_path, "operator-secret\n").unwrap();
+        std::env::set_var("LEASH_OPERATOR_AUTH_TOKEN_FILE", &token_path);
+
+        let harness = Harness::new_with_test_driver(HarnessConfig {
+            profile: crate::Profile::WaveshareUgv,
+            allow_physical_actuation: true,
+            allow_physical_navigation: true,
+            allow_legacy_physical_control: false,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let remote = ConnectInfo("192.0.2.10:4100".parse().unwrap());
+
+        let mut invalid_headers = HeaderMap::new();
+        invalid_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer wrong"));
+        assert!(pilot_authorize(
+            remote,
+            State(harness.clone()),
+            invalid_headers,
+            Json(PilotTokenReq {
+                token: "mission-session".to_string(),
+                ttl_secs: Some(30),
+                speed_mode: Some(crate::types::SpeedMode::Low),
+            }),
+        )
+        .await
+        .is_err());
+        assert!(!harness.operator_token_status().active);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer operator-secret"),
+        );
+        let equal_token_error = pilot_authorize(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(PilotTokenReq {
+                token: "operator-secret".to_string(),
+                ttl_secs: Some(30),
+                speed_mode: Some(crate::types::SpeedMode::Low),
+            }),
+        )
+        .await
+        .unwrap_err()
+        .0
+        .to_string();
+        assert!(equal_token_error.contains("must be distinct"));
+        assert!(!equal_token_error.contains("operator-secret"));
+        assert!(!harness.operator_token_status().active);
+
+        assert!(pilot_authorize(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(PilotTokenReq {
+                token: "mission-session".to_string(),
+                ttl_secs: Some(31),
+                speed_mode: Some(crate::types::SpeedMode::Low),
+            }),
+        )
+        .await
+        .unwrap_err()
+        .0
+        .to_string()
+        .contains("between 1 and 30"));
+        assert!(!harness.operator_token_status().active);
+
+        let response = pilot_authorize(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(PilotTokenReq {
+                token: "mission-session".to_string(),
+                ttl_secs: Some(30),
+                speed_mode: Some(crate::types::SpeedMode::Low),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(harness.operator_token_status().active);
+        let response_text = response.to_string();
+        assert!(!response_text.contains("operator-secret"));
+        assert!(!response_text.contains("mission-session"));
+        assert!(!harness
+            .dashboard_events()
+            .join("\n")
+            .contains("operator-secret"));
+
+        let navigation_request = NavigationGoalRequest {
+            schema_version: NAVIGATION_GOAL_SCHEMA_VERSION.to_string(),
+            mission_id: "remote-canonical-navigation".to_string(),
+            idempotency_key: "remote-canonical-navigation:plan-1".to_string(),
+            token: "mission-session".to_string(),
+            approval: true,
+            expected_map: sim_map_identity(),
+            frame_id: "map".to_string(),
+            x_m: 0.25,
+            y_m: 0.0,
+            tolerance_m: 0.1,
+            speed_mode: crate::types::SpeedMode::Low,
+            deadline_ms: super::camera_now_ms() + 10_000,
+        };
+        let missing_bearer = navigation_goal_submit(
+            remote,
+            State(harness.clone()),
+            HeaderMap::new(),
+            Json(navigation_request.clone()),
+        )
+        .await;
+        assert_eq!(missing_bearer.status(), StatusCode::UNAUTHORIZED);
+
+        let authenticated_goal = navigation_goal_submit(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(navigation_request),
+        )
+        .await;
+        assert_ne!(authenticated_goal.status(), StatusCode::UNAUTHORIZED);
+
+        let drive_error = drive(
+            remote,
+            State(harness.clone()),
+            headers.clone(),
+            Json(DriveReq {
+                token: Some("mission-session".to_string()),
+                left: 0.1,
+                right: 0.1,
+                speed_mode: Some(crate::types::SpeedMode::Low),
+                approval: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err()
+        .0
+        .to_string();
+        assert!(drive_error.contains("legacy physical control"));
+
+        let navigation_error = harness
+            .set_planner_goal_authorized(
+                crate::types::PlannerGoal {
+                    frame_id: "map".to_string(),
+                    x_m: 0.25,
+                    y_m: 0.0,
+                    tolerance_m: 0.1,
+                    speed_mode: crate::types::SpeedMode::Low,
+                },
+                Some("mission-session"),
+                true,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(!navigation_error.contains("invalid pilot token"));
+
+        std::env::remove_var("LEASH_OPERATOR_AUTH_TOKEN_FILE");
+        fs::remove_file(token_path).unwrap();
     }
 
     #[tokio::test]
@@ -3753,7 +4282,9 @@ mod tests {
         assert!(!calibration_status(State(harness.clone())).await.0.active);
 
         let error = calibration_enter(
+            axum::extract::ConnectInfo("127.0.0.1:12345".parse().unwrap()),
             State(harness),
+            HeaderMap::new(),
             Json(crate::calibration::CalibrationEnterRequest {
                 token: "fixture".to_string(),
                 approval: true,

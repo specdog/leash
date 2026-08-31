@@ -120,6 +120,37 @@ impl CapabilityRegistry {
             .collect()
     }
 
+    pub(crate) fn requires_legacy_physical_control(&self, name: &str) -> bool {
+        let name = canonical_name(name);
+        let Some(descriptor) = self
+            .descriptors
+            .iter()
+            .find(|descriptor| descriptor.name == name)
+        else {
+            return false;
+        };
+        let safety = if self.harness.config().profile.is_physical()
+            && is_navigation_start_capability(name)
+        {
+            SafetyClass::PhysicalMotion
+        } else {
+            descriptor.safety
+        };
+        name == "authorize"
+            || name == "speed_mode"
+            || safety.is_policy_gated()
+            || self.harness.config().profile.is_physical()
+                && matches!(
+                    name,
+                    "waypoint_create"
+                        | "waypoint_update"
+                        | "waypoint_delete"
+                        | "patrol_zone_create"
+                        | "patrol_zone_update"
+                        | "patrol_zone_delete"
+                )
+    }
+
     pub fn invoke_value(&self, name: &str, args: Value) -> Result<Value> {
         self.invoke_value_with_context(
             name,
@@ -573,6 +604,25 @@ impl CapabilityRegistry {
         approval: bool,
         context: InvocationContext,
     ) -> Result<PolicyDecision> {
+        if self.harness.config().profile.is_physical()
+            && matches!(
+                context.origin,
+                InvocationOrigin::Http | InvocationOrigin::Mcp | InvocationOrigin::Agent
+            )
+            && !self.harness.config().allow_legacy_physical_control
+            && self.requires_legacy_physical_control(name)
+        {
+            self.log_policy_denied(
+                name,
+                safety,
+                context,
+                "legacy remote physical control is disabled",
+            );
+            bail!(
+                "legacy remote physical control requires --allow-legacy-physical-control or LEASH_ALLOW_LEGACY_PHYSICAL_CONTROL=1"
+            );
+        }
+
         if !safety.is_policy_gated() {
             return Ok(PolicyDecision::Execute);
         }
@@ -1914,5 +1964,54 @@ mod tests {
             )
             .unwrap();
         assert!(harness.telemetry().left_cmd > 0.0);
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn physical_remote_legacy_control_and_plan_mutation_default_off() {
+        let harness = Harness::new_with_test_driver(HarnessConfig {
+            profile: crate::Profile::WaveshareUgv,
+            allow_physical_actuation: true,
+            ..HarnessConfig::default()
+        })
+        .unwrap();
+        let registry = harness.capability_registry();
+
+        let authorize_error = registry
+            .invoke_value_with_origin(
+                "authorize",
+                json!({"token": "caller-chosen"}),
+                InvocationOrigin::Http,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(authorize_error.contains("legacy remote physical control"));
+        let waypoint_error = registry
+            .invoke_value_with_origin(
+                "waypoint_create",
+                json!({
+                    "id": "unsafe-target",
+                    "name": "Unsafe Target",
+                    "x_m": 1.0,
+                    "y_m": 0.0
+                }),
+                InvocationOrigin::Mcp,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(waypoint_error.contains("legacy remote physical control"));
+
+        assert_eq!(
+            registry
+                .invoke_value_with_origin("health", json!({}), InvocationOrigin::Mcp)
+                .unwrap()["profile"],
+            "waveshare-ugv"
+        );
+        assert_eq!(
+            registry
+                .invoke_value_with_origin("stop", json!({}), InvocationOrigin::Mcp)
+                .unwrap()["ok"],
+            true
+        );
     }
 }

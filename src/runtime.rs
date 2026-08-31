@@ -64,12 +64,12 @@ use crate::{
         CommandOverlay, CommandStreamState, CostmapFrame, DriveOutcome, Health, ImageObservation,
         ImuStatus, LocalizationFrame, LocalizationHealth, LocalizationStatus, MapIdentity,
         MapMetadata, MotionEvent, MotionEventKind, OccupancyGridFrame, OdometryStatus,
-        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZoneList, PlannerGoal,
-        PlannerStatus, PointCloudMetadata, Pose2d, PoseWithCovariance2d, RangeScanStatus,
-        RawFrameStatus, ResourceSample, SafetyStreamState, SavedWaypointList, SensorSnapshot,
-        SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame, Twist2d,
-        VerifiedZeroEvidence, VisionResult, VisualizationFrame, VisualizationPath, VoxelCell,
-        VoxelGridFrame, ZeroCommandReason, APPLIED_ACTION_PAGE_SCHEMA_VERSION,
+        OperatorTokenStatus, PatrolStatus, PatrolStrategy, PatrolZoneList, PlanarRangeScan,
+        PlannerGoal, PlannerStatus, PointCloudMetadata, Pose2d, PoseWithCovariance2d,
+        RangeScanStatus, RawFrameStatus, ResourceSample, SafetyStreamState, SavedWaypointList,
+        SensorSnapshot, SpatialMemoryStatus, SpeedMode, TelemetryFrame, TelemetryStreamFrame,
+        Twist2d, VerifiedZeroEvidence, VisionResult, VisualizationFrame, VisualizationPath,
+        VoxelCell, VoxelGridFrame, ZeroCommandReason, APPLIED_ACTION_PAGE_SCHEMA_VERSION,
         APPLIED_ACTION_SCHEMA_VERSION, COST_FREE, COST_LETHAL, LOCALIZATION_FRAME_VERSION,
         OCCUPANCY_FREE, OCCUPANCY_OCCUPIED, SENSOR_CONTRACT_VERSION, VISUALIZATION_FRAME_VERSION,
         VOXEL_GRID_VERSION,
@@ -306,6 +306,12 @@ struct CommandState {
 struct CommandIoState {
     sequence: u64,
     verified_zero_in_progress: bool,
+}
+
+#[derive(Debug, Default)]
+struct MotionGate {
+    stop_epoch: u64,
+    planner_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -579,6 +585,7 @@ pub struct Harness {
     config: HarnessConfig,
     started_at: Instant,
     driver: Arc<dyn RobotDriver>,
+    motion_gate: Arc<Mutex<MotionGate>>,
     command_io: Arc<Mutex<CommandIoState>>,
     command: Arc<Mutex<CommandState>>,
     action_evidence: Arc<Mutex<ActionEvidenceState>>,
@@ -745,6 +752,7 @@ impl Harness {
             config,
             started_at: Instant::now(),
             driver,
+            motion_gate: Arc::new(Mutex::new(MotionGate::default())),
             command_io: Arc::new(Mutex::new(CommandIoState::default())),
             command: Arc::new(Mutex::new(CommandState::default())),
             action_evidence: Arc::new(Mutex::new(ActionEvidenceState::new(
@@ -899,10 +907,7 @@ impl Harness {
                 .last_ms
                 .is_some_and(|last_ms| now.saturating_sub(last_ms) <= PHYSICAL_NAV_SENSOR_FRESH_MS);
             let collision_clear = range_scan.sample.as_ref().is_some_and(|scan| {
-                scan.ranges_m
-                    .iter()
-                    .flatten()
-                    .all(|range| *range > PHYSICAL_NAV_MIN_CLEARANCE_M)
+                scan.validate().is_ok() && scan_collision_clear(scan, PHYSICAL_NAV_MIN_CLEARANCE_M)
             });
             let runtime_gates = self.config.allow_physical_navigation
                 && self.physical_actuation_enabled()
@@ -1085,6 +1090,22 @@ impl Harness {
         self.planner.lock().clone()
     }
 
+    pub(crate) fn motion_epoch(&self) -> u64 {
+        self.motion_gate.lock().stop_epoch
+    }
+
+    fn activate_planner_at_epoch(&self, status: PlannerStatus, expected_epoch: u64) -> Result<()> {
+        let mut gate = self.motion_gate.lock();
+        if gate.stop_epoch != expected_epoch {
+            return Err(anyhow!(
+                "motion request was superseded by a newer stop command"
+            ));
+        }
+        gate.planner_epoch = status.active.then_some(expected_epoch);
+        *self.planner.lock() = status;
+        Ok(())
+    }
+
     pub fn navigation_execution_status(&self) -> Option<NavigationExecutionStatus> {
         self.config
             .profile
@@ -1093,14 +1114,29 @@ impl Harness {
     }
 
     pub fn set_planner_goal(&self, goal: PlannerGoal) -> Result<PlannerStatus> {
+        let motion_epoch = self.motion_epoch();
+        self.set_planner_goal_at_epoch(goal, motion_epoch)
+    }
+
+    fn set_planner_goal_at_epoch(
+        &self,
+        goal: PlannerGoal,
+        motion_epoch: u64,
+    ) -> Result<PlannerStatus> {
         if self.config.profile != Profile::Sim {
             return Err(anyhow!("planner is only available for the sim profile"));
         }
         if goal.frame_id != "map" {
             return Err(anyhow!("planner goals must use frame_id 'map'"));
         }
-        if goal.tolerance_m <= 0.0 {
-            return Err(anyhow!("planner goal tolerance_m must be positive"));
+        if !goal.x_m.is_finite()
+            || !goal.y_m.is_finite()
+            || !goal.tolerance_m.is_finite()
+            || goal.tolerance_m <= 0.0
+        {
+            return Err(anyhow!(
+                "planner goal coordinates and positive tolerance_m must be finite"
+            ));
         }
 
         let ts_ms = now_ms();
@@ -1126,7 +1162,7 @@ impl Harness {
                 },
                 last_drive: None,
             };
-            *self.planner.lock() = status.clone();
+            self.activate_planner_at_epoch(status.clone(), motion_epoch)?;
             return Ok(status);
         };
 
@@ -1146,7 +1182,7 @@ impl Harness {
             },
             last_drive: None,
         };
-        *self.planner.lock() = status;
+        self.activate_planner_at_epoch(status, motion_epoch)?;
         self.planner_step();
         Ok(self.planner_status())
     }
@@ -1157,6 +1193,7 @@ impl Harness {
         token: Option<&str>,
         approval: bool,
     ) -> Result<PlannerStatus> {
+        let motion_epoch = self.motion_epoch();
         #[cfg(feature = "physical-navigation")]
         if self.config.profile.is_physical() {
             // Preserve the authorization/gate error ordering even when no map
@@ -1166,7 +1203,13 @@ impl Harness {
         let expected_map = self
             .active_map_identity()
             .ok_or_else(|| anyhow!("navigation requires an active map identity"))?;
-        self.set_navigation_goal_authorized(goal, expected_map, token, approval)
+        self.set_navigation_goal_authorized_at_epoch(
+            goal,
+            expected_map,
+            token,
+            approval,
+            motion_epoch,
+        )
     }
 
     pub fn set_navigation_goal_authorized(
@@ -1175,6 +1218,24 @@ impl Harness {
         expected_map: MapIdentity,
         token: Option<&str>,
         approval: bool,
+    ) -> Result<PlannerStatus> {
+        let motion_epoch = self.motion_epoch();
+        self.set_navigation_goal_authorized_at_epoch(
+            goal,
+            expected_map,
+            token,
+            approval,
+            motion_epoch,
+        )
+    }
+
+    pub(crate) fn set_navigation_goal_authorized_at_epoch(
+        &self,
+        goal: PlannerGoal,
+        expected_map: MapIdentity,
+        token: Option<&str>,
+        approval: bool,
+        motion_epoch: u64,
     ) -> Result<PlannerStatus> {
         if !self.config.profile.is_physical() {
             if self.config.profile != Profile::Sim {
@@ -1185,11 +1246,17 @@ impl Harness {
                     "navigation expected map identity does not match the active map"
                 ));
             }
-            return self.set_planner_goal(goal);
+            return self.set_planner_goal_at_epoch(goal, motion_epoch);
         }
         #[cfg(feature = "physical-navigation")]
         {
-            self.set_physical_planner_goal(goal, expected_map, token, approval)
+            self.set_physical_planner_goal_at_epoch(
+                goal,
+                expected_map,
+                token,
+                approval,
+                motion_epoch,
+            )
         }
         #[cfg(not(feature = "physical-navigation"))]
         {
@@ -1201,10 +1268,17 @@ impl Harness {
     }
 
     pub fn cancel_planner_goal(&self) -> Result<PlannerStatus> {
-        self.clear_physical_navigation_lease();
-        self.cancel_patrol_state("stopped", "patrol stopped by planner cancel");
-        self.cancel_planner_state("cancelled", "planner goal cancelled");
-        let outcome = self.stop_without_planner_cancel()?;
+        let outcome = {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
+            self.cancel_patrol_state("stopped", "patrol stopped by planner cancel");
+            self.cancel_planner_state("cancelled", "planner goal cancelled");
+            let outcome = self.stop_without_planner_cancel_locked();
+            self.clear_physical_navigation_lease();
+            outcome
+        };
+        let outcome = outcome?;
         let mut planner = self.planner.lock();
         planner.last_drive = Some(outcome);
         Ok(planner.clone())
@@ -1474,10 +1548,23 @@ impl Harness {
     #[cfg(feature = "physical-navigation")]
     fn set_physical_planner_goal(
         &self,
+        goal: PlannerGoal,
+        expected_map: MapIdentity,
+        token: Option<&str>,
+        approval: bool,
+    ) -> Result<PlannerStatus> {
+        let motion_epoch = self.motion_epoch();
+        self.set_physical_planner_goal_at_epoch(goal, expected_map, token, approval, motion_epoch)
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    fn set_physical_planner_goal_at_epoch(
+        &self,
         mut goal: PlannerGoal,
         expected_map: MapIdentity,
         token: Option<&str>,
         approval: bool,
+        motion_epoch: u64,
     ) -> Result<PlannerStatus> {
         let token = self.validate_physical_navigation_authorization(token, approval)?;
         let snapshot = self.physical_navigation_snapshot()?;
@@ -1487,6 +1574,11 @@ impl Harness {
             .as_ref()
             .map(|localized| localized.pose.clone())
             .ok_or_else(|| anyhow!("physical navigation requires a localized pose"))?;
+        if !current.is_finite() {
+            return Err(anyhow!(
+                "physical navigation requires a finite localized pose"
+            ));
+        }
         if goal.frame_id != current.frame_id {
             return Err(anyhow!(
                 "physical planner goal frame '{}' does not match localization frame '{}'",
@@ -1512,21 +1604,29 @@ impl Harness {
         if self.navigation_executor.kind() == NavigationExecutorKind::Unsupported || !readiness.ok {
             return Err(anyhow!("{}", readiness.message));
         }
+        let mut gate = self.motion_gate.lock();
+        if gate.stop_epoch != motion_epoch {
+            return Err(anyhow!(
+                "navigation goal was superseded by a newer stop command"
+            ));
+        }
         let execution = self.navigation_executor.submit(&goal, &expected_map)?;
         if !execution.ok {
             return Err(anyhow!("{}", execution.message));
         }
+        let status = planner_status_from_execution(goal, execution);
         *self.physical_navigation_lease.lock() = Some(PhysicalNavigationLease {
             token,
             approval,
             expected_map,
         });
-        {
-            let mut command = self.command.lock();
-            command.stopped_by_deadman = false;
-            command.speed_mode = SpeedMode::Low;
-        }
-        *self.planner.lock() = planner_status_from_execution(goal, execution);
+        let mut command = self.command.lock();
+        command.stopped_by_deadman = false;
+        command.speed_mode = SpeedMode::Low;
+        gate.planner_epoch = status.active.then_some(motion_epoch);
+        *self.planner.lock() = status;
+        drop(command);
+        drop(gate);
         self.planner_step();
         Ok(self.planner_status())
     }
@@ -1702,12 +1802,9 @@ impl Harness {
             .sample
             .as_ref()
             .ok_or_else(|| anyhow!("physical navigation lidar sample is missing"))?;
-        if scan
-            .ranges_m
-            .iter()
-            .flatten()
-            .any(|range| *range <= PHYSICAL_NAV_MIN_CLEARANCE_M)
-        {
+        scan.validate()
+            .map_err(|error| anyhow!("physical navigation lidar is invalid: {error}"))?;
+        if !scan_collision_clear(scan, PHYSICAL_NAV_MIN_CLEARANCE_M) {
             return Err(anyhow!("physical navigation path is blocked by lidar"));
         }
         Ok(snapshot)
@@ -1723,14 +1820,24 @@ impl Harness {
     fn clear_physical_navigation_lease(&self) {
         #[cfg(feature = "physical-navigation")]
         {
-            let had_lease = self.physical_navigation_lease.lock().take().is_some();
-            if had_lease && self.config.profile.is_physical() {
-                if let Err(error) = self.navigation_executor.cancel() {
-                    warn!(
-                        ?error,
-                        "physical navigation executor cancel failed while clearing lease"
-                    );
-                }
+            let had_lease = self.detach_physical_navigation_lease();
+            self.cancel_detached_physical_navigation(had_lease);
+        }
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    fn detach_physical_navigation_lease(&self) -> bool {
+        self.physical_navigation_lease.lock().take().is_some()
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    fn cancel_detached_physical_navigation(&self, had_lease: bool) {
+        if had_lease && self.config.profile.is_physical() {
+            if let Err(error) = self.navigation_executor.cancel() {
+                warn!(
+                    ?error,
+                    "physical navigation executor cancel failed while clearing lease"
+                );
             }
         }
     }
@@ -2322,6 +2429,9 @@ impl Harness {
         if let Err(error) = validation {
             self.clear_calibration_lease();
             self.sessions.lock().clear();
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
             let speed_scale = self.command.lock().speed_mode.cap();
             let _ = self.write_stop_command(ActionCommandEvidence::stopped(speed_scale, 0));
             let mut command = self.command.lock();
@@ -2373,7 +2483,11 @@ impl Harness {
         if reason != ZeroCommandReason::CalibrationEntry {
             self.clear_calibration_lease();
         }
-        self.clear_physical_navigation_lease();
+        let mut gate = self.motion_gate.lock();
+        gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+        gate.planner_epoch = None;
+        #[cfg(feature = "physical-navigation")]
+        let had_navigation_lease = self.detach_physical_navigation_lease();
         self.cancel_patrol_state("verified-zero", "patrol movement stopped for verified zero");
         self.cancel_planner_state(
             "verified-zero",
@@ -2421,7 +2535,14 @@ impl Harness {
                 }
             }
         };
-        let (command_sequence, write_completed_at_ms) = write_result?;
+        let (command_sequence, write_completed_at_ms) = match write_result {
+            Ok(write) => write,
+            Err(error) => {
+                #[cfg(feature = "physical-navigation")]
+                self.cancel_detached_physical_navigation(had_navigation_lease);
+                return Err(error);
+            }
+        };
         {
             let mut command = self.command.lock();
             command.left_cmd = 0.0;
@@ -2444,6 +2565,9 @@ impl Harness {
                 && sample_received_at_ms.is_some_and(|received| received >= write_completed_at_ms)
             {
                 self.command_io.lock().verified_zero_in_progress = false;
+                #[cfg(feature = "physical-navigation")]
+                self.cancel_detached_physical_navigation(had_navigation_lease);
+                drop(gate);
                 return Ok(VerifiedZeroEvidence {
                     command_sequence,
                     write_completed_at_ms,
@@ -2456,6 +2580,9 @@ impl Harness {
             }
             if Instant::now() >= deadline {
                 self.command_io.lock().verified_zero_in_progress = false;
+                #[cfg(feature = "physical-navigation")]
+                self.cancel_detached_physical_navigation(had_navigation_lease);
+                drop(gate);
                 return Err(anyhow!(
                     "verified zero confirmation timed out after {VERIFIED_ZERO_TIMEOUT_MS} ms for {reason:?}; use the physical E-stop"
                 ));
@@ -2489,6 +2616,9 @@ impl Harness {
                 && (command.left_cmd != 0.0 || command.right_cmd != 0.0)
         };
         if should_stop_previous_owner {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
             let mut command = self.command.lock();
             self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))?;
             command.left_cmd = 0.0;
@@ -2554,13 +2684,22 @@ impl Harness {
         right: f64,
         speed_mode: Option<SpeedMode>,
     ) -> Result<DriveOutcome> {
+        let motion_epoch = self.motion_epoch();
+        self.drive_at_epoch(token, left, right, speed_mode, motion_epoch)
+    }
+
+    fn drive_at_epoch(
+        &self,
+        token: Option<&str>,
+        left: f64,
+        right: f64,
+        speed_mode: Option<SpeedMode>,
+        motion_epoch: u64,
+    ) -> Result<DriveOutcome> {
         let requested_left = left;
         let requested_right = right;
         let session = self.validate_session(token)?;
         let speed_mode = speed_mode.or(session.map(|session| session.speed_mode));
-        if let Some(speed_mode) = speed_mode {
-            self.command.lock().speed_mode = speed_mode;
-        }
         self.validate_calibration_drive(token, left, right)?;
 
         #[cfg(feature = "waveshare-ugv")]
@@ -2576,7 +2715,16 @@ impl Harness {
             }
         }
 
+        let gate = self.motion_gate.lock();
+        if gate.stop_epoch != motion_epoch {
+            return Err(anyhow!(
+                "drive request was superseded by a newer stop command"
+            ));
+        }
         let mut command = self.command.lock();
+        if let Some(speed_mode) = speed_mode {
+            command.speed_mode = speed_mode;
+        }
         if command.estop {
             return Err(anyhow!("estop is latched; call estop/reset before driving"));
         }
@@ -2623,6 +2771,7 @@ impl Harness {
         self.advance_sim_odometry(left, right);
 
         let command = self.command.lock().clone();
+        drop(gate);
         Ok(DriveOutcome {
             ok: true,
             left,
@@ -2679,6 +2828,9 @@ impl Harness {
     #[cfg(feature = "waveshare-ugv")]
     fn stop_for_obstacle(&self, requested_left: f64, requested_right: f64) -> Result<()> {
         {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
             let mut command = self.command.lock();
             self.write_stop_command(ActionCommandEvidence {
                 requested_left,
@@ -2697,16 +2849,17 @@ impl Harness {
             command.left_cmd = 0.0;
             command.right_cmd = 0.0;
             command.last_cmd_at = Some(Instant::now());
+            drop(command);
+            self.clear_physical_navigation_lease();
+            self.cancel_planner_state(
+                "collision-stop",
+                "planner movement cancelled by lidar collision threshold",
+            );
+            self.cancel_patrol_state(
+                "collision-stop",
+                "patrol movement cancelled by lidar collision threshold",
+            );
         }
-        self.clear_physical_navigation_lease();
-        self.cancel_planner_state(
-            "collision-stop",
-            "planner movement cancelled by lidar collision threshold",
-        );
-        self.cancel_patrol_state(
-            "collision-stop",
-            "patrol movement cancelled by lidar collision threshold",
-        );
         Ok(())
     }
 
@@ -2718,14 +2871,31 @@ impl Harness {
         speed: Option<u32>,
         accel: Option<u32>,
     ) -> Result<CameraAimOutcome> {
+        let motion_epoch = self.motion_epoch();
+        self.camera_aim_at_epoch(token, pan_deg, tilt_deg, speed, accel, motion_epoch)
+    }
+
+    fn camera_aim_at_epoch(
+        &self,
+        token: Option<&str>,
+        pan_deg: f64,
+        tilt_deg: f64,
+        speed: Option<u32>,
+        accel: Option<u32>,
+        motion_epoch: u64,
+    ) -> Result<CameraAimOutcome> {
         self.validate_session(token)?;
-        {
-            let command = self.command.lock();
-            if command.estop {
-                return Err(anyhow!(
-                    "estop is latched; call estop/reset before camera aim"
-                ));
-            }
+        let gate = self.motion_gate.lock();
+        if gate.stop_epoch != motion_epoch {
+            return Err(anyhow!(
+                "camera aim request was superseded by a newer stop command"
+            ));
+        }
+        let mut command = self.command.lock();
+        if command.estop {
+            return Err(anyhow!(
+                "estop is latched; call estop/reset before camera aim"
+            ));
         }
 
         let pan_deg = clamp(pan_deg, CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG);
@@ -2733,7 +2903,7 @@ impl Harness {
         let speed = speed.unwrap_or(0);
         let accel = accel.unwrap_or(0);
         self.driver.aim_camera(pan_deg, tilt_deg, speed, accel)?;
-        self.command.lock().camera_aim = Some(CameraAimState {
+        command.camera_aim = Some(CameraAimState {
             pan_deg,
             tilt_deg,
             speed,
@@ -2756,13 +2926,27 @@ impl Harness {
 
     pub fn stop(&self) -> Result<DriveOutcome> {
         self.clear_calibration_lease();
-        self.clear_physical_navigation_lease();
-        self.cancel_patrol_state("stopped", "patrol movement stopped");
-        self.cancel_planner_state("stopped", "planner movement stopped");
-        self.stop_without_planner_cancel()
+        let outcome = {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
+            self.cancel_patrol_state("stopped", "patrol movement stopped");
+            self.cancel_planner_state("stopped", "planner movement stopped");
+            let outcome = self.stop_without_planner_cancel_locked();
+            self.clear_physical_navigation_lease();
+            outcome
+        };
+        outcome
     }
 
     fn stop_without_planner_cancel(&self) -> Result<DriveOutcome> {
+        let mut gate = self.motion_gate.lock();
+        gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+        gate.planner_epoch = None;
+        self.stop_without_planner_cancel_locked()
+    }
+
+    fn stop_without_planner_cancel_locked(&self) -> Result<DriveOutcome> {
         let mut command = self.command.lock();
         self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))?;
         command.left_cmd = 0.0;
@@ -2782,23 +2966,33 @@ impl Harness {
 
     pub fn estop(&self) -> Result<()> {
         self.clear_calibration_lease();
-        self.clear_physical_navigation_lease();
-        self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
-        self.cancel_planner_state("estop", "planner movement cancelled by estop");
-        let mut command = self.command.lock();
-        let mut io = self.command_io.lock();
-        let mut evidence = self.action_evidence.lock();
-        self.driver.emergency_stop()?;
-        io.sequence = io.sequence.saturating_add(1);
-        evidence.transition(
-            now_ns(),
-            ActionCommandEvidence::stopped(command.speed_mode.cap(), ACTION_SAFETY_ESTOP),
-        );
-        command.left_cmd = 0.0;
-        command.right_cmd = 0.0;
-        command.estop = true;
-        command.stopped_by_deadman = false;
-        Ok(())
+        (|| -> Result<()> {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
+            self.cancel_patrol_state("estop", "patrol movement cancelled by estop");
+            self.cancel_planner_state("estop", "planner movement cancelled by estop");
+            let mut command = self.command.lock();
+            let mut io = self.command_io.lock();
+            let mut evidence = self.action_evidence.lock();
+            let result = self.driver.emergency_stop();
+            if result.is_ok() {
+                io.sequence = io.sequence.saturating_add(1);
+                evidence.transition(
+                    now_ns(),
+                    ActionCommandEvidence::stopped(command.speed_mode.cap(), ACTION_SAFETY_ESTOP),
+                );
+                command.left_cmd = 0.0;
+                command.right_cmd = 0.0;
+                command.estop = true;
+                command.stopped_by_deadman = false;
+            }
+            drop(evidence);
+            drop(io);
+            drop(command);
+            self.clear_physical_navigation_lease();
+            result
+        })()
     }
 
     fn current_sim_pose(&self, ts_ms: u128) -> Pose2d {
@@ -2815,6 +3009,13 @@ impl Harness {
     }
 
     fn planner_step(&self) {
+        let motion_epoch = {
+            let gate = self.motion_gate.lock();
+            let Some(epoch) = gate.planner_epoch else {
+                return;
+            };
+            epoch
+        };
         let (goal, path) = {
             let planner = self.planner.lock();
             if !planner.active {
@@ -2828,7 +3029,7 @@ impl Harness {
 
         if self.config.profile.is_physical() {
             #[cfg(feature = "physical-navigation")]
-            self.physical_planner_step(goal, path);
+            self.physical_planner_step(goal, path, motion_epoch);
             #[cfg(not(feature = "physical-navigation"))]
             self.fail_physical_navigation(
                 "gate-disabled",
@@ -2860,8 +3061,12 @@ impl Harness {
             });
         let (left, right) = planner_drive_command(&current, &next);
 
-        match self.drive(None, left, right, Some(goal.speed_mode)) {
+        match self.drive_at_epoch(None, left, right, Some(goal.speed_mode), motion_epoch) {
             Ok(outcome) => {
+                let mut gate = self.motion_gate.lock();
+                if gate.stop_epoch != motion_epoch {
+                    return;
+                }
                 let mut planner = self.planner.lock();
                 planner.last_drive = Some(outcome.clone());
                 if outcome.soft_odometry_limited {
@@ -2875,19 +3080,27 @@ impl Harness {
                     planner.status = "active".to_string();
                     planner.message = "planner driving toward goal".to_string();
                 }
+                gate.planner_epoch = planner.active.then_some(motion_epoch);
             }
             Err(err) => {
+                let mut gate = self.motion_gate.lock();
                 let mut planner = self.planner.lock();
                 planner.ok = false;
                 planner.active = false;
                 planner.status = "stopped".to_string();
                 planner.message = format!("planner drive stopped: {err}");
+                gate.planner_epoch = None;
             }
         }
     }
 
     #[cfg(feature = "physical-navigation")]
-    fn physical_planner_step(&self, goal: PlannerGoal, _path: VisualizationPath) {
+    fn physical_planner_step(
+        &self,
+        goal: PlannerGoal,
+        _path: VisualizationPath,
+        motion_epoch: u64,
+    ) {
         let current_lease = { self.physical_navigation_lease.lock().clone() };
         let lease = match current_lease {
             Some(lease) if lease.approval => lease,
@@ -2933,48 +3146,74 @@ impl Harness {
 
         let execution = self.navigation_executor.status();
         if execution.active && execution.ok {
-            *self.planner.lock() = planner_status_from_execution(goal, execution);
+            let _ = self.activate_planner_at_epoch(
+                planner_status_from_execution(goal, execution),
+                motion_epoch,
+            );
             return;
         }
 
         let status = execution.status.clone();
         let message = execution.message.clone();
-        if let Err(error) = self.stop_without_planner_cancel() {
-            self.clear_physical_navigation_lease();
-            self.cancel_planner_state(
-                "safety-stop",
-                &format!("physical navigation terminal zero command failed: {error}"),
-            );
-            self.cancel_patrol_state(
-                "safety-stop",
-                "physical navigation terminal zero command failed",
-            );
+        let reached = status == "reached";
+        let stop_result = {
+            let mut gate = self.motion_gate.lock();
+            if gate.stop_epoch != motion_epoch || gate.planner_epoch != Some(motion_epoch) {
+                return;
+            }
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
+            let result = self.stop_without_planner_cancel_locked();
+            match &result {
+                Ok(_) => {
+                    *self.planner.lock() = planner_status_from_execution(goal, execution);
+                    if !reached {
+                        self.clear_physical_navigation_lease();
+                        self.cancel_patrol_state(&status, &message);
+                    }
+                }
+                Err(error) => {
+                    self.clear_physical_navigation_lease();
+                    self.cancel_planner_state(
+                        "safety-stop",
+                        &format!("physical navigation terminal zero command failed: {error}"),
+                    );
+                    self.cancel_patrol_state(
+                        "safety-stop",
+                        "physical navigation terminal zero command failed",
+                    );
+                }
+            }
+            result
+        };
+        if let Err(error) = stop_result {
+            warn!(?error, "physical navigation terminal zero command failed");
             return;
         }
-        *self.planner.lock() = planner_status_from_execution(goal, execution);
-        if status == "reached" {
-            return;
-        }
-        self.clear_physical_navigation_lease();
-        self.cancel_patrol_state(&status, &message);
     }
 
     fn fail_physical_navigation(&self, status: &str, message: &str) {
         let stop_result = {
+            let mut gate = self.motion_gate.lock();
+            gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+            gate.planner_epoch = None;
             let mut command = self.command.lock();
-            self.write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))
+            let result = self
+                .write_stop_command(ActionCommandEvidence::stopped(command.speed_mode.cap(), 0))
                 .map(|_| {
                     command.left_cmd = 0.0;
                     command.right_cmd = 0.0;
                     command.last_cmd_at = Some(Instant::now());
-                })
+                });
+            drop(command);
+            self.clear_physical_navigation_lease();
+            self.cancel_planner_state(status, message);
+            self.cancel_patrol_state(status, message);
+            result
         };
         if let Err(error) = stop_result {
             warn!(?error, "physical navigation stop failed");
         }
-        self.clear_physical_navigation_lease();
-        self.cancel_planner_state(status, message);
-        self.cancel_patrol_state(status, message);
     }
 
     fn cancel_planner_state(&self, status: &str, message: &str) {
@@ -3383,6 +3622,9 @@ impl Harness {
                     }
                 };
                 if should_stop {
+                    let mut gate = harness.motion_gate.lock();
+                    gate.stop_epoch = gate.stop_epoch.saturating_add(1);
+                    gate.planner_epoch = None;
                     let mut command = harness.command.lock();
                     let stop_result = harness.write_stop_command(ActionCommandEvidence::stopped(
                         command.speed_mode.cap(),
@@ -4184,6 +4426,14 @@ fn distance2d(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
 }
 
+#[cfg(feature = "physical-navigation")]
+fn scan_collision_clear(scan: &PlanarRangeScan, clearance_m: f64) -> bool {
+    let mut ranges = scan.ranges_m.iter().flatten();
+    ranges
+        .next()
+        .is_some_and(|first| *first > clearance_m && ranges.all(|range| *range > clearance_m))
+}
+
 struct PatrolStatusUpdate<'a> {
     ok: bool,
     active: bool,
@@ -4434,6 +4684,74 @@ mod tests {
             status.message = "test Nav2 goal cancelled".to_string();
             status.terminal_reason = Some(crate::navigation::NavigationTerminalReason::Cancelled);
             Ok(status.clone())
+        }
+
+        fn status(&self) -> NavigationExecutionStatus {
+            self.state.lock().clone()
+        }
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    struct BlockingSubmitNavigationExecutor {
+        state: Mutex<NavigationExecutionStatus>,
+        submit_started: std::sync::mpsc::SyncSender<()>,
+        submit_release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    impl NavigationExecutor for BlockingSubmitNavigationExecutor {
+        fn kind(&self) -> NavigationExecutorKind {
+            NavigationExecutorKind::Nav2
+        }
+
+        fn readiness(&self) -> NavigationExecutionStatus {
+            NavigationExecutionStatus {
+                ok: true,
+                active: false,
+                status: "ready".to_string(),
+                message: "blocking test executor ready".to_string(),
+                path: VisualizationPath::default(),
+                feedback: None,
+                terminal_reason: None,
+            }
+        }
+
+        fn submit(
+            &self,
+            goal: &PlannerGoal,
+            _expected_map: &MapIdentity,
+        ) -> Result<NavigationExecutionStatus> {
+            self.submit_started.send(()).unwrap();
+            self.submit_release.lock().recv().unwrap();
+            let status = NavigationExecutionStatus {
+                ok: true,
+                active: true,
+                status: "active".to_string(),
+                message: "blocking test goal accepted".to_string(),
+                path: VisualizationPath {
+                    ts_ms: now_ms(),
+                    frame_id: goal.frame_id.clone(),
+                    poses: Vec::new(),
+                },
+                feedback: None,
+                terminal_reason: None,
+            };
+            *self.state.lock() = status.clone();
+            Ok(status)
+        }
+
+        fn cancel(&self) -> Result<NavigationExecutionStatus> {
+            let status = NavigationExecutionStatus {
+                ok: true,
+                active: false,
+                status: "cancelled".to_string(),
+                message: "blocking test goal cancelled".to_string(),
+                path: VisualizationPath::default(),
+                feedback: None,
+                terminal_reason: None,
+            };
+            *self.state.lock() = status.clone();
+            Ok(status)
         }
 
         fn status(&self) -> NavigationExecutionStatus {
@@ -5276,6 +5594,22 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("blocked by lidar"));
+
+        let harness = physical_navigation_harness();
+        let mut no_measurements = simulated_range_scan(now_ms());
+        no_measurements.sample.as_mut().unwrap().ranges_m.fill(None);
+        harness.raw.write().range_scan = no_measurements;
+        let readiness = harness.navigation_readiness(&MapIdentity {
+            map_id: "sim-local".to_string(),
+            map_revision: "sim-grid-v1".to_string(),
+            frame_id: "map".to_string(),
+        });
+        assert!(!readiness.collision_clear);
+        assert!(harness
+            .set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+            .unwrap_err()
+            .to_string()
+            .contains("valid measurement"));
     }
 
     #[cfg(feature = "physical-navigation")]
@@ -5320,6 +5654,73 @@ mod tests {
         assert_eq!(harness.command.lock().right_cmd, 0.0);
         harness.cancel_planner_goal().unwrap();
         assert_eq!(executor.cancels.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg(feature = "physical-navigation")]
+    #[tokio::test]
+    async fn physical_submit_and_stop_are_linearized_at_the_executor_boundary() {
+        let (submit_started_tx, submit_started_rx) = std::sync::mpsc::sync_channel(1);
+        let (submit_release_tx, submit_release_rx) = std::sync::mpsc::sync_channel(1);
+        let executor = Arc::new(BlockingSubmitNavigationExecutor {
+            state: Mutex::new(NavigationExecutionStatus {
+                ok: true,
+                active: false,
+                status: "ready".to_string(),
+                message: "blocking test executor ready".to_string(),
+                path: VisualizationPath::default(),
+                feedback: None,
+                terminal_reason: None,
+            }),
+            submit_started: submit_started_tx,
+            submit_release: Mutex::new(submit_release_rx),
+        });
+        let harness = physical_navigation_harness_with_executor(executor);
+
+        let goal_harness = harness.clone();
+        let goal_thread = std::thread::spawn(move || {
+            goal_harness.set_planner_goal_authorized(physical_goal(), Some("nav-token"), true)
+        });
+        submit_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+
+        let (stop_done_tx, stop_done_rx) = std::sync::mpsc::sync_channel(1);
+        let stop_harness = harness.clone();
+        let stop_thread = std::thread::spawn(move || {
+            stop_done_tx.send(stop_harness.stop()).unwrap();
+        });
+        assert!(matches!(
+            stop_done_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        submit_release_tx.send(()).unwrap();
+        goal_thread.join().unwrap().unwrap();
+        stop_done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        stop_thread.join().unwrap();
+
+        assert!(!harness.planner_status().active);
+        assert!(harness.physical_navigation_lease.lock().is_none());
+        assert_eq!(harness.command.lock().left_cmd, 0.0);
+        assert_eq!(harness.command.lock().right_cmd, 0.0);
+
+        let stale_epoch = harness.motion_epoch();
+        harness.stop().unwrap();
+        let expected_map = harness.active_map_identity().unwrap();
+        assert!(harness
+            .set_navigation_goal_authorized_at_epoch(
+                physical_goal(),
+                expected_map,
+                Some("nav-token"),
+                true,
+                stale_epoch,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("superseded"));
     }
 
     #[cfg(feature = "physical-navigation")]
@@ -5775,6 +6176,15 @@ mod tests {
     async fn planner_rejects_blocked_sim_goal_without_motion() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
 
+        assert!(harness
+            .set_planner_goal(PlannerGoal {
+                x_m: f64::NAN,
+                ..PlannerGoal::default()
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("finite"));
+
         let status = harness
             .set_planner_goal(PlannerGoal {
                 x_m: -0.25,
@@ -5896,6 +6306,83 @@ mod tests {
         let status = harness.planner_status();
         assert!(!status.active);
         assert_eq!(status.status, "estop");
+    }
+
+    #[tokio::test]
+    async fn stop_linearizes_both_drive_and_navigation_orderings() {
+        let stale_drive = Harness::new(HarnessConfig::default()).unwrap();
+        let drive_epoch = stale_drive.motion_epoch();
+        stale_drive.stop().unwrap();
+        assert!(stale_drive
+            .drive_at_epoch(None, 0.2, 0.2, Some(SpeedMode::Low), drive_epoch)
+            .unwrap_err()
+            .to_string()
+            .contains("superseded"));
+        assert_eq!(stale_drive.telemetry().left_cmd, 0.0);
+
+        let drive_then_stop = Harness::new(HarnessConfig::default()).unwrap();
+        drive_then_stop
+            .drive(None, 0.2, 0.2, Some(SpeedMode::Low))
+            .unwrap();
+        drive_then_stop.stop().unwrap();
+        assert_eq!(drive_then_stop.telemetry().left_cmd, 0.0);
+        assert_eq!(drive_then_stop.telemetry().right_cmd, 0.0);
+
+        let stale_navigation = Harness::new(HarnessConfig::default()).unwrap();
+        let expected_map = stale_navigation.active_map_identity().unwrap();
+        let navigation_epoch = stale_navigation.motion_epoch();
+        stale_navigation.stop().unwrap();
+        assert!(stale_navigation
+            .set_navigation_goal_authorized_at_epoch(
+                PlannerGoal {
+                    x_m: 0.25,
+                    y_m: 0.0,
+                    ..PlannerGoal::default()
+                },
+                expected_map,
+                None,
+                true,
+                navigation_epoch,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("superseded"));
+        assert!(!stale_navigation.planner_status().active);
+
+        let navigation_then_stop = Harness::new(HarnessConfig::default()).unwrap();
+        navigation_then_stop
+            .set_planner_goal(PlannerGoal {
+                x_m: 0.25,
+                y_m: 0.0,
+                ..PlannerGoal::default()
+            })
+            .unwrap();
+        navigation_then_stop.stop().unwrap();
+        assert!(!navigation_then_stop.planner_status().active);
+        assert_eq!(navigation_then_stop.telemetry().left_cmd, 0.0);
+        assert_eq!(navigation_then_stop.telemetry().right_cmd, 0.0);
+    }
+
+    #[tokio::test]
+    async fn stop_linearizes_both_camera_aim_orderings() {
+        let stale_aim = Harness::new(HarnessConfig::default()).unwrap();
+        let aim_epoch = stale_aim.motion_epoch();
+        stale_aim.stop().unwrap();
+        assert!(stale_aim
+            .camera_aim_at_epoch(None, 20.0, 5.0, None, None, aim_epoch)
+            .unwrap_err()
+            .to_string()
+            .contains("superseded"));
+        assert!(stale_aim.camera_aim_state().is_none());
+
+        let aim_then_estop = Harness::new(HarnessConfig::default()).unwrap();
+        aim_then_estop
+            .camera_aim(None, 20.0, 5.0, None, None)
+            .unwrap();
+        aim_then_estop.estop().unwrap();
+        assert!(aim_then_estop.telemetry().estop);
+        assert_eq!(aim_then_estop.telemetry().left_cmd, 0.0);
+        assert_eq!(aim_then_estop.telemetry().right_cmd, 0.0);
     }
 
     #[tokio::test]

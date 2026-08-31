@@ -142,6 +142,9 @@ struct RuntimeArgs {
     allow_physical_navigation: bool,
 
     #[arg(long, action = ArgAction::SetTrue)]
+    allow_legacy_physical_control: bool,
+
+    #[arg(long, action = ArgAction::SetTrue)]
     allow_calibration_motion: bool,
 
     #[arg(long)]
@@ -1195,6 +1198,9 @@ fn agent_task_supervisor_args(name: &str, config: &HarnessConfig) -> Vec<String>
     if config.allow_physical_navigation {
         args.push("--allow-physical-navigation".to_string());
     }
+    if config.allow_legacy_physical_control {
+        args.push("--allow-legacy-physical-control".to_string());
+    }
     if let Some(path) = &config.replay_source {
         args.push("--replay-source".to_string());
         args.push(path.display().to_string());
@@ -1575,6 +1581,7 @@ impl RuntimeArgs {
             },
             allow_physical_actuation: self.allow_physical_actuation.then_some(true),
             allow_physical_navigation: self.allow_physical_navigation.then_some(true),
+            allow_legacy_physical_control: self.allow_legacy_physical_control.then_some(true),
             allow_calibration_motion: self.allow_calibration_motion.then_some(true),
             deadman_ms: self.deadman_ms,
             soft_odometry_limit_m: self.soft_odometry_limit_m,
@@ -1931,6 +1938,9 @@ fn serve_http_args(config: &HarnessConfig) -> Vec<String> {
     if config.allow_physical_navigation {
         args.push("--allow-physical-navigation".to_string());
     }
+    if config.allow_legacy_physical_control {
+        args.push("--allow-legacy-physical-control".to_string());
+    }
     if config.allow_calibration_motion {
         args.push("--allow-calibration-motion".to_string());
     }
@@ -2225,5 +2235,20 @@ mod http_tests {
             agent_messages_endpoint("http://127.0.0.1:8000/"),
             "http://127.0.0.1:8000/agent/messages"
         );
+    }
+
+    #[test]
+    fn daemon_children_preserve_explicit_legacy_physical_control_opt_in() {
+        let config = HarnessConfig {
+            allow_legacy_physical_control: true,
+            ..HarnessConfig::default()
+        };
+
+        assert!(serve_http_args(&config)
+            .iter()
+            .any(|arg| arg == "--allow-legacy-physical-control"));
+        assert!(agent_task_supervisor_args("fixture", &config)
+            .iter()
+            .any(|arg| arg == "--allow-legacy-physical-control"));
     }
 }

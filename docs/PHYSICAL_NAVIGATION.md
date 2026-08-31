@@ -56,11 +56,28 @@ Every physical navigation start requires:
 - no latched e-stop, prior deadman stop, or soft-distance limit.
 - an injected Nav2 goal/cancel/path/feedback executor that reports ready.
 
+Remote canonical clients establish the short pilot lease with a bearer secret
+stored in `LEASH_OPERATOR_AUTH_TOKEN_FILE`. Qualia must point
+`QUALIA_LEASH_OPERATOR_TOKEN_FILE` at the matching secret. Leash accepts only a
+regular, non-symlink UTF-8 file of at most 16 KiB, and physical bearer-issued
+leases are limited to 1–30 seconds. The session token in the request body is
+not itself authority to create a lease, and a remote physical goal must present
+the bearer again. Direct legacy authorize/drive and physical MCP or agent
+capabilities stay disabled unless the deployment also explicitly opts into
+loopback-only legacy control. The local dashboard never supplies a default
+token and caps its explicit legacy lease at 30 seconds.
+
 Physical planner goals are forced to the low speed mode. Nav2 velocity remains
 a proposal and must still pass through Leash's CPU safety and motor-owner path.
 Without that complete bridge, readiness is explicitly `unsupported` and no
 straight-line fallback is attempted. Simulation remains deterministic. Replay
 remains non-actuating.
+
+The first real Nav2 executor must make goal acceptance and cancellation bounded
+and two-phase. Leash linearizes these calls with the STOP epoch; a blocking
+executor would delay STOP completion. `UnsupportedNavigationExecutor` remains
+the only production executor in this release, so physical Start stays
+fail-closed until that prerequisite is implemented and tested.
 
 ## Cancellation contract
 
