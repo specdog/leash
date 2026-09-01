@@ -1,0 +1,6 @@
+.build/
+node_modules/
+output/rendered*/
+output/pdf-rendered/
+output/layout/
+output/private-publish-receipt.json

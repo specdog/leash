@@ -1,0 +1,146 @@
+{
+  "schema_version": "leash.talk-preflight.v1",
+  "captured_at": "2026-09-01T16:56:12.787Z",
+  "mode": "observe",
+  "role": null,
+  "profile": null,
+  "ready": false,
+  "gates": [
+    {
+      "id": "service",
+      "label": "Leash live service",
+      "ok": false,
+      "severity": "required",
+      "detail": "unknown / unknown"
+    },
+    {
+      "id": "estop",
+      "label": "E-stop clear",
+      "ok": false,
+      "severity": "required",
+      "detail": "clear"
+    },
+    {
+      "id": "deadman",
+      "label": "Deadman healthy",
+      "ok": false,
+      "severity": "required",
+      "detail": "stale"
+    },
+    {
+      "id": "actuation",
+      "label": "Physical actuation gate",
+      "ok": false,
+      "severity": "required",
+      "detail": "locked"
+    },
+    {
+      "id": "controller",
+      "label": "Controller owner connected",
+      "ok": false,
+      "severity": "required",
+      "detail": "unavailable"
+    },
+    {
+      "id": "authority",
+      "label": "CPU remains final authority",
+      "ok": false,
+      "severity": "required",
+      "detail": "unavailable"
+    },
+    {
+      "id": "supervisor",
+      "label": "Safety supervisor healthy",
+      "ok": false,
+      "severity": "required",
+      "detail": "healthy"
+    },
+    {
+      "id": "evidence",
+      "label": "Evidence journal healthy",
+      "ok": false,
+      "severity": "required",
+      "detail": "0 durable records"
+    },
+    {
+      "id": "failures",
+      "label": "No safety-path failures",
+      "ok": true,
+      "severity": "required",
+      "detail": "ack/evidence/fault/panic/write counters are zero"
+    },
+    {
+      "id": "camera",
+      "label": "Camera fresh",
+      "ok": false,
+      "severity": "required",
+      "detail": "unavailable"
+    },
+    {
+      "id": "lidar",
+      "label": "LiDAR fresh",
+      "ok": false,
+      "severity": "required",
+      "detail": "no timestamp"
+    },
+    {
+      "id": "imu",
+      "label": "IMU fresh",
+      "ok": false,
+      "severity": "required",
+      "detail": "no timestamp"
+    },
+    {
+      "id": "odometry",
+      "label": "Odometry available",
+      "ok": false,
+      "severity": "required",
+      "detail": "unavailable"
+    },
+    {
+      "id": "battery",
+      "label": "Battery above 30%",
+      "ok": false,
+      "severity": "required",
+      "detail": "?%"
+    },
+    {
+      "id": "cuda",
+      "label": "CUDA probe active",
+      "ok": false,
+      "severity": "required",
+      "detail": "unavailable"
+    },
+    {
+      "id": "mapping",
+      "label": "Mapping state",
+      "ok": false,
+      "severity": "advisory",
+      "detail": "unavailable"
+    },
+    {
+      "id": "visual-odometry",
+      "label": "Visual odometry",
+      "ok": false,
+      "severity": "advisory",
+      "detail": "unavailable"
+    }
+  ],
+  "transport": {
+    "health": "fetch failed",
+    "sensors": "fetch failed",
+    "runtime": "fetch failed",
+    "mapping": "fetch failed",
+    "visualOdometry": "fetch failed"
+  },
+  "snapshot": {
+    "battery_pct": null,
+    "camera": null,
+    "lidar_age_ms": null,
+    "imu_age_ms": null,
+    "accelerator": null,
+    "durable_evidence_records": null,
+    "mapping_state": null,
+    "visual_odometry_state": null
+  }
+}
