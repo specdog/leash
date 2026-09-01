@@ -59,12 +59,13 @@ leash show-config sim-http
 
 ## Demo
 
-[Geek on a Leash](talks/geek-on-a-leash/README.md) is the full Leash demo and Rust Tuesdays talk. It walks through the agent-to-motor boundary, the Rust runtime, ROS 2 integration, CUDA processing, and a bounded UGV demo.
+[Geek on a Leash](talks/geek-on-a-leash/output/geek-on-a-leash.pdf) is the full Leash demo and Rust Tuesdays talk. It walks through the agent-to-motor boundary, the Rust runtime, ROS 2 integration, CUDA processing, and a bounded UGV demo.
 
 The demo package includes:
 
 - [editable deck source](talks/geek-on-a-leash/deck.mjs)
-- [PowerPoint](talks/geek-on-a-leash/output/geek-on-a-leash.pptx) and [PDF](talks/geek-on-a-leash/output/geek-on-a-leash.pdf)
+- [PowerPoint](talks/geek-on-a-leash/output/geek-on-a-leash.pptx)
+- [source + notes](talks/geek-on-a-leash/README.md)
 - [speaker notes](talks/geek-on-a-leash/output/speaker-notes.md)
 - [demo preflight](talks/geek-on-a-leash/demo-preflight.mjs)
 - [recorded fallback demo](talks/geek-on-a-leash/output/fallback-demo.mp4)
