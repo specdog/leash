@@ -1,36 +1,54 @@
 # Leash
 
-> One safe control surface for agents, operators, simulations, and physical robots.
+> One safety-gated control surface for agents, operators, simulations, and physical robots.
 
-Leash is a Rust robotics harness. An operator or agent asks for an action through
-CLI, HTTP, or MCP. Leash validates that request against the same capability and
-safety policy, sends an allowed command to a selected adapter, and publishes the
-result as typed telemetry.
+Leash is an open-source Rust robotics runtime. CLI, HTTP, and MCP requests converge on the same typed capability and safety boundary. An AI or operator can request motion; **Leash decides whether motion is allowed**.
 
-The important rule is simple: **an AI can request motion; Leash decides whether
-motion is allowed.** Simulation works out of the box. Hardware and autonomous
-navigation each require separate, explicit gates.
+Simulation and replay are non-actuating by default. Physical actuation and physical navigation require separate compile/runtime gates plus normal authorization, approval, freshness, deadman, collision, stop, and E-stop checks.
+
+## Current main
+
+The current repository is an active multi-crate workspace, not a crate skeleton.
+
+| Area | Current implementation |
+| --- | --- |
+| Control surfaces | CLI, HTTP, WebSocket/SSE telemetry, MCP stdio, MCP Streamable HTTP |
+| Safe local use | simulation, deterministic replay, record/replay JSONL, generated schemas |
+| Navigation | planner/patrol primitives plus bounded idempotent HTTP goals, status, cancellation, deadlines, and verified stop |
+| Compute | authenticated async advisory jobs with bounded temporal-spatial evidence, CPU execution, qualified CUDA acceleration, parity checks, and CPU fallback |
+| Hardware | feature-gated Waveshare UGV implementation with calibration/deployment/rollout evidence kept outside reusable core |
+| Localization | typed localization/map contracts and provider boundaries; ROS 2 supplies proposals/evidence and never owns motors |
+| Safety | capability policy, pilot ownership, approval, deadman, stale-provider checks, collision clearance, soft odometry limits, stop, and latching E-stop |
 
 ```mermaid
 flowchart LR
-  operator["Human operator"] --> surface
-  agent["Local or hosted agent"] --> surface
+  human["Human operator"] --> surface
+  agent["Agent"] --> surface
   surface["CLI · HTTP · MCP"] --> registry["Typed capability registry"]
-  registry --> policy{"Safety policy allows it?"}
+  registry --> policy{"Leash policy allows it?"}
   policy -- no --> denied["Typed denial + zero motion"]
   policy -- yes --> runtime["Leash runtime"]
   runtime --> adapter{"Selected adapter"}
-  adapter --> sim["Simulation"]
-  adapter --> replay["Replay fixture"]
+  adapter --> sim["Simulation / replay"]
   adapter --> robot["Physical robot"]
-  sim --> telemetry["Telemetry · events · recordings"]
-  replay --> telemetry
-  robot --> telemetry
-  telemetry --> operator
+  runtime --> telemetry["Telemetry · events · recordings"]
+  telemetry --> human
   telemetry --> agent
 ```
 
-## Try It Safely
+### Rust workspace
+
+- `crates/leash-core` — reusable contracts and core types
+- `crates/leash-runtime` — runtime orchestration
+- `crates/leash-cuda` — bounded advisory CUDA compute with CPU parity/fallback
+- `crates/leash-gateway` — gateway boundary
+- `crates/leash-replay` — replay support
+- `crates/leash-ros2` — ROS 2 provider/proposal boundary
+- `crates/leash-waveshare` — reusable Waveshare adapter code
+- `src/` — top-level CLI/HTTP/MCP harness integration
+- `implementations/waveshare-ugv/` — concrete robot deployment, calibration, and field proof
+
+## Try it safely
 
 Install the CLI and start the simulated HTTP stack:
 
@@ -47,14 +65,15 @@ curl -s http://127.0.0.1:8000/telemetry | jq
 leash agent-send "inspect the battery"
 ```
 
-Nothing in that path can touch hardware. To expose the same runtime to an MCP
-client instead:
+Nothing in that path can touch hardware.
+
+Run MCP over stdio:
 
 ```bash
 leash run sim-mcp
 ```
 
-Or run a local MCP HTTP endpoint and inspect it with the built-in client:
+Or run the local MCP HTTP endpoint:
 
 ```bash
 leash serve mcp-http --listen 127.0.0.1:9990
@@ -63,243 +82,144 @@ leash mcp call health
 leash mcp call observe
 ```
 
-## Pick a Mode
-
-| Goal | Command | Can move hardware? |
-| --- | --- | --- |
-| Learn the runtime | `leash run sim-http` | No |
-| Connect an MCP agent over stdio | `leash run sim-mcp` | No |
-| Connect MCP over localhost HTTP | `leash serve mcp-http` | No by default |
-| Replay a known sensor session | `leash replay examples/replay/sim-basic.jsonl` | No |
-| Fan out module events over JSONL | `leash run sim-stream-hub` | No |
-| Start a physical adapter | Feature + runtime actuation opt-in | Only after policy gates pass |
-
-See every built-in stack and its requirements with:
+Inspect built-in stacks and configuration:
 
 ```bash
 leash list
 leash show-config sim-http
 ```
 
-## What Happens Inside
+## Bounded navigation API
 
-Every surface—web dashboard, REST endpoint, CLI command, or MCP tool—converges
-on the same capability registry. There is no privileged “AI path” around the
-safety checks.
+Leash exposes a goal-level HTTP surface for clients that need mission orchestration without owning a motor refresh loop:
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant A as Agent or operator
-  participant S as CLI / HTTP / MCP
-  participant C as Capability registry
-  participant P as Policy + safety state
-  participant D as Adapter
-  participant T as Telemetry
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/navigation/goals` | Submit an idempotent bounded planner goal |
+| `GET` | `/navigation/status?mission_id=...` | Reconcile planner state |
+| `POST` | `/navigation/goals/:mission_id/cancel` | Cancel and command zero output |
+| `POST` | `/motors/stop/verified` | Command and confirm zero output |
 
-  A->>S: Request capability + typed arguments
-  S->>C: Resolve capability schema
-  C->>P: Check mode, token, approval, freshness, estop
-  alt request denied
-    P-->>S: Structured reason
-    P->>D: Keep or command zero speed
-    S-->>A: Denied
-  else request allowed
-    P->>D: Bounded command
-    D-->>T: State, sensors, command result
-    T-->>A: Observe over HTTP / WS / SSE / MCP
-  end
-```
+The caller must already hold a short pilot lease. Goal submission does not create or extend that lease. Current physical goals are low-speed, bounded by deadline, and remain subordinate to all Leash safety checks.
 
-Modules declare their inputs, outputs, lifecycle, and health. The coordinator
-starts them in dependency order and stops them in reverse order. Streams use
-in-memory transport for deterministic tests, local pub/sub for async fan-out,
-or a TCP JSONL hub for external processes.
+See [`docs/NAVIGATION_API.md`](docs/NAVIGATION_API.md) and [`docs/PHYSICAL_NAVIGATION.md`](docs/PHYSICAL_NAVIGATION.md).
 
-```mermaid
-flowchart TB
-  sensors["Camera · lidar · IMU · odometry"] --> contracts["Versioned sensor contracts"]
-  contracts --> modules["Runtime modules"]
-  modules --> state["Harness state"]
-  state --> views["HTTP · WebSocket · SSE · MCP observe"]
-  state --> recording["Record / replay JSONL"]
-  state --> memory["Spatial memory"]
-  planner["Path or localization provider"] --> state
-  state --> guard["Leash motion guard"]
-  guard --> base["MobileBaseAdapter"]
-```
+## Advisory compute
 
-## Safety Is a State Machine
+The asynchronous compute API accepts authenticated, bounded jobs and returns typed evidence. Compute never receives motor authority.
 
-Physical motion is fail-closed. The normal path needs a compiled hardware
-adapter, the physical-actuation runtime opt-in, a valid owner token, and any
-policy-required approval. Physical goal or patrol execution adds an independent
-navigation feature and runtime gate plus fresh localization and lidar.
+The current `spatial_window` workload can transform recent range scans into odometry-frame spatial evidence. Small workloads stay on CPU. CUDA is allowed only after CPU-authoritative shadow comparisons qualify the accelerator; a mismatch or CUDA failure falls back to CPU with an explicit receipt.
 
-```mermaid
-stateDiagram-v2
-  [*] --> SimulationSafe
-  SimulationSafe --> PhysicalLocked: hardware profile selected
-  PhysicalLocked --> Authorized: actuation opt-in + valid token
-  Authorized --> Ready: approval and required sensors fresh
-  Ready --> Moving: bounded capability accepted
-  Moving --> Ready: explicit stop
-  Moving --> PhysicalLocked: token expires / deadman / stale sensor
-  Moving --> EStopped: e-stop
-  Ready --> EStopped: e-stop
-  EStopped --> PhysicalLocked: separately authorized reset
-```
+See [`docs/COMPUTE_API.md`](docs/COMPUTE_API.md).
 
-Stop and e-stop remain available when ordinary commands are denied. Token
-replacement, deadman expiry, provider loss, stale lidar, collision clearance,
-or an odometry limit cancels active motion and commands zero speed. Replay is
-always non-actuating.
+## Physical robot boundary
 
-Read the full [safety policy](docs/PHYSICAL_NAVIGATION.md) before enabling a
-physical navigation path.
-
-## Physical Robot Boundary
-
-Leash owns the device command boundary and final safety decision. Perception,
-mapping, localization, and planning providers supply typed evidence; they do
-not write motor commands.
+Leash owns the final device command boundary. Perception, mapping, localization, planning, ROS 2, CUDA, model providers, and external agents may provide typed evidence or requests; they do not write motors directly.
 
 ```mermaid
 flowchart LR
-  devices["Robot devices"] --> leash["Leash\nsole device owner"]
-  leash --> sensorContracts["Range scan · IMU · camera · odometry"]
-  sensorContracts --> provider["Mapping / localization / planner"]
-  provider --> proposal["Pose or path proposal"]
-  proposal --> leash
-  request["Operator or agent request"] --> leash
-  leash --> checks{"Token · approval · freshness\nclearance · deadman · estop"}
+  providers["Mapping · localization · planner · agent · CUDA"] --> proposal["Typed request / evidence"]
+  proposal --> leash["Leash"]
+  leash --> checks{"Token · approval · freshness · collision · deadman · E-stop"}
   checks -- pass --> motors["Bounded adapter command"]
   checks -- fail --> zero["Reject + zero speed"]
 ```
 
-The current concrete implementation is the
-[Waveshare UGV stack](implementations/waveshare-ugv/README.md). It keeps robot
-identity, device paths, calibration evidence, deployment, rollback, and field
-proof outside the reusable core. ROS 2 is an implementation adapter for mapping
-and localization, never a parallel motor owner.
+The current concrete implementation is [`implementations/waveshare-ugv/`](implementations/waveshare-ugv/README.md). Robot identity, device paths, calibration, deployment, rollback, and field proof remain implementation-owned rather than leaking into reusable core.
 
-Pinkie's measured transforms, bounded calibration lease, verified-zero evidence,
-map-lineage reload proof, and Stage 1 acceptance manifest live in the
-[calibration guide](implementations/waveshare-ugv/calibration/README.md). Stage 1
-can mark calibration and mapping ready; autonomous exploration remains disabled
-until its independent watchdog proofs pass.
+## Development state
 
-## Core Surfaces
+The README describes merged `main` as shipped repository state. Draft pull requests are not treated as current behavior.
 
-### MCP tools
+Active draft work includes:
 
-| Tool | Purpose |
-| --- | --- |
-| `health` | Read runtime and safety health |
-| `capabilities` | Discover endpoints, tools, modes, and gates |
-| `modules` | Inspect the active module graph |
-| `observe` | Read the latest typed telemetry frame |
-| `invoke_capability` | Request an action through policy |
-| `stop` | Command a non-latching zero-speed stop |
-| `estop` | Latch emergency stop |
-| `capture` | Capture a deterministic frame |
+- [#187](https://github.com/specdog/leash/pull/187) — durable agent sessions/tasks and headful operator workflow;
+- [#188](https://github.com/specdog/leash/pull/188) — compact Qualia telemetry, gimbal state, and standard MCP mounting, stacked on #187;
+- [#191](https://github.com/specdog/leash/pull/191) — lossless post-safety applied-action evidence;
+- [#179–#181](https://github.com/specdog/leash/pulls) — older stacked calibration/map/physical-navigation field-evidence work that intentionally remains draft until physical acceptance evidence exists.
 
-`POST /mcp` implements MCP Streamable HTTP. Compatibility routes remain for
-existing local tools. See [the MCP HTTP guide](docs/MCP_HTTP.md).
+Do not merge stale draft branches directly. Bring them current with `main`, rerun verification, and reconcile docs/contracts first.
 
-### HTTP and streams
+## Open source: humans
 
-| Route | Purpose |
-| --- | --- |
-| `GET /health` | Health and safety snapshot |
-| `GET /capabilities` | Active runtime contract |
-| `GET /telemetry` | Latest telemetry frame |
-| `GET /events/telemetry` | Server-sent telemetry |
-| `WS /ws/telemetry` | WebSocket telemetry |
-| `POST /drive` | Policy-gated differential drive request |
-| `POST /stop` | Shared stop path |
-| `POST /estop` | Shared latching e-stop path |
-| `GET /camera/snapshot` | One bounded JPEG snapshot |
-| `GET /sensors` | Typed sensor status |
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-### Record and replay
-
-Recordings use the compact `leash-replay-v1` JSONL format. Replay sends those
-events through the normal observation surfaces without starting hardware:
+Minimal setup:
 
 ```bash
-leash record --output /tmp/leash-demo.jsonl --samples 10 --interval-ms 50
-leash replay /tmp/leash-demo.jsonl --speed 20
-leash serve http --replay-source examples/replay/sim-basic.jsonl
+git clone https://github.com/specdog/leash.git
+cd leash
+npm ci
+cargo build
+cargo run -- run sim-http
 ```
 
-## Extending Leash
+Work on a branch from current `main`. Before requesting merge, run the repository proof appropriate to the change; the full CI-equivalent set is listed below.
 
-A new robot implements small adapter contracts below the policy layer:
+## Open source: coding agents
 
-```mermaid
-flowchart LR
-  profile["Feature-gated profile"] --> registry["Capability metadata"]
-  registry --> mobile["MobileBaseAdapter"]
-  registry --> camera["CameraAdapter"]
-  registry --> gimbal["GimbalAdapter"]
-  registry --> sensors["Sensor adapters"]
-  mobile --> tests["Sim + replay first"]
-  camera --> tests
-  gimbal --> tests
-  sensors --> tests
-  tests --> physical["Bench proof, then field proof"]
+Start with [`AGENTS.md`](AGENTS.md). The repository also includes reusable verification guidance under [`.agents/skills/`](.agents/skills/).
+
+For project structure, agents query the compiled DotDog graph rather than parsing human `.dog` source:
+
+```bash
+npm ci
+npx dotdog serve
 ```
 
-Start with [the adapter guide](docs/ADAPTERS.md) and its
-[smoke-test template](docs/ADAPTER_SMOKE_TEMPLATE.md). New hardware must not
-make default builds or tests require a device.
+`specs/leash/leash.dag` is the compiled agent graph. Human contributors own `specs/leash/*.dog`. If the graph and current implementation disagree, report the drift instead of silently inventing structure.
 
-## Repository Guide
+## Repository guide
 
 ```text
-src/                         reusable runtime, policy, adapters, protocols
-src/bin/                     leash CLI and schema binaries
+AGENTS.md                    coding-agent entry point
+CONTRIBUTING.md              human contributor workflow
+crates/                      reusable Rust workspace crates
+src/                         top-level harness integration
 implementations/             concrete robot implementations and field proof
+operator/                    operator-side code/tests
 examples/                    simulation, replay, and client fixtures
-docs/                        focused operator and extension guides
+docs/                        operator, protocol, safety, and extension guides
 schemas/                     generated external JSON Schema
-scripts/                     smoke, packaging, and deployment helpers
-specs/leash/                 DotDog project graph source and compiled DAG
-.github/workflows/           CI and release automation
+scripts/                     smoke, packaging, deployment, and proof helpers
+specs/leash/                 DotDog source + compiled DAG
+.github/workflows/           CI, ROS 2, and release automation
 ```
 
 Useful guides:
 
-- [Configuration and adapter contracts](docs/ADAPTERS.md)
-- [MCP Streamable HTTP](docs/MCP_HTTP.md)
-- [Sensor contracts](docs/SENSORS.md)
-- [Localization providers](docs/LOCALIZATION_PROVIDERS.md)
-- [Navigation and patrol](docs/NAVIGATION.md)
-- [Physical navigation gates](docs/PHYSICAL_NAVIGATION.md)
-- [Operator session replay](docs/OPERATOR_SESSIONS.md)
-- [Schemas and compatibility](docs/SCHEMAS.md)
-- [Release proof](docs/RELEASE.md)
-- [Source map](docs/SOURCE_MAP.md)
+- [`docs/ADAPTERS.md`](docs/ADAPTERS.md)
+- [`docs/MCP_HTTP.md`](docs/MCP_HTTP.md)
+- [`docs/SENSORS.md`](docs/SENSORS.md)
+- [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md)
+- [`docs/LOCALIZATION_PROVIDERS.md`](docs/LOCALIZATION_PROVIDERS.md)
+- [`docs/NAVIGATION.md`](docs/NAVIGATION.md)
+- [`docs/NAVIGATION_API.md`](docs/NAVIGATION_API.md)
+- [`docs/PHYSICAL_NAVIGATION.md`](docs/PHYSICAL_NAVIGATION.md)
+- [`docs/COMPUTE_API.md`](docs/COMPUTE_API.md)
+- [`docs/OPERATOR_SESSIONS.md`](docs/OPERATOR_SESSIONS.md)
+- [`docs/SCHEMAS.md`](docs/SCHEMAS.md)
+- [`docs/RELEASE.md`](docs/RELEASE.md)
+- [`docs/SOURCE_MAP.md`](docs/SOURCE_MAP.md)
 
-## Development
+## Verification
 
-The aggregate no-hardware proof mirrors the release-critical behavior:
+The full repository proof mirrors CI:
 
 ```bash
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
+cargo test -p leash-core --doc
+cargo test --no-default-features --features sim,mcp
+npm test
 cargo run --features mcp --bin leash-schema -- --check
+cargo package --workspace --locked
 scripts/smoke-all.sh
 ```
 
-The CI feature matrix also checks core-only, MCP-only, HTTP simulation, hardware
-adapter, and all-feature builds. A `v*.*.*` tag packages the crate and platform
-binaries, then creates a draft GitHub release.
+CI also checks core-only, default, MCP-only, HTTP simulation, hardware-adapter, and all-feature builds.
 
 ## License
 
 MIT
-
-
