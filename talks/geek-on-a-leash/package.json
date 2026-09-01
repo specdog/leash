@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node deck.mjs output/geek-on-a-leash.pptx",
+    "verify": "node verify-deck.mjs output/geek-on-a-leash.pptx",
     "preflight": "node demo-preflight.mjs",
     "publish": "node publish.mjs"
   },

@@ -6,13 +6,18 @@ Deck source commit: `566bc569b24bf5f392291b142469282fcdfac2b3` from `specdog/lea
 
 - Canonical rule and architecture: `README.md`
 - Validated newtypes, `Candidate<C>`, `Authorized<C>`, safety gate, and compile-fail contracts: `crates/leash-core/src/drive.rs`
+- Checked monotonic time, `NonZeroU64` identifiers, `Result` composition, and `Stamped<T>::map` with `FnOnce`: `crates/leash-core/src/time.rs`
+- Unit-generating `macro_rules!` and cross-unit compile-fail contract: `crates/leash-core/src/units.rs`
 - `Frame<Tag>`, `Pose2<Tag>`, and `PhantomData` frame markers: `crates/leash-core/src/frame.rs`
-- `ActuationPort`, associated types, supervisor bounds, priority safety path, and 10 ms default tick: `crates/leash-runtime/src/supervisor.rs`
-- Bounded lane implementation: `crates/leash-runtime/src/lane.rs`
-- `ControllerIo` supertraits and blanket implementation, Waveshare adapter, and verified acknowledgements: `crates/leash-waveshare/src/lib.rs`
-- Transport-neutral command/query traits: `crates/leash-gateway/src/lib.rs`
+- `ActuationPort`, associated types, equality bounds, single-owner thread, panic containment, `Drop`, and 10 ms default tick: `crates/leash-runtime/src/supervisor.rs`
+- Generic bounded lane, value-preserving errors, explicit overflow policy, and receiver-owned closure: `crates/leash-runtime/src/lane.rs`
+- Atomic priority safety mailbox and AcqRel/Acquire ordering: `crates/leash-runtime/src/safety.rs`
+- Latest-only generic slot, sequence rejection, `Option::replace`, and `Option::take`: `crates/leash-runtime/src/latest.rs`
+- `ControllerIo` supertraits and blanket implementation, closure factory, trait objects, Waveshare adapter, `let-else`, and verified acknowledgements: `crates/leash-waveshare/src/lib.rs`
+- Tagged Serde command enum, strict unknown-field handling, transport-neutral service traits, and typed error conversion: `crates/leash-gateway/src/lib.rs`
 - ROS2/Nav2 typed proposals and conversions: `crates/leash-ros2/src/lib.rs`
-- CUDA shadow gate and fallback: `crates/leash-cuda/src/gate.rs` and `crates/leash-cuda/README.md`
+- Crate-wide unsafe denial and the feature-gated cudarc launch island: `crates/leash-cuda/src/lib.rs` and `crates/leash-cuda/src/device.rs`
+- Deterministic stable digests and cross-architecture replay oracle: `crates/leash-replay/src/lib.rs`
 
 ## Measured evidence
 

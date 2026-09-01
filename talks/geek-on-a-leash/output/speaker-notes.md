@@ -1,8 +1,8 @@
-# Geek on a Leash — Speaker Notes
+# Geek on a Leash — Rust Tuesdays speaker notes
 
 ## 01
 
-Welcome. This is a talk about a small piece of software with an intentionally narrow job: stand between an intelligent requester and physical motors. We will spend most of the hour inside Leash, then use Pinkie for a bounded live proof.
+This is the Rust Tuesdays version: substantially more source code, fewer broad architecture slides, and a line-by-line tour of the language mechanisms that make Leash safe enough to sit near motors.
 
 [Sources]
 - https://github.com/specdog/leash
@@ -10,216 +10,291 @@ Welcome. This is a talk about a small piece of software with an intentionally na
 
 ## 02
 
-Start at the boundary. In an agentic robot, the planner, human, autonomy stack, and recovery code may all want motion. If authority is implicit, every integration becomes a safety argument. Leash makes the question explicit.
+The core problem is authority, not intelligence. Several producers may propose motion, but only one narrow boundary may authorize it. Rust lets us represent that authority in types rather than conventions.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/README.md
 
 ## 03
 
-The metaphor is literal enough to be useful. Leash does not invent missions, recognize rooms, or decide what is interesting. It constrains the path from requested action to the physical body.
+Four verbs define the boundary. The rest of this talk asks how Rust preserves that order across generics, traits, threads, drivers, serialization, ROS2, and CUDA.
 
 [Sources]
-- https://github.com/specdog/leash
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/README.md
 
 ## 04
 
-This is the canonical rule from the project README. I use it as a design filter: language models and planners produce candidates; only Leash can authorize a candidate for hardware execution.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/README.md
-
-## 05
-
-Pinkie is the current robot. The left image is a live camera snapshot from today; the right is the official Waveshare product image. The important point is not the brand. It is that real serial buses, stale sensors, batteries, and motor controllers turn vague intent into concrete failure modes.
+Pinkie is the concrete forcing function: Jetson compute, motor controller, LiDAR, camera, and an actual chassis. Every language decision we discuss has a physical consequence at this boundary.
 
 [Sources]
 - https://www.waveshare.com/product/ai/robots/ugv-rover-pt-jetson-orin-ai-kit.htm
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/implementations/waveshare-ugv/README.md
+
+## 05
+
+The workspace structure is not packaging trivia. Core defines the legal vocabulary. Runtime owns authority. Adapters and accelerators depend inward, so they cannot redefine the rules without creating a visible dependency violation.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/Cargo.toml
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/Cargo.toml
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/Cargo.toml
 
 ## 06
 
-Follow a motion request downward. Protocol parsing cannot write motors. The registry resolves a capability. Policy validates and authorizes. The runtime selects one adapter. Only that adapter owns the hardware path.
+Rust is not valuable here because it is fashionable or merely fast. It is valuable because validation, ownership, and lifecycle rules can be made structural and checked before the robot is powered.
 
 [Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/README.md
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/lib.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/implementations/waveshare-ugv/adapter.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
 
 ## 07
 
-The single-owner rule is operational, not philosophical. The runtime status reports the Waveshare controller owner. If another process owns the serial port, Leash cannot make a meaningful authority claim.
+Start with unsafe policy. Runtime and hardware adapters forbid it. CUDA denies it at the crate root, then opens one explicitly named module. That makes the unsafe surface searchable and reviewable.
 
 [Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/lib.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/implementations/waveshare-ugv/adapter.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
 
 ## 08
 
-Leash exposes CLI, HTTP, and MCP-shaped access, but those are transports. The capability boundary is the stable idea. A caller submits a typed candidate and receives an authorization or a refusal—not direct hardware access.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/http.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/capability.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/runtime.rs
-
-## 09
-
-This is the architectural split. Intent is rich and nondeterministic. Authorization and the safety kernel are small and deterministic. The adapter translates to hardware. Evidence records the whole crossing so a later replay can explain what happened.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-evidence/src
-
-## 10
-
-Capabilities name the effect and its contract. Unknown verbs do not fall through to magic. Unavailable hardware is not silently simulated. Each call ends as authorized, rejected, or unavailable, and that outcome can be recorded.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/capability.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/types.rs
-
-## 11
-
-This is real Leash syntax. ControllerIo is a marker trait with three supertraits: Read, Write, and Send. The blanket implementation means any type satisfying those bounds automatically implements ControllerIo. There are no methods to fake and no inheritance tree. The Send bound is architectural: ownership of the I/O object can move into the controller-owner thread.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
-
-## 12
-
-Leash’s CPU supervisor runs with a default ten-millisecond tick. It reads bounded inputs, makes a deterministic transition, writes an effect, and records evidence. The language-model loop is outside this deadline.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/safety_supervisor.rs
-
-## 13
-
-NormalizedDrive is a one-field tuple struct whose field is private. Callers cannot construct NormalizedDrive(2.0); they must use new, which rejects non-finite and out-of-range values and returns Result. After construction, the rest of the program can rely on the invariant instead of rechecking every float.
+The newtype is the first important move. NormalizedDrive is as cheap as f64 at runtime, but its private tuple field means external code must call the validating constructor. After construction, the rest of the system can treat range and finiteness as already proven.
 
 [Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
 
+## 09
+
+Derives encode semantics. Copy says this value has no unique resource identity. Debug makes evidence legible. PartialEq makes transition tests precise. The module may construct STOP directly because it owns the private invariant.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
+
+## 10
+
+This is a good use of macro_rules: generate repetitive, inspectable domain types while preserving nominal type separation. The macro removes boilerplate without erasing the unit distinction.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/units.rs
+
+## 11
+
+Sequence uses a standard-library niche type rather than a comment saying zero is reserved. new converts Option from NonZeroU64 into a domain Result. next composes checked arithmetic with and_then so zero and overflow stay explicit.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/time.rs
+
+## 12
+
+A u64 timestamp is easy to misuse. The newtype names the clock domain, and every operation is checked. A caller must handle overflow or reversed time explicitly instead of receiving a wrapped value.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/time.rs
+
+## 13
+
+This small generic method shows ownership doing useful work. Consuming self allows the envelope fields to move directly. FnOnce is the least restrictive correct callback bound because the transform is invoked exactly once.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/time.rs
+
 ## 14
 
-Candidate<C> and Authorized<C> carry the same generic command type C, but they are different states. authorize consumes the candidate, checks the gate and deadline, allocates evidence identity, and returns Authorized<C>. Authorized’s fields are private, so a transport cannot assemble one with a struct literal. The compile-fail doctest proves that forgery does not compile.
+Candidate is generic over the command payload, but identity and timing are shared. The constructor remains a plain data constructor: possession of Candidate never implies permission to actuate.
 
 [Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
 
 ## 15
 
-The supervisor has a bounded proposal channel and a separate priority safety path. Emergency stop is not allowed to wait behind ordinary motion requests. The CPU loop remains the final authority even when CUDA shadow computation is active.
+Authorized is a typestate boundary. The runtime can require this type at the motor port. Adapters can inspect it, but only the defining module can create it. That changes authorization from a boolean convention into possession of an unforgeable value.
 
 [Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/safety_supervisor.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/README.md
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
 
 ## 16
 
-ActuationPort uses associated types rather than trait generics. Each implementation chooses one acknowledgement and error type, so the supervisor can be generic over the port without erasing its concrete contract. The Send plus static bounds allow the port to live in the supervisor thread. submit_drive takes mutable self and only Authorized<DifferentialDrive>, enforcing exclusive access and post-policy input at the signature.
+Look at the function signature first. It consumes Candidate<C> and either returns Authorized<C> or a typed denial. The body is an audit trail: safety state, temporal direction, deadline, evidence sequence, then construction of the capability.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
+
+## 17
+
+Compile-fail doctests protect absence: raw floats must not enter the drive command, and downstream code must not forge authorization. Runtime tests cannot prove those APIs are impossible; compiler tests can.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
+
+## 18
+
+Map, Odom, Base, and Sensor are uninhabited marker types. PhantomData tells the compiler that Frame logically depends on Tag even though no Tag value exists at runtime. The result is zero-cost coordinate-frame separation.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/frame.rs
+
+## 19
+
+Robotics code is full of structurally identical coordinates with incompatible meaning. A phantom frame tag makes the missing transform visible at the call site. The explicit conversion becomes a reviewable operation instead of an assumption.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/frame.rs
+
+## 20
+
+ControllerIo is a trait alias pattern on stable Rust. The blanket implementation means serial ports, test doubles, and future transports participate automatically if they satisfy Read, Write, and Send.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
+
+## 21
+
+The factory itself is object-safe and the closure blanket implementation keeps call sites light. FnMut is deliberate: opening a connection may update retry counters or consume mutable configuration.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
+
+## 22
+
+Associated types are better than extra generic parameters here because each concrete port has one canonical acknowledgement and error type. The signature also makes the typestate boundary unavoidable: raw DifferentialDrive is not accepted.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
+
+## 23
+
+The supervisor stores acknowledgement state, so A belongs on the struct. The concrete port P is only needed to spawn the owner thread. The equality bound proves that whatever P emits is exactly the A the shared state can hold.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
+
+## 24
+
+Leash uses both dispatch models. The supervisor control loop remains generic and monomorphized. The transport is selected at runtime behind Box dyn ControllerIo. The useful question is where substitution happens and who owns the value.
 
 [Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
 
-## 17
+## 25
 
-Today’s read-only sensor endpoint reported fresh LiDAR, camera, IMU, and odometry plus 83.3 percent battery. The design lesson is that a sensor value must carry freshness and health; stale but plausible values are dangerous.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/types.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/http.rs
-
-## 18
-
-The live runtime reported more than 4.8 million durable records. The point is not the number; it is the sequence. Replay should reconstruct the request, authorization, state transition, hardware write, telemetry, and result without asking an agent to narrate what it thinks happened.
+The owner thread receives port by move, so the caller cannot keep using it. Shared observation crosses the boundary through Arc. The closure is wrapped in catch_unwind so a panic becomes explicit supervisor state rather than silent loss of the actuator owner.
 
 [Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-evidence/src
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
 
-## 19
+## 26
 
-The safety lifecycle is explicit. Motion is not a boolean. Arm, move, stop, verify zero, and fault are different states with defined exits. Timeouts, E-stop, stale sensors, and ownership loss all have an explicit route away from motion.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/safety_supervisor.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/drive.rs
-
-## 20
-
-In the physical rollout evidence, E-stop acknowledgement was measured at 37.622 milliseconds and the final state was verified zero. This is the distinction: sending a stop is not the success condition. Observing and recording zero is.
+RAII matters beyond memory. When the supervisor owner is dropped, it signals shutdown, wakes the worker, takes the JoinHandle out of its Option, and joins exactly once. Lifecycle behavior is co-located with lifecycle ownership.
 
 [Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/supervisor.rs
 
-## 21
+## 27
 
-CUDA is active on Pinkie, but the live runtime reports CPU final authority. The CUDA design is shadow-first: compare results, measure performance, and fall back. Acceleration is not permission, and GPU availability is not a reason to widen the authority surface.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/README.md
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json
-
-## 22
-
-Map and Odom are zero-variant marker enums. Frame<Tag> carries PhantomData, so the tag exists at compile time without runtime storage. Pose2<Map> and Pose2<Odom> are different types; the compile-fail doctest proves they cannot be exchanged silently. The ROS2 bridge converts Nav2 output into typed proposals, but Leash still authorizes the effect.
+Boundedness is a correctness property for a real-time-ish control loop. Notice the ownership-aware result types: a failed send returns the value, and drop-oldest reports what was replaced. Nothing disappears implicitly.
 
 [Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-core/src/frame.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/lane.rs
+
+## 28
+
+The control path chooses an overload policy explicitly. RejectNewest preserves older work. DropOldest preserves freshness. The caller sees which happened through the result type, so overload can enter evidence instead of becoming hidden latency.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/lane.rs
+
+## 29
+
+Stop and E-stop do not compete with normal proposals for bounded-lane space. Each kind has an atomic request count. fetch_update publishes a monotonic sequence and rejects exhaustion instead of wrapping.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/safety.rs
+
+## 30
+
+Priority is visible in control flow. E-stop is loaded before stop and returns immediately. Each counter is compared with its own seen watermark, preserving request counts without allocating a queue.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/safety.rs
+
+## 31
+
+Some data should queue; high-rate observations often should not. The latest slot models that directly. Option replace and take express displacement and consumption without sentinel values or cloning.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/src/latest.rs
+
+## 32
+
+The gateway does not pass loosely typed JSON inward. A tagged enum defines the allowed command set. Unknown fields fail closed, and serde errors are mapped into a domain error before any command reaches runtime.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-gateway/src/lib.rs
+
+## 33
+
+This is idiomatic error plumbing with a safety benefit: failures stay categorized. map_err adapts errors at subsystem boundaries, while the question-mark operator exits immediately and keeps the success path easy to audit.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-gateway/src/lib.rs
+
+## 34
+
+let-else is ideal when the interesting path requires a value. front borrows the oldest ticket without removing it. Only an available acknowledgement causes pop_front, so a pending ticket retains its exact queue position.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
+
+## 35
+
+The adapter is where abstract runtime contracts become controller messages. It chooses CommandAck and PortError, accepts only an Authorized drive, and preserves the typed acknowledgement contract back into runtime.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-waveshare/src/lib.rs
+
+## 36
+
+The ROS2 crate carries the phantom-frame discipline to path proposals and navigation goals. A transform names both endpoints in its type. The adapter can translate Nav2 intent, but it still cannot produce motor authority directly.
+
+[Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-ros2/src/lib.rs
 
-## 23
+## 37
 
-These are measured artifacts committed with Leash: 58,306 nanoseconds p99 transition latency, zero deadline misses at 100 hertz, 110,293 durable records per second in the evidence run, and 37.622 milliseconds physical E-stop acknowledgement. They are not promises for every machine; they are reproducible evidence from this Jetson.
+This is the unsafe island opened on slide seven. Checked multiplication, integer conversion, capacity checks, and typed device slices precede the cudarc kernel launch. CUDA accelerates compute and shadow evaluation; the CPU control kernel remains final motion authority.
 
 [Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/device.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/README.md
+
+## 38
+
+Types prevent classes of misuse, but the runtime still needs empirical proof. Replay runs the same scenario twice and checks exact transitions and a stable digest. Recorded Jetson evidence supplies latency, deadline, durability, and physical E-stop measurements.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-replay/src/lib.rs
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json
 
-## 24
+## 39
 
-Leash is MIT licensed and modular. Core types, runtime policy, hardware adapters, evidence, and CUDA can evolve independently so long as they preserve the authority contract. The goal is not a universal robotics framework; it is a sharp boundary that can fit inside different stacks.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/LICENSE
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/Cargo.toml
-- https://github.com/specdog/leash
-
-## 25
-
-For the demo, I am separating live proof from future direction. Today we verified ownership, CPU authority, fresh sensors, camera, CUDA availability, and evidence. Mapping is currently initializing and visual odometry is unavailable, so I will not claim autonomous mapping or SLAM lock.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/README.md
-
-## 26
-
-Qualia is intentionally outside Leash. It works on scene understanding, missions, ontologies, and longer-lived learning. Those asynchronous updates may improve future proposals, but they do not enter the ten-millisecond safety loop or gain motor authority.
+Qualia is intentionally outside the open-source Leash boundary. It may build missions, ontologies, and semantic evidence asynchronously. It proposes. Leash remains the small, fast, local authority path that decides whether a physical command may proceed.
 
 [Sources]
 - https://github.com/specdog/leash
 
-## 27
+## 40
 
-This is the entire relationship in one slide. Hermes or Qualia can form a mission and candidate. The candidate includes bounded magnitude, duration, and context. Leash validates and either authorizes an effect or records a refusal. The mission system remains replaceable.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/types.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/src/capability.rs
-- https://github.com/specdog/leash
-
-## 28
-
-The demo sequence is intentionally boring. First a read-only preflight. Then an explicit human approval and operator token. One low-speed pulse, no more than 0.10 normalized drive and no more than 500 milliseconds. Then verified stop and evidence. If any gate is red, I use the recorded fallback instead of improvising.
-
-[Sources]
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json
-
-## 29
-
-The takeaway is the rule: the planner proposes and the boundary decides. The QR points directly to this deck’s PDF and expires on the date shown. The repository is public and MIT licensed. Thank you—questions are welcome.
+The live demo is deliberately bounded. First run the observation-only preflight. Motion requires an active operator token and explicit approval. Perform one low-drive, short-duration pulse, then show the verified-zero acknowledgement. If any gate is red, play the recorded fallback. Do not improvise motion.
 
 [Sources]
 - https://github.com/specdog/leash
-- https://docs.railway.com/storage-buckets
+
+## 41
+
+The closing idea is simple: when software crosses into physical authority, make the rule visible in the type system. The QR opens the editable deck package and the source is at specdog/leash.
+
+[Sources]
+- https://github.com/specdog/leash

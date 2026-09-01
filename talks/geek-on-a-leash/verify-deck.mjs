@@ -16,6 +16,7 @@ if (!size) throw new Error("Presentation slide size is missing");
 const width = Number(size[1]);
 const height = Number(size[2]);
 const tolerance = 12700;
+const expectedSlides = 41;
 
 const slideNames = Object.keys(zip.files)
   .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
@@ -49,7 +50,11 @@ const report = {
   notes: notesNames.length,
   source_blocks: sourceBlocks,
   out_of_bounds_transforms: outside,
-  passed: slideNames.length === 29 && notesNames.length === 29 && sourceBlocks >= 20 && outside.length === 0,
+  passed:
+    slideNames.length === expectedSlides &&
+    notesNames.length === expectedSlides &&
+    sourceBlocks >= 38 &&
+    outside.length === 0,
 };
 console.log(JSON.stringify(report, null, 2));
 process.exitCode = report.passed ? 0 : 1;

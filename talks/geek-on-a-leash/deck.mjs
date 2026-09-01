@@ -4,36 +4,33 @@ import { fileURLToPath } from "node:url";
 import PptxGenJS from "pptxgenjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = here;
-const assets = path.join(root, "assets");
-const output = path.resolve(process.argv[2] || path.join(root, ".build", "geek-on-a-leash.pptx"));
-const notesOutput = path.join(root, "output", "speaker-notes.md");
-const qrPath = process.env.TALK_QR_PNG || path.join(root, "output", "geek-on-a-leash-qr.png");
+const assets = path.join(here, "assets");
+const output = path.resolve(process.argv[2] || path.join(here, ".build", "geek-on-a-leash.pptx"));
+const notesOutput = path.join(here, "output", "speaker-notes.md");
+const qrPath = process.env.TALK_QR_PNG || path.join(here, "output", "geek-on-a-leash-qr.png");
 const qrExpiry = process.env.TALK_QR_EXPIRES || "QR added after publication preflight";
 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.mkdirSync(path.dirname(notesOutput), { recursive: true });
 
 const pptx = new PptxGenJS();
-pptx.layout = "LAYOUT_WIDE";
-pptx.author = "Eric Manganaro";
-pptx.company = "specdog";
-pptx.subject = "Leash architecture, Rust safety boundaries, and a live UGV demonstration";
-pptx.title = "Geek on a Leash — Rust at the Boundary Between Intent and Motion";
-pptx.lang = "en-US";
-pptx.theme = {
-  headFontFace: "Arial Black",
-  bodyFontFace: "Arial",
-  lang: "en-US",
-};
 pptx.defineLayout({ name: "WIDE", width: 13.333, height: 7.5 });
 pptx.layout = "WIDE";
+pptx.author = "Eric Manganaro";
+pptx.company = "specdog";
+pptx.subject = "A source-level Rust Tuesdays talk about Leash and physical authority";
+pptx.title = "Geek on a Leash — Rust Tuesdays";
+pptx.lang = "en-US";
+pptx.theme = { headFontFace: "Arial Black", bodyFontFace: "Arial", lang: "en-US" };
 
 const C = {
   paper: "F7F2E8",
   paper2: "FFFDF7",
   ink: "0B0B0B",
+  code: "101419",
+  codeLine: "28313A",
   blue: "2855FF",
+  cyan: "5FD7FF",
   lime: "B8FF32",
   pink: "FF5B9D",
   yellow: "FFD63D",
@@ -47,43 +44,11 @@ const C = {
 };
 
 const SH = pptx.ShapeType;
-const LINE = { color: C.ink, width: 2.25, beginArrowType: "none", endArrowType: "none" };
 const BASE_SHA = "566bc569b24bf5f392291b142469282fcdfac2b3";
 const GH = `https://github.com/specdog/leash/blob/${BASE_SHA}`;
 const REPO = "https://github.com/specdog/leash";
 const WAVESHARE = "https://www.waveshare.com/product/ai/robots/ugv-rover-pt-jetson-orin-ai-kit.htm";
-const RAILWAY_BUCKETS = "https://docs.railway.com/storage-buckets";
-
 const notes = [];
-
-function slide(bg = C.paper, section = "LEASH", number = null) {
-  const s = pptx.addSlide();
-  s.background = { color: bg };
-  s.addShape(SH.line, { x: 0.3, y: 0.28, w: 12.73, h: 0, line: { color: C.ink, width: 1.25 } });
-  s.addText(section, { x: 0.42, y: 0.1, w: 3.2, h: 0.24, fontFace: "Arial Black", fontSize: 9.5, bold: true, color: C.ink, charSpacing: 1.4, margin: 0 });
-  if (number !== null) {
-    s.addText(String(number).padStart(2, "0"), { x: 12.42, y: 0.1, w: 0.45, h: 0.24, fontFace: "Courier New", fontSize: 9.5, bold: true, color: C.ink, align: "right", margin: 0 });
-  }
-  return s;
-}
-
-function title(s, text, opts = {}) {
-  const x = opts.x ?? 0.55;
-  const y = opts.y ?? 0.62;
-  const w = opts.w ?? 12.15;
-  const h = opts.h ?? 1.0;
-  s.addText(text, {
-    x, y, w, h,
-    fontFace: "Arial Black",
-    fontSize: opts.size ?? 28,
-    bold: true,
-    color: opts.color ?? C.ink,
-    margin: 0,
-    breakLine: false,
-    valign: "mid",
-    fit: "shrink",
-  });
-}
 
 function body(s, text, x, y, w, h, opts = {}) {
   s.addText(text, {
@@ -96,20 +61,43 @@ function body(s, text, x, y, w, h, opts = {}) {
     valign: opts.valign ?? "top",
     align: opts.align ?? "left",
     breakLine: false,
-    fit: "shrink",
-    lineSpacingMultiple: 1.0,
+    fit: opts.fit ?? "shrink",
+    lineSpacingMultiple: 1,
   });
 }
 
-function pill(s, text, x, y, w, fill = C.lime, color = C.ink, size = 12) {
-  s.addShape(SH.roundRect, { x, y, w, h: 0.42, rectRadius: 0.08, fill: { color: fill }, line: { color: C.ink, width: 1.5 } });
-  body(s, text, x + 0.12, y + 0.08, w - 0.24, 0.24, { size, bold: true, color, valign: "mid", align: "center" });
+function slide(bg = C.paper, section = "RUST TUESDAYS", number = null) {
+  const s = pptx.addSlide();
+  s.background = { color: bg };
+  s.addShape(SH.line, { x: 0.32, y: 0.29, w: 12.69, h: 0, line: { color: C.ink, width: 1.25 } });
+  body(s, section, 0.43, 0.08, 4.4, 0.19, { size: 9.5, bold: true });
+  body(s, "RUST TUESDAYS", 5.2, 0.08, 3.0, 0.19, { size: 9.5, bold: true, align: "center", color: C.blue });
+  if (number !== null) body(s, String(number).padStart(2, "0"), 12.45, 0.08, 0.4, 0.19, { size: 9.5, bold: true, mono: true, align: "right" });
+  return s;
+}
+
+function title(s, text, opts = {}) {
+  body(s, text, opts.x ?? 0.55, opts.y ?? 0.58, opts.w ?? 12.2, opts.h ?? 0.75, {
+    size: opts.size ?? 28,
+    bold: true,
+    color: opts.color ?? C.ink,
+    valign: "mid",
+  });
+}
+
+function footer(s, text = `specdog/leash • ${BASE_SHA.slice(0, 8)}`) {
+  body(s, text, 0.56, 7.16, 6.4, 0.14, { size: 8.5, bold: true, color: C.grey });
+}
+
+function pill(s, text, x, y, w, fill = C.lime, color = C.ink, size = 11) {
+  s.addShape(SH.roundRect, { x, y, w, h: 0.4, rectRadius: 0.06, fill: { color: fill }, line: { color: C.ink, width: 1.4 } });
+  body(s, text, x + 0.08, y + 0.07, w - 0.16, 0.23, { size, bold: true, color, align: "center", valign: "mid" });
 }
 
 function box(s, text, x, y, w, h, fill = C.paper2, opts = {}) {
-  s.addShape(opts.shape || SH.rect, { x, y, w, h, fill: { color: fill }, line: { color: opts.lineColor || C.ink, width: opts.lineWidth || 2.2 } });
-  body(s, text, x + (opts.pad ?? 0.18), y + (opts.pad ?? 0.18), w - 2 * (opts.pad ?? 0.18), h - 2 * (opts.pad ?? 0.18), {
-    size: opts.size ?? 17,
+  s.addShape(SH.rect, { x, y, w, h, fill: { color: fill }, line: { color: opts.lineColor ?? C.ink, width: opts.lineWidth ?? 2.1 } });
+  body(s, text, x + (opts.pad ?? 0.17), y + (opts.pad ?? 0.15), w - 2 * (opts.pad ?? 0.17), h - 2 * (opts.pad ?? 0.15), {
+    size: opts.size ?? 18,
     bold: opts.bold ?? true,
     align: opts.align ?? "center",
     valign: opts.valign ?? "mid",
@@ -122,592 +110,1094 @@ function arrow(s, x, y, w, h = 0, color = C.ink, width = 2.5) {
   s.addShape(SH.line, { x, y, w, h, line: { color, width, endArrowType: "triangle" } });
 }
 
-function dot(s, x, y, r, fill, line = C.ink) {
-  s.addShape(SH.ellipse, { x, y, w: r, h: r, fill: { color: fill }, line: { color: line, width: 2 } });
-}
-
-function addImage(s, file, x, y, w, h, contain = true) {
-  const p = path.join(assets, file);
-  if (!fs.existsSync(p)) return;
-  if (!contain) {
-    s.addImage({ path: p, x, y, w, h });
-    return;
-  }
-  const isWide = file.includes("qualia") || file.includes("terminal");
-  const ratio = isWide ? (file.includes("qualia") ? 2824 / 1384 : 912 / 488) : file.includes("camera") ? 640 / 480 : 1;
-  const target = w / h;
-  let iw = w, ih = h, ix = x, iy = y;
-  if (ratio > target) {
-    ih = w / ratio;
-    iy = y + (h - ih) / 2;
-  } else {
-    iw = h * ratio;
-    ix = x + (w - iw) / 2;
-  }
-  s.addImage({ path: p, x: ix, y: iy, w: iw, h: ih });
-}
-
-function photoFrame(s, file, x, y, w, h, accent = C.ink, contain = true) {
-  s.addShape(SH.rect, { x: x - 0.08, y: y - 0.08, w: w + 0.16, h: h + 0.16, fill: { color: C.paper2 }, line: { color: accent, width: 3 } });
-  addImage(s, file, x, y, w, h, contain);
+function photo(s, file, x, y, w, h, accent = C.ink) {
+  const image = path.join(assets, file);
+  if (!fs.existsSync(image)) return;
+  s.addShape(SH.rect, { x: x - 0.07, y: y - 0.07, w: w + 0.14, h: h + 0.14, fill: { color: C.paper2 }, line: { color: accent, width: 2.7 } });
+  s.addImage({ path: image, x, y, w, h });
 }
 
 function note(s, number, talk, sources = []) {
-  const src = sources.length ? `\n\n[Sources]\n${sources.map((u) => `- ${u}`).join("\n")}` : "";
-  const all = `${talk}${src}`;
+  const sourceText = sources.length ? `\n\n[Sources]\n${sources.map((url) => `- ${url}`).join("\n")}` : "";
+  const all = `${talk}${sourceText}`;
   s.addNotes(all);
   notes.push(`## ${String(number).padStart(2, "0")}\n\n${all}\n`);
 }
 
-function quoteMark(s, x, y, size = 80, color = C.blue) {
-  body(s, "“", x, y, 1.0, 1.0, { size, bold: true, color, mono: false });
+function codeBlock(s, label, code, x, y, w, h, opts = {}) {
+  s.addShape(SH.rect, { x, y, w, h, fill: { color: C.code }, line: { color: opts.accent ?? C.ink, width: 2.1 } });
+  s.addShape(SH.rect, { x, y, w, h: 0.39, fill: { color: opts.accent ?? C.lime }, line: { color: opts.accent ?? C.ink, width: 0 } });
+  body(s, label, x + 0.13, y + 0.09, w - 0.26, 0.2, { size: 10.5, bold: true, mono: true, color: C.ink });
+  body(s, code.trim(), x + 0.18, y + 0.56, w - 0.36, h - 0.72, {
+    size: opts.size ?? 16.5,
+    mono: true,
+    color: opts.color ?? C.white,
+    fit: "shrink",
+  });
 }
 
-function footer(s, text = "github.com/specdog/leash") {
-  body(s, text, 0.55, 7.13, 5.2, 0.18, { size: 8.5, bold: true, color: C.grey });
+function takeaways(s, items, x = 9.08, y = 1.58, w = 3.72, h = 4.98, accent = C.lime) {
+  const gap = 0.13;
+  const each = (h - gap * (items.length - 1)) / items.length;
+  items.forEach((item, index) => {
+    const iy = y + index * (each + gap);
+    s.addShape(SH.rect, { x, y: iy, w, h: each, fill: { color: index === 0 ? accent : C.paper2 }, line: { color: C.ink, width: 1.8 } });
+    body(s, item, x + 0.18, iy + 0.13, w - 0.36, each - 0.26, { size: index === 0 ? 18 : 16, bold: true, valign: "mid" });
+  });
+}
+
+function codeSlide(number, section, heading, file, code, items, talk, sources, opts = {}) {
+  const s = slide(opts.bg ?? C.paper, section, number);
+  title(s, heading, { size: opts.titleSize ?? 27 });
+  codeBlock(s, file, code, 0.55, 1.52, opts.codeW ?? 8.25, 5.35, { accent: opts.accent ?? C.lime, size: opts.codeSize ?? 16.5 });
+  takeaways(s, items, 9.05, 1.52, 3.73, 5.35, opts.accent ?? C.lime);
+  footer(s);
+  note(s, number, talk, sources);
+  return s;
 }
 
 // 01 — title
 {
   const s = slide(C.paper, "GEEK ON A LEASH", 1);
-  s.addShape(SH.rect, { x: 0.45, y: 0.58, w: 7.55, h: 5.95, fill: { color: C.blue }, line: { color: C.ink, width: 3 } });
-  body(s, "GEEK ON\nA LEASH", 0.78, 0.9, 6.7, 2.35, { size: 43, bold: true, color: C.white, mono: false });
-  body(s, "Rust at the boundary between\nintent and motion", 0.82, 3.55, 6.35, 1.05, { size: 23, bold: true, color: C.white });
-  pill(s, "OPEN SOURCE • MIT", 0.82, 5.55, 2.55, C.lime, C.ink, 11);
-  photoFrame(s, "waveshare-ugv-rover-front.jpg", 8.55, 0.76, 4.15, 4.15, C.ink, true);
-  body(s, "ERIC MANGANARO", 8.62, 5.26, 3.9, 0.34, { size: 18, bold: true });
-  body(s, "Leash + Pinkie • 60 minutes", 8.62, 5.68, 3.9, 0.3, { size: 13, color: C.grey });
-  if (fs.existsSync(qrPath)) {
-    s.addImage({ path: qrPath, x: 11.2, y: 5.22, w: 1.2, h: 1.2 });
-  }
+  s.addShape(SH.rect, { x: 0.46, y: 0.58, w: 7.5, h: 5.92, fill: { color: C.blue }, line: { color: C.ink, width: 3 } });
+  body(s, "GEEK ON\nA LEASH", 0.78, 0.88, 6.6, 2.1, { size: 43, bold: true, color: C.white });
+  body(s, "A source-level Rust talk about\nphysical authority", 0.82, 3.36, 6.45, 1.15, { size: 24, bold: true, color: C.white });
+  pill(s, "RUST TUESDAYS • 60 MIN", 0.82, 5.5, 2.95, C.lime, C.ink, 11);
+  photo(s, "waveshare-ugv-rover-front.jpg", 8.52, 0.77, 4.12, 4.12);
+  body(s, "ERIC MANGANARO", 8.58, 5.18, 3.6, 0.34, { size: 18, bold: true });
+  body(s, "Leash + Pinkie", 8.58, 5.62, 2.8, 0.28, { size: 14, color: C.grey });
+  if (fs.existsSync(qrPath)) s.addImage({ path: qrPath, x: 11.2, y: 5.17, w: 1.22, h: 1.22 });
+  footer(s, "github.com/specdog/leash");
+  note(s, 1, "This is the Rust Tuesdays version: substantially more source code, fewer broad architecture slides, and a line-by-line tour of the language mechanisms that make Leash safe enough to sit near motors.", [REPO, WAVESHARE]);
+}
+
+// 02 — authority question
+{
+  const s = slide(C.yellow, "THE BOUNDARY", 2);
+  title(s, "Who is allowed to write the motors?", { size: 34 });
+  box(s, "HUMAN", 0.65, 2.0, 2.35, 1.15, C.paper2, { size: 22 });
+  box(s, "AGENT", 0.65, 4.4, 2.35, 1.15, C.paleBlue, { size: 22 });
+  arrow(s, 3.15, 2.58, 2.0, 1.42, C.ink, 3);
+  arrow(s, 3.15, 4.97, 2.0, -1.42, C.ink, 3);
+  box(s, "TYPE\nBOUNDARY", 5.25, 2.52, 2.4, 2.2, C.pink, { size: 23 });
+  arrow(s, 7.82, 3.62, 1.85, 0, C.ink, 3);
+  box(s, "MOTOR\nDRIVER", 9.82, 2.52, 2.82, 2.2, C.ink, { size: 24, color: C.white });
+  body(s, "The dangerous bug is ambiguous authority.", 3.45, 5.75, 6.25, 0.48, { size: 22, bold: true, align: "center" });
   footer(s);
-  note(s, 1, "Welcome. This is a talk about a small piece of software with an intentionally narrow job: stand between an intelligent requester and physical motors. We will spend most of the hour inside Leash, then use Pinkie for a bounded live proof.", [REPO, WAVESHARE]);
+  note(s, 2, "The core problem is authority, not intelligence. Several producers may propose motion, but only one narrow boundary may authorize it. Rust lets us represent that authority in types rather than conventions.", [`${GH}/README.md`]);
 }
 
-// 02
+// 03 — canonical rule
 {
-  const s = slide(C.yellow, "THE PROBLEM", 2);
-  title(s, "Who gets to write the motors?", { size: 36, y: 0.72 });
-  box(s, "HUMAN", 0.65, 2.1, 2.45, 1.25, C.paper2, { size: 22 });
-  box(s, "AGENT", 0.65, 4.4, 2.45, 1.25, C.paleBlue, { size: 22 });
-  arrow(s, 3.25, 2.72, 2.2, 1.5, C.ink, 3);
-  arrow(s, 3.25, 5.02, 2.2, -1.5, C.ink, 3);
-  box(s, "?", 5.45, 2.52, 2.05, 2.05, C.pink, { size: 48 });
-  arrow(s, 7.65, 3.55, 2.1, 0, C.ink, 3);
-  box(s, "MOTOR\nDRIVER", 9.85, 2.5, 2.75, 2.1, C.ink, { size: 24, color: C.white, lineColor: C.ink });
-  body(s, "The dangerous bug is not bad planning.\nIt is ambiguous authority.", 3.9, 5.6, 5.6, 0.82, { size: 19, bold: true, align: "center" });
+  const s = slide(C.paper, "THE RULE", 3);
+  title(s, "The canonical rule is intentionally boring.", { size: 32 });
+  box(s, "request", 0.7, 2.45, 2.0, 1.15, C.paleBlue, { size: 22, mono: true });
+  arrow(s, 2.86, 3.02, 1.15, 0, C.ink, 3);
+  box(s, "propose", 4.08, 2.45, 2.0, 1.15, C.paleYellow, { size: 22, mono: true });
+  arrow(s, 6.24, 3.02, 1.15, 0, C.ink, 3);
+  box(s, "authorize", 7.46, 2.45, 2.15, 1.15, C.palePink, { size: 22, mono: true });
+  arrow(s, 9.78, 3.02, 1.15, 0, C.ink, 3);
+  box(s, "actuate", 11.0, 2.45, 1.7, 1.15, C.lime, { size: 20, mono: true });
+  body(s, "No adapter, planner, or GPU kernel may skip a verb.", 1.35, 4.55, 10.6, 0.7, { size: 27, bold: true, align: "center", color: C.blue });
   footer(s);
-  note(s, 2, "Start at the boundary. In an agentic robot, the planner, human, autonomy stack, and recovery code may all want motion. If authority is implicit, every integration becomes a safety argument. Leash makes the question explicit.");
+  note(s, 3, "Four verbs define the boundary. The rest of this talk asks how Rust preserves that order across generics, traits, threads, drivers, serialization, ROS2, and CUDA.", [`${GH}/README.md`]);
 }
 
-// 03
+// 04 — hardware
 {
-  const s = slide(C.paper, "THE METAPHOR", 3);
-  title(s, "A leash does not choose the walk.", { size: 34 });
-  body(s, "It limits how intent reaches the body.", 0.62, 1.48, 7.3, 0.55, { size: 25, bold: true, color: C.blue });
-  dot(s, 1.05, 3.15, 0.62, C.pink);
-  body(s, "intent", 0.72, 3.92, 1.3, 0.35, { size: 15, bold: true, align: "center" });
-  s.addShape(SH.arc, { x: 1.65, y: 2.38, w: 6.55, h: 2.15, adjustPoint: 0.3, rotate: 2, fill: { color: C.paper, transparency: 100 }, line: { color: C.blue, width: 7 } });
-  dot(s, 8.0, 3.15, 0.62, C.lime);
-  body(s, "motion", 7.7, 3.92, 1.3, 0.35, { size: 15, bold: true, align: "center" });
-  box(s, "LEASH", 4.05, 2.78, 1.85, 1.1, C.yellow, { size: 22 });
-  body(s, "The planner proposes.\nThe boundary decides.", 9.25, 2.68, 3.25, 1.4, { size: 25, bold: true });
-  pill(s, "SMALL • FAST • AUDITABLE", 9.27, 4.55, 3.1, C.lime, C.ink, 10.5);
+  const s = slide(C.paper, "PINKIE", 4);
+  title(s, "The types terminate in real hardware.", { size: 31 });
+  photo(s, "waveshare-ugv-rover-angle.jpg", 0.72, 1.52, 5.1, 4.75, C.blue);
+  photo(s, "pinkie-live-camera-2026-09-01.jpg", 6.2, 1.52, 3.35, 2.55, C.pink);
+  box(s, "Jetson Orin NX", 9.9, 1.52, 2.62, 0.82, C.lime, { size: 18 });
+  box(s, "serial motor MCU", 9.9, 2.58, 2.62, 0.82, C.paleYellow, { size: 17, mono: true });
+  box(s, "LiDAR + camera", 9.9, 3.64, 2.62, 0.82, C.paleBlue, { size: 18 });
+  body(s, "A bad abstraction becomes\na moving machine.", 6.28, 4.62, 5.9, 1.1, { size: 27, bold: true });
   footer(s);
-  note(s, 3, "The metaphor is literal enough to be useful. Leash does not invent missions, recognize rooms, or decide what is interesting. It constrains the path from requested action to the physical body.", [REPO]);
+  note(s, 4, "Pinkie is the concrete forcing function: Jetson compute, motor controller, LiDAR, camera, and an actual chassis. Every language decision we discuss has a physical consequence at this boundary.", [WAVESHARE]);
 }
 
-// 04
+// 05 — crate graph
 {
-  const s = slide(C.ink, "THE CANONICAL RULE", 4);
-  quoteMark(s, 0.6, 0.75, 80, C.lime);
-  body(s, "AI may request motion.", 1.32, 1.17, 10.8, 0.76, { size: 36, bold: true, color: C.white });
-  body(s, "LEASH DECIDES WHETHER\nIT IS ALLOWED.", 1.32, 2.26, 10.7, 2.08, { size: 43, bold: true, color: C.lime });
-  s.addShape(SH.line, { x: 1.34, y: 5.0, w: 10.8, h: 0, line: { color: C.white, width: 2 } });
-  body(s, "This sentence is the architecture test.", 1.35, 5.33, 9.6, 0.5, { size: 21, bold: true, color: C.white });
-  body(s, "If a feature violates it, the feature belongs somewhere else.", 1.35, 5.98, 10.8, 0.42, { size: 16, color: C.paper });
-  footer(s, REPO);
-  note(s, 4, "This is the canonical rule from the project README. I use it as a design filter: language models and planners produce candidates; only Leash can authorize a candidate for hardware execution.", [`${GH}/README.md`]);
-}
-
-// 05
-{
-  const s = slide(C.paper, "THE MACHINE", 5);
-  title(s, "Pinkie is where the abstractions meet friction.", { size: 31 });
-  photoFrame(s, "pinkie-live-camera-2026-09-01.jpg", 0.7, 1.65, 5.35, 4.0, C.pink, false);
-  photoFrame(s, "waveshare-ugv-rover-angle.jpg", 7.25, 1.42, 5.0, 5.0, C.ink, true);
-  pill(s, "LIVE CAMERA • 2026-09-01", 0.84, 5.9, 3.0, C.lime, C.ink, 10);
-  body(s, "Waveshare UGV\nJetson Orin NX\nLiDAR + camera + IMU + odometry", 7.3, 5.72, 5.0, 0.82, { size: 14, bold: true });
-  footer(s);
-  note(s, 5, "Pinkie is the current robot. The left image is a live camera snapshot from today; the right is the official Waveshare product image. The important point is not the brand. It is that real serial buses, stale sensors, batteries, and motor controllers turn vague intent into concrete failure modes.", [WAVESHARE, `${GH}/implementations/waveshare-ugv/README.md`]);
-}
-
-// 06
-{
-  const s = slide(C.paleBlue, "THE HARDWARE CHAIN", 6);
-  title(s, "Every layer narrows what the next layer may do.", { size: 30 });
-  const ys = [1.65, 2.64, 3.63, 4.62, 5.61];
-  const labels = [
-    ["MISSION / HUMAN", C.paper2],
-    ["HTTP • CLI • MCP", C.yellow],
-    ["LEASH RUNTIME", C.lime],
-    ["WAVESHARE ADAPTER", C.pink],
-    ["UART → CONTROLLER → MOTORS", C.ink],
+  const s = slide(C.paper, "WORKSPACE", 5);
+  title(s, "The crate graph is an authority graph.", { size: 31 });
+  box(s, "leash-core\nno dependencies", 4.9, 1.43, 3.05, 1.0, C.lime, { size: 20, mono: true });
+  const crates = [
+    ["runtime", 0.62, 3.0, C.palePink],
+    ["gateway", 3.08, 3.0, C.paleBlue],
+    ["ros2", 5.54, 3.0, C.paleYellow],
+    ["waveshare", 8.0, 3.0, C.paleLime],
+    ["cuda", 10.46, 3.0, C.palePink],
   ];
-  labels.forEach(([label, fill], i) => {
-    box(s, label, 1.15 + i * 0.68, ys[i], 8.55 - i * 1.36, 0.65, fill, { size: 16, color: fill === C.ink ? C.white : C.ink });
-    if (i < labels.length - 1) arrow(s, 5.43, ys[i] + 0.68, 0, 0.27, C.ink, 2.2);
+  crates.forEach(([name, x, y, fill]) => {
+    box(s, `leash-${name}`, x, y, 2.18, 0.92, fill, { size: 16.5, mono: true });
+    arrow(s, x + 1.09, y - 0.08, 5.43 - (x + 1.09), -0.48, C.ink, 1.8);
   });
-  body(s, "REQUEST", 10.35, 1.75, 1.5, 0.34, { size: 13, bold: true, color: C.blue, align: "center" });
-  arrow(s, 11.1, 2.2, 0, 2.85, C.blue, 4);
-  body(s, "EFFECT", 10.35, 5.34, 1.5, 0.34, { size: 13, bold: true, color: C.blue, align: "center" });
+  box(s, "replay", 5.54, 4.75, 2.18, 0.92, C.paper2, { size: 17, mono: true });
+  arrow(s, 6.63, 4.66, 0, -0.6, C.ink, 1.8);
+  body(s, "Dependencies point inward. Physical authority stays narrow.", 1.55, 6.02, 10.2, 0.5, { size: 23, bold: true, align: "center" });
   footer(s);
-  note(s, 6, "Follow a motion request downward. Protocol parsing cannot write motors. The registry resolves a capability. Policy validates and authorizes. The runtime selects one adapter. Only that adapter owns the hardware path.", [`${GH}/README.md`, `${GH}/crates/leash-runtime/src/lib.rs`, `${GH}/implementations/waveshare-ugv/adapter.rs`]);
+  note(s, 5, "The workspace structure is not packaging trivia. Core defines the legal vocabulary. Runtime owns authority. Adapters and accelerators depend inward, so they cannot redefine the rules without creating a visible dependency violation.", [`${GH}/Cargo.toml`, `${GH}/crates/leash-core/Cargo.toml`, `${GH}/crates/leash-runtime/Cargo.toml`]);
 }
 
-// 07
+// 06 — why Rust
 {
-  const s = slide(C.yellow, "THE DEVICE OWNER", 7);
-  title(s, "One serial owner. Zero mystery writers.", { size: 35 });
-  const writers = [["CLI", 0.8], ["HTTP", 2.55], ["MCP", 4.3], ["NAV", 6.05]];
-  writers.forEach(([t, x], i) => {
-    box(s, t, x, 2.0 + (i % 2) * 1.0, 1.35, 0.78, i === 3 ? C.palePink : C.paper2, { size: 18 });
-    arrow(s, x + 1.42, 2.4 + (i % 2), 2.4 - i * 0.3, 1.4 - (i % 2), C.ink, 2);
-  });
-  box(s, "LEASH\nDEVICE OWNER", 8.7, 2.18, 2.15, 2.05, C.lime, { size: 20 });
-  arrow(s, 10.96, 3.2, 0.75, 0, C.ink, 3);
-  box(s, "UART", 11.78, 2.72, 0.85, 0.95, C.ink, { size: 16, color: C.white });
-  body(s, "All roads converge before bytes reach the controller.", 2.05, 5.25, 8.9, 0.62, { size: 24, bold: true, align: "center" });
-  footer(s);
-  note(s, 7, "The single-owner rule is operational, not philosophical. The runtime status reports the Waveshare controller owner. If another process owns the serial port, Leash cannot make a meaningful authority claim.", [`${GH}/crates/leash-runtime/src/lib.rs`, `${GH}/implementations/waveshare-ugv/adapter.rs`]);
-}
-
-// 08
-{
-  const s = slide(C.ink, "THE SURFACE", 8);
-  title(s, "Three protocols. One capability contract.", { size: 32, color: C.white });
-  box(s, "$ leash drive --linear 0.08 --for 400ms", 0.7, 1.7, 5.95, 0.9, C.paper2, { mono: true, size: 16, align: "left", pad: 0.25 });
-  box(s, "POST /v1/capabilities/drive/propose", 6.85, 1.7, 5.75, 0.9, C.paleBlue, { mono: true, size: 15, align: "left", pad: 0.25 });
-  box(s, "tools.call(\"drive.propose\", candidate)", 0.7, 3.0, 7.2, 0.9, C.palePink, { mono: true, size: 15, align: "left", pad: 0.25 });
-  arrow(s, 3.7, 4.4, 3.0, 0, C.lime, 4);
-  box(s, "Capability< Candidate → Authorized >", 6.85, 4.0, 5.75, 1.0, C.lime, { mono: true, size: 16 });
-  body(s, "Syntax changes. Authority does not.", 0.72, 5.55, 8.0, 0.52, { size: 25, bold: true, color: C.white });
-  footer(s, REPO);
-  note(s, 8, "Leash exposes CLI, HTTP, and MCP-shaped access, but those are transports. The capability boundary is the stable idea. A caller submits a typed candidate and receives an authorization or a refusal—not direct hardware access.", [`${GH}/src/http.rs`, `${GH}/src/capability.rs`, `${GH}/src/runtime.rs`]);
-}
-
-// 09
-{
-  const s = slide(C.paper, "THE STACK", 9);
-  title(s, "Policy above mechanism. Evidence beside both.", { size: 29 });
+  const s = slide(C.blue, "WHY RUST", 6);
+  title(s, "Use the compiler to make illegal motion awkward.", { size: 32, color: C.white });
   const rows = [
-    ["INTENT", "mission • operator • autonomy", C.paleBlue],
-    ["CAPABILITY", "resolve • validate • authorize", C.yellow],
-    ["SAFETY KERNEL", "deadline • E-stop • verified zero", C.lime],
-    ["ADAPTER", "encode • transmit • read back", C.pink],
-    ["HARDWARE", "controller • motors • sensors", C.ink],
+    ["NEWTYPE", "validate once; keep raw floats out"],
+    ["TYPESTATE", "authorization cannot be forged"],
+    ["TRAITS", "hardware varies; contract does not"],
+    ["OWNERSHIP", "one thread owns physical I/O"],
+    ["DROP", "shutdown is part of the type lifecycle"],
   ];
-  rows.forEach(([a, b, fill], i) => {
-    const y = 1.45 + i * 0.93;
-    box(s, a, 0.7, y, 2.45, 0.67, fill, { size: 15, color: fill === C.ink ? C.white : C.ink });
-    body(s, b, 3.55, y + 0.16, 4.6, 0.33, { size: 16, bold: true, color: C.grey });
+  rows.forEach(([left, right], index) => {
+    const y = 1.48 + index * 0.96;
+    box(s, left, 0.7, y, 2.35, 0.72, index % 2 ? C.pink : C.lime, { size: 16, mono: true });
+    body(s, right, 3.38, y + 0.13, 8.7, 0.4, { size: 22, bold: true, color: C.white });
   });
-  s.addShape(SH.rect, { x: 9.0, y: 1.45, w: 3.2, h: 4.38, fill: { color: C.blue }, line: { color: C.ink, width: 2.5 } });
-  body(s, "EVIDENCE", 9.42, 1.86, 2.4, 0.45, { size: 23, bold: true, color: C.white, align: "center" });
-  body(s, "proposal\ndecision\ntransition\ntelemetry\nresult", 9.5, 2.62, 2.2, 2.2, { size: 20, bold: true, color: C.white, align: "center" });
-  body(s, "Append-only, not an afterthought.", 8.75, 6.18, 3.7, 0.36, { size: 14, bold: true, align: "center" });
+  footer(s, "Rust Tuesdays • types are part of the control plane");
+  note(s, 6, "Rust is not valuable here because it is fashionable or merely fast. It is valuable because validation, ownership, and lifecycle rules can be made structural and checked before the robot is powered.", [`${GH}/crates/leash-core/src/drive.rs`, `${GH}/crates/leash-runtime/src/supervisor.rs`]);
+}
+
+// 07 — unsafe policy
+codeSlide(7, "UNSAFE POLICY", "Unsafe is denied by default, then isolated.", "crate roots", String.raw`
+// leash-runtime/src/lib.rs
+#![forbid(unsafe_code)]
+
+// leash-waveshare/src/lib.rs
+#![forbid(unsafe_code)]
+
+// leash-cuda/src/lib.rs
+#![deny(unsafe_code)]
+
+#[cfg(feature = "cuda")]
+#[allow(unsafe_code)]
+mod device;`, [
+  "The default is a compiler error.",
+  "The exception is named and feature-gated.",
+  "Review the island, not the ocean.",
+], "Start with unsafe policy. Runtime and hardware adapters forbid it. CUDA denies it at the crate root, then opens one explicitly named module. That makes the unsafe surface searchable and reviewable.", [`${GH}/crates/leash-runtime/src/lib.rs`, `${GH}/crates/leash-waveshare/src/lib.rs`, `${GH}/crates/leash-cuda/src/lib.rs`], { accent: C.pink, codeSize: 17 });
+
+// 08 — newtype validation
+codeSlide(8, "NEWTYPES", "A private field turns validation into a constructor.", "leash-core/src/drive.rs", String.raw`
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd)]
+pub struct NormalizedDrive(f64);
+
+impl NormalizedDrive {
+    pub const ZERO: Self = Self(0.0);
+
+    pub fn new(value: f64) -> Result<Self, DomainError> {
+        if !value.is_finite() {
+            return Err(DomainError::NonFinite("normalized drive"));
+        }
+        if !(-1.0..=1.0).contains(&value) {
+            return Err(DomainError::OutOfRange("normalized drive"));
+        }
+        Ok(Self(value))
+    }
+}`, [
+  "Tuple field is private.",
+  "All construction crosses one gate.",
+  "Downstream code receives a proof.",
+], "The newtype is the first important move. NormalizedDrive is as cheap as f64 at runtime, but its private tuple field means external code must call the validating constructor. After construction, the rest of the system can treat range and finiteness as already proven.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.lime, codeSize: 16.2 });
+
+// 09 — derive semantics
+codeSlide(9, "DATA SEMANTICS", "Derives are an API decision, not decoration.", "leash-core/src/drive.rs", String.raw`
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd)]
+pub struct NormalizedDrive(f64);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DifferentialDrive {
+    pub left: NormalizedDrive,
+    pub right: NormalizedDrive,
+}
+
+impl DifferentialDrive {
+    pub const STOP: Self = Self {
+        left: NormalizedDrive::ZERO,
+        right: NormalizedDrive::ZERO,
+    };
+}`, [
+  "Copy is safe because the value is tiny and immutable.",
+  "PartialEq supports exact protocol tests.",
+  "STOP is a canonical, allocation-free value.",
+], "Derives encode semantics. Copy says this value has no unique resource identity. Debug makes evidence legible. PartialEq makes transition tests precise. The module may construct STOP directly because it owns the private invariant.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.cyan, codeSize: 16.2 });
+
+// 10 — unit macro
+codeSlide(10, "MACROS", "One macro stamps the same invariant onto every unit.", "leash-core/src/units.rs", String.raw`
+macro_rules! finite_unit {
+    ($name:ident, $label:literal) => {
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct $name(f64);
+
+        impl $name {
+            pub fn new(value: f64) -> Result<Self, DomainError> {
+                if !value.is_finite() {
+                    return Err(DomainError::NonFinite($label));
+                }
+                Ok(Self(value))
+            }
+        }
+    };
+}`, [
+  "macro_rules! removes invariant drift.",
+  "Each expansion is still a distinct type.",
+  "Meters cannot silently become radians.",
+], "This is a good use of macro_rules: generate repetitive, inspectable domain types while preserving nominal type separation. The macro removes boilerplate without erasing the unit distinction.", [`${GH}/crates/leash-core/src/units.rs`], { accent: C.yellow, codeSize: 15.7 });
+
+// 11 — NonZeroU64 sequence
+codeSlide(11, "VALID STATES", "NonZeroU64 removes an invalid state from memory.", "leash-core/src/time.rs", String.raw`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Sequence(NonZeroU64);
+
+impl Sequence {
+    pub fn new(value: u64) -> Result<Self, DomainError> {
+        NonZeroU64::new(value)
+            .map(Self)
+            .ok_or(DomainError::Zero("sequence"))
+    }
+
+    pub fn next(self) -> Result<Self, DomainError> {
+        self.get()
+            .checked_add(1)
+            .ok_or(DomainError::Overflow("sequence"))
+            .and_then(Self::new)
+    }
+}`, [
+  "Zero cannot be represented.",
+  "checked_add makes overflow explicit.",
+  "Option says absence is ordinary, not exceptional.",
+], "Sequence uses a standard-library niche type rather than a comment saying zero is reserved. new converts Option from NonZeroU64 into a domain Result. next composes checked arithmetic with and_then so zero and overflow stay explicit.", [`${GH}/crates/leash-core/src/time.rs`], { accent: C.lime, codeSize: 15.9 });
+
+// 12 — monotonic time
+codeSlide(12, "TIME", "Time arithmetic is checked and domain-specific.", "leash-core/src/time.rs", String.raw`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MonotonicNanos(u64);
+
+impl MonotonicNanos {
+    pub fn checked_add(self, duration: DurationNanos)
+        -> Result<Self, DomainError> {
+        self.0
+            .checked_add(duration.0)
+            .map(Self)
+            .ok_or(DomainError::Overflow("monotonic timestamp"))
+    }
+
+    pub fn duration_since(self, earlier: Self)
+        -> Result<DurationNanos, DomainError> {
+        self.0
+            .checked_sub(earlier.0)
+            .map(DurationNanos)
+            .ok_or(DomainError::TimeReversed)
+    }
+}`, [
+  "Monotonic is not wall-clock time.",
+  "Subtraction cannot go negative unnoticed.",
+  "Overflow is visible in the return type.",
+], "A u64 timestamp is easy to misuse. The newtype names the clock domain, and every operation is checked. A caller must handle overflow or reversed time explicitly instead of receiving a wrapped value.", [`${GH}/crates/leash-core/src/time.rs`], { accent: C.cyan, codeSize: 14.7 });
+
+// 13 — generic map
+codeSlide(13, "GENERICS", "Stamped<T>::map moves metadata without cloning it.", "leash-core/src/time.rs", String.raw`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stamped<T> {
+    pub at: MonotonicNanos,
+    pub sequence: Sequence,
+    pub value: T,
+}
+
+impl<T> Stamped<T> {
+    pub fn map<U>(self, transform: impl FnOnce(T) -> U) -> Stamped<U> {
+        Stamped {
+            at: self.at,
+            sequence: self.sequence,
+            value: transform(self.value),
+        }
+    }
+}`, [
+  "self is consumed: no partial alias survives.",
+  "FnOnce permits transforms that consume captures.",
+  "Only the payload type changes.",
+], "This small generic method shows ownership doing useful work. Consuming self allows the envelope fields to move directly. FnOnce is the least restrictive correct callback bound because the transform is invoked exactly once.", [`${GH}/crates/leash-core/src/time.rs`], { accent: C.pink, codeSize: 15.2 });
+
+// 14 — candidate
+codeSlide(14, "PROPOSALS", "Candidate<C> carries intent, identity, and a deadline.", "leash-core/src/drive.rs", String.raw`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Candidate<C> {
+    pub id: CommandId,
+    pub issued_at: MonotonicNanos,
+    pub deadline: MonotonicNanos,
+    pub command: C,
+}
+
+impl<C> Candidate<C> {
+    pub const fn new(
+        id: CommandId,
+        issued_at: MonotonicNanos,
+        deadline: MonotonicNanos,
+        command: C,
+    ) -> Self {
+        Self { id, issued_at, deadline, command }
+    }
+}`, [
+  "C keeps the envelope command-agnostic.",
+  "CommandId binds producer epoch and sequence.",
+  "A proposal is data, never authority.",
+], "Candidate is generic over the command payload, but identity and timing are shared. The constructor remains a plain data constructor: possession of Candidate never implies permission to actuate.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.paleBlue, codeSize: 15.7 });
+
+// 15 — Authorized typestate
+codeSlide(15, "TYPESTATE", "Authorization is a value you cannot construct outside core.", "leash-core/src/drive.rs", String.raw`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Authorized<C> {
+    command_id: CommandId,
+    evidence_id: EvidenceId,
+    authorized_at: MonotonicNanos,
+    command: C,
+}
+
+impl<C> Authorized<C> {
+    pub const fn command_id(&self) -> CommandId {
+        self.command_id
+    }
+
+    pub const fn evidence_id(&self) -> EvidenceId {
+        self.evidence_id
+    }
+
+    pub fn command(&self) -> &C {
+        &self.command
+    }
+}
+`, [
+  "Private fields block struct literals downstream.",
+  "Accessors expose facts, not construction power.",
+  "The type is a capability token.",
+], "Authorized is a typestate boundary. The runtime can require this type at the motor port. Adapters can inspect it, but only the defining module can create it. That changes authorization from a boolean convention into possession of an unforgeable value.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.lime, codeSize: 15.7 });
+
+// 16 — authorize
+codeSlide(16, "CONTROL FLOW", "The gate consumes a proposal and returns a capability.", "leash-core/src/drive.rs", String.raw`
+pub fn authorize<C>(
+    &mut self,
+    candidate: Candidate<C>,
+    now: MonotonicNanos,
+) -> Result<Authorized<C>, SafetyDenial> {
+    match self.state {
+        SafetyState::Disarmed => return Err(SafetyDenial::Disarmed),
+        SafetyState::EStopped => return Err(SafetyDenial::EStopped),
+        SafetyState::Faulted => return Err(SafetyDenial::Faulted),
+        SafetyState::Ready | SafetyState::Moving => {}
+    }
+
+    if candidate.issued_at > now {
+        return Err(SafetyDenial::IssuedInFuture);
+    }
+    if candidate.deadline < now {
+        return Err(SafetyDenial::Expired);
+    }
+
+    let evidence_id = self.next_evidence_id()?;
+    Ok(Authorized {
+        command_id: candidate.id,
+        evidence_id,
+        authorized_at: now,
+        command: candidate.command,
+    })
+}`, [
+  "candidate is moved: it cannot be reused accidentally.",
+  "match is exhaustive over safety state.",
+  "? exits on the first failed proof.",
+], "Look at the function signature first. It consumes Candidate<C> and either returns Authorized<C> or a typed denial. The body is an audit trail: safety state, temporal direction, deadline, evidence sequence, then construction of the capability.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.pink, codeSize: 13.9 });
+
+// 17 — compile fail
+codeSlide(17, "COMPILE-FAIL TESTS", "The public API is tested by code that must not compile.", "leash-core/src/drive.rs doctest", String.raw`
+/// \`\`\`compile_fail
+/// use leash_core::DifferentialDrive;
+/// let _command = DifferentialDrive::new(0.5, 0.5);
+/// \`\`\`
+
+/// \`\`\`compile_fail
+/// use leash_core::{Authorized, DifferentialDrive};
+/// let _forged = Authorized::<DifferentialDrive> {
+///     command: DifferentialDrive::STOP,
+/// };
+/// \`\`\``, [
+  "Documentation becomes a negative contract.",
+  "Refactors fail if the forbidden path opens.",
+  "The compiler is part of the test harness.",
+], "Compile-fail doctests protect absence: raw floats must not enter the drive command, and downstream code must not forge authorization. Runtime tests cannot prove those APIs are impossible; compiler tests can.", [`${GH}/crates/leash-core/src/drive.rs`], { accent: C.red, codeSize: 15.6 });
+
+// 18 — PhantomData
+codeSlide(18, "PHANTOM TYPES", "Frame<Tag> stores no tag at runtime—and still separates frames.", "leash-core/src/frame.rs", String.raw`
+pub enum Map {}
+pub enum Odom {}
+pub enum Base {}
+pub enum Sensor {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Frame<Tag> {
+    name: FrameName,
+    marker: PhantomData<fn() -> Tag>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pose2<Tag> {
+    pub frame: Frame<Tag>,
+    pub x: Meters,
+    pub y: Meters,
+    pub yaw: Radians,
+}`, [
+  "Empty enums are type-level labels.",
+  "PhantomData ties Tag to ownership/type rules.",
+  "No tag bytes are stored in Pose2.",
+], "Map, Odom, Base, and Sensor are uninhabited marker types. PhantomData tells the compiler that Frame logically depends on Tag even though no Tag value exists at runtime. The result is zero-cost coordinate-frame separation.", [`${GH}/crates/leash-core/src/frame.rs`], { accent: C.cyan, codeSize: 15.0 });
+
+// 19 — frame compile fail
+codeSlide(19, "PHANTOM TYPES", "A pose in Odom is not a pose in Map.", "leash-core/src/frame.rs doctest", String.raw`
+/// \`\`\`compile_fail
+/// use leash_core::{Frame, FrameName, Map, Meters, Odom, Pose2, Radians};
+/// fn consume_map(_: Pose2<Map>) {}
+/// let odom = Frame::<Odom>::new(FrameName::new("odom").unwrap());
+/// let pose = Pose2::new(
+///     odom,
+///     Meters::new(0.0).unwrap(),
+///     Meters::new(0.0).unwrap(),
+///     Radians::new(0.0).unwrap(),
+/// );
+/// consume_map(pose);
+/// \`\`\`
+`, [
+  "Same fields do not mean same semantics.",
+  "The missing transform becomes a compiler error.",
+  "Zero runtime checks; strong compile-time separation.",
+], "Robotics code is full of structurally identical coordinates with incompatible meaning. A phantom frame tag makes the missing transform visible at the call site. The explicit conversion becomes a reviewable operation instead of an assumption.", [`${GH}/crates/leash-core/src/frame.rs`], { accent: C.yellow, codeSize: 15.3 });
+
+// 20 — supertrait blanket impl
+codeSlide(20, "TRAITS", "Supertraits define the minimum hardware capability.", "leash-waveshare/src/lib.rs", String.raw`
+pub trait ControllerIo: Read + Write + Send {}
+
+impl<T> ControllerIo for T
+where
+    T: Read + Write + Send,
+{}
+
+pub trait ControllerIoFactory: Send {
+    fn open(&mut self) -> io::Result<Box<dyn ControllerIo>>;
+}`, [
+  "Read + Write + Send is the complete capability set.",
+  "The blanket impl admits every compatible transport.",
+  "Box<dyn Trait> erases the concrete serial type.",
+], "ControllerIo is a trait alias pattern on stable Rust. The blanket implementation means serial ports, test doubles, and future transports participate automatically if they satisfy Read, Write, and Send.", [`${GH}/crates/leash-waveshare/src/lib.rs`], { accent: C.lime, codeSize: 15.5 });
+
+// 21 — factory closure
+codeSlide(21, "TRAIT OBJECTS", "A closure can be the reconnection factory.", "leash-waveshare/src/lib.rs", String.raw`
+pub trait ControllerIoFactory: Send {
+    fn open(&mut self) -> io::Result<Box<dyn ControllerIo>>;
+}
+
+impl<F> ControllerIoFactory for F
+where
+    F: FnMut() -> io::Result<Box<dyn ControllerIo>> + Send,
+{
+    fn open(&mut self) -> io::Result<Box<dyn ControllerIo>> {
+        self()
+    }
+}
+`, [
+  "FnMut permits reconnect state to evolve.",
+  "Send permits ownership transfer to the I/O thread.",
+  "The trait object keeps Supervisor non-generic at runtime.",
+], "The factory itself is object-safe and the closure blanket implementation keeps call sites light. FnMut is deliberate: opening a connection may update retry counters or consume mutable configuration.", [`${GH}/crates/leash-waveshare/src/lib.rs`], { accent: C.pink, codeSize: 15.0 });
+
+// 22 — associated types
+codeSlide(22, "ASSOCIATED TYPES", "The actuation port chooses its acknowledgement protocol.", "leash-runtime/src/supervisor.rs", String.raw`
+pub trait ActuationAcknowledgement: Send + 'static {
+    fn applied(&self) -> bool;
+    fn verified_zero(&self) -> bool;
+
+    fn command_id(&self) -> Option<CommandId> { None }
+    fn evidence_id(&self) -> Option<EvidenceId> { None }
+    fn applied_sequence(&self) -> Option<u64> { None }
+}
+
+pub trait ActuationPort: Send + 'static {
+    type Acknowledgement: ActuationAcknowledgement;
+    type Error: fmt::Display + Send + 'static;
+
+    fn submit_drive(
+        &mut self,
+        command: Authorized<DifferentialDrive>,
+    ) -> Result<(), Self::Error>;
+
+    fn try_acknowledgement(
+        &mut self,
+    ) -> Result<Option<Self::Acknowledgement>, Self::Error>;
+}`, [
+  "Associated types bind one Ack and Error to each port.",
+  "The port accepts only Authorized<Drive>.",
+  "'static permits the whole port to live on a thread.",
+], "Associated types are better than extra generic parameters here because each concrete port has one canonical acknowledgement and error type. The signature also makes the typestate boundary unavoidable: raw DifferentialDrive is not accepted.", [`${GH}/crates/leash-runtime/src/supervisor.rs`], { accent: C.cyan, codeSize: 14.5 });
+
+// 23 — generic supervisor
+codeSlide(23, "GENERIC BOUNDS", "An equality bound connects the supervisor to the port.", "leash-runtime/src/supervisor.rs", String.raw`
+pub struct CpuSafetySupervisor<A>
+{
+    handle: SupervisorHandle,
+    events: Option<LatestReader<SupervisorEvent<A>>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl<A> CpuSafetySupervisor<A>
+where
+    A: ActuationAcknowledgement,
+{
+    pub fn spawn<P>(
+        kernel: ControlKernel,
+        port: P,
+        clock: Box<dyn Clock + Send>,
+        config: SupervisorConfig,
+    ) -> Result<Self, SupervisorStartError>
+    where
+        P: ActuationPort<Acknowledgement = A>,
+    {
+        Self::spawn_inner(kernel, port, clock, config, None)
+    }
+}`, [
+  "A is named once on the supervisor state.",
+  "P stays generic only at construction.",
+  "Acknowledgement = A is an associated-type equality.",
+], "The supervisor stores acknowledgement state, so A belongs on the struct. The concrete port P is only needed to spawn the owner thread. The equality bound proves that whatever P emits is exactly the A the shared state can hold.", [`${GH}/crates/leash-runtime/src/supervisor.rs`], { accent: C.lime, codeSize: 15.0 });
+
+// 24 — dispatch boundary
+{
+  const s = slide(C.paper, "DISPATCH", 24);
+  title(s, "Static dispatch inside; dynamic dispatch at hardware seams.", { size: 30 });
+  codeBlock(s, "MONOMORPHIZED", String.raw`
+fn run_supervisor<P>(
+    mut port: P,
+    // ...
+) where
+    P: ActuationPort,
+{
+    // specialized for P
+}`, 0.62, 1.55, 5.8, 3.7, { accent: C.lime, size: 17.5 });
+  codeBlock(s, "ERASED", String.raw`
+fn controller_loop(
+    io: Box<dyn ControllerIo>,
+) {
+    // one runtime-selected I/O object
+}`, 6.9, 1.55, 5.8, 3.7, { accent: C.pink, size: 17.5 });
+  pill(s, "FAST CONTROL PATH", 1.65, 5.62, 3.65, C.lime, C.ink, 12);
+  pill(s, "REPLACEABLE ADAPTER", 7.95, 5.62, 3.65, C.pink, C.ink, 12);
+  body(s, "Choose dispatch based on ownership and change boundaries—not dogma.", 1.1, 6.32, 11.1, 0.4, { size: 21, bold: true, align: "center" });
   footer(s);
-  note(s, 9, "This is the architectural split. Intent is rich and nondeterministic. Authorization and the safety kernel are small and deterministic. The adapter translates to hardware. Evidence records the whole crossing so a later replay can explain what happened.", [`${GH}/crates/leash-core/src`, `${GH}/crates/leash-runtime/src`, `${GH}/crates/leash-evidence/src`]);
+  note(s, 24, "Leash uses both dispatch models. The supervisor control loop remains generic and monomorphized. The transport is selected at runtime behind Box dyn ControllerIo. The useful question is where substitution happens and who owns the value.", [`${GH}/crates/leash-runtime/src/supervisor.rs`, `${GH}/crates/leash-waveshare/src/lib.rs`]);
 }
 
-// 10
+// 25 — ownership into thread
+codeSlide(25, "THREAD OWNERSHIP", "move transfers the physical port into one owner thread.", "leash-runtime/src/supervisor.rs [abridged]", String.raw`
+let panic_shared = Arc::clone(&shared);
+let thread_shared = Arc::clone(&shared);
+
+let worker = thread::Builder::new()
+    .name("leash-cpu-safety".to_string())
+    .spawn(move || {
+        let _ = thread_shared.worker_thread.set(thread::current());
+        let result = std::panic::catch_unwind(
+            std::panic::AssertUnwindSafe(|| {
+                run_supervisor(
+                    kernel, port, clock, config,
+                    proposal_receiver, safety_receiver,
+                    event_publisher, evidence, shared,
+                );
+            }),
+        );
+        if result.is_err() {
+            panic_shared.faulted.store(true, Ordering::Release);
+            panic_shared.closed.store(true, Ordering::Release);
+        }
+    })
+    .map_err(|error| SupervisorStartError::Thread(error.to_string()))?;`, [
+  "move gives the thread exclusive port ownership.",
+  "Arc shares state, not mutable hardware access.",
+  "catch_unwind converts panic into a fail-closed outcome.",
+], "The owner thread receives port by move, so the caller cannot keep using it. Shared observation crosses the boundary through Arc. The closure is wrapped in catch_unwind so a panic becomes explicit supervisor state rather than silent loss of the actuator owner.", [`${GH}/crates/leash-runtime/src/supervisor.rs`], { accent: C.pink, codeSize: 13.9 });
+
+// 26 — Drop lifecycle
+codeSlide(26, "RAII", "Drop makes thread shutdown part of ownership.", "leash-runtime/src/supervisor.rs", String.raw`
+impl<A> Drop for CpuSafetySupervisor<A>
 {
-  const s = slide(C.paleLime, "CAPABILITIES", 10);
-  title(s, "A registry turns verbs into explicit authority.", { size: 31 });
-  const caps = [["drive", C.pink], ["stop", C.red], ["observe", C.paleBlue], ["map", C.yellow], ["camera", C.paper2]];
-  caps.forEach(([t, fill], i) => {
-    const y = 1.45 + i * 0.95;
-    box(s, t, 0.75, y, 2.0, 0.64, fill, { size: 17, color: fill === C.red ? C.white : C.ink });
-    arrow(s, 2.88, y + 0.32, 1.15, 0, C.ink, 2.2);
-  });
-  s.addShape(SH.rect, { x: 4.2, y: 1.25, w: 3.45, h: 4.95, fill: { color: C.blue }, line: { color: C.ink, width: 3 } });
-  body(s, "CAPABILITY\nREGISTRY", 4.55, 2.25, 2.75, 1.15, { size: 25, bold: true, color: C.white, align: "center" });
-  body(s, "name → schema\npolicy → handler", 4.65, 3.72, 2.55, 0.95, { size: 17, mono: true, color: C.white, align: "center" });
-  const outcomes = [["AUTHORIZED", C.lime, 8.45, 1.55], ["REJECTED", C.pink, 9.15, 3.2], ["UNAVAILABLE", C.yellow, 8.45, 4.85]];
-  outcomes.forEach(([t, fill, x, y]) => {
-    arrow(s, 7.78, 3.65, x - 7.88, y - 3.3, C.ink, 2.2);
-    box(s, t, x, y, 3.1, 0.84, fill, { size: 16 });
-  });
+    fn drop(&mut self) {
+        self.handle.shared.shutdown.store(true, Ordering::Release);
+        self.handle.shared.wake();
+
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}`, [
+  "Dropping sets the shutdown flag.",
+  "Wake prevents a sleeping loop from hanging.",
+  "Option::take guarantees one join attempt.",
+], "RAII matters beyond memory. When the supervisor owner is dropped, it signals shutdown, wakes the worker, takes the JoinHandle out of its Option, and joins exactly once. Lifecycle behavior is co-located with lifecycle ownership.", [`${GH}/crates/leash-runtime/src/supervisor.rs`], { accent: C.lime, codeSize: 16.2 });
+
+// 27 — bounded lane types
+codeSlide(27, "BOUNDED CONCURRENCY", "Backpressure errors return ownership to the sender.", "leash-runtime/src/lane.rs", String.raw`
+pub enum OverflowPolicy {
+    RejectNewest,
+    DropOldest,
+}
+
+pub enum SendOutcome<T> {
+    Enqueued,
+    ReplacedOldest(T),
+}
+
+pub enum SendError<T> {
+    Closed(T),
+    Full(T),
+}
+
+struct LaneState<T> {
+    queue: VecDeque<T>,
+    high_watermark: usize,
+    sent: u64,
+    received: u64,
+    rejected: u64,
+    dropped: u64,
+}
+
+struct LaneShared<T> {
+    capacity: usize,
+    policy: OverflowPolicy,
+    closed: AtomicBool,
+    state: Mutex<LaneState<T>>,
+}`, [
+  "The queue has a hard capacity.",
+  "Errors preserve the rejected T.",
+  "Replacement reports the evicted T.",
+], "Boundedness is a correctness property for a real-time-ish control loop. Notice the ownership-aware result types: a failed send returns the value, and drop-oldest reports what was replaced. Nothing disappears implicitly.", [`${GH}/crates/leash-runtime/src/lane.rs`], { accent: C.cyan, codeSize: 16.0 });
+
+// 28 — overflow match
+codeSlide(28, "BOUNDED CONCURRENCY", "Overflow policy is an exhaustive match, not a comment.", "leash-runtime/src/lane.rs [abridged]", String.raw`
+pub fn try_send(&self, value: T)
+    -> Result<SendOutcome<T>, SendError<T>> {
+    if self.shared.closed.load(Ordering::Acquire) {
+        return Err(SendError::Closed(value));
+    }
+
+    let mut state = lock(&self.shared.state);
+    if self.shared.closed.load(Ordering::Acquire) {
+        return Err(SendError::Closed(value));
+    }
+
+    let outcome = if state.queue.len() == self.shared.capacity {
+        match self.shared.policy {
+        OverflowPolicy::RejectNewest => {
+            state.rejected = state.rejected.saturating_add(1);
+            return Err(SendError::Full(value));
+        }
+        OverflowPolicy::DropOldest => {
+            let replaced = state.queue.pop_front()
+                .expect("a full bounded queue contains an item");
+            state.dropped = state.dropped.saturating_add(1);
+            state.queue.push_back(value);
+            SendOutcome::ReplacedOldest(replaced)
+        }
+        }
+    } else {
+        state.queue.push_back(value);
+        SendOutcome::Enqueued
+    };
+    Ok(outcome)
+}`, [
+  "Check closed before taking the mutex.",
+  "The match documents both overload semantics.",
+  "No unbounded queue can consume the device.",
+], "The control path chooses an overload policy explicitly. RejectNewest preserves older work. DropOldest preserves freshness. The caller sees which happened through the result type, so overload can enter evidence instead of becoming hidden latency.", [`${GH}/crates/leash-runtime/src/lane.rs`], { accent: C.yellow, codeSize: 13.8 });
+
+// 29 — atomics mailbox
+codeSlide(29, "ATOMICS", "Safety requests bypass the ordinary proposal lane.", "leash-runtime/src/safety.rs", String.raw`
+struct SafetyShared {
+    stop: AtomicU64,
+    estop: AtomicU64,
+    closed: AtomicBool,
+}
+
+impl SafetySender {
+    pub fn request(&self, kind: SafetyKind)
+        -> Result<u64, SafetyRequestError> {
+        if self.shared.closed.load(Ordering::Acquire) {
+            return Err(SafetyRequestError::Closed);
+        }
+        let sequence = match kind {
+            SafetyKind::Stop => increment(&self.shared.stop),
+            SafetyKind::EStop => increment(&self.shared.estop),
+        }?;
+        if self.shared.closed.load(Ordering::Acquire) {
+            return Err(SafetyRequestError::Closed);
+        }
+        Ok(sequence)
+    }
+}
+
+fn increment(counter: &AtomicU64) -> Result<u64, SafetyRequestError> {
+    counter.fetch_update(Ordering::AcqRel, Ordering::Acquire,
+        |current| current.checked_add(1))
+        .map(|previous| previous + 1)
+        .map_err(|_| SafetyRequestError::SequenceExhausted)
+}`, [
+  "Safety has a dedicated mailbox.",
+  "AcqRel makes increment a read-modify-write boundary.",
+  "fetch_update prevents sequence wraparound.",
+], "Stop and E-stop do not compete with normal proposals for bounded-lane space. Each kind has an atomic request count. fetch_update publishes a monotonic sequence and rejects exhaustion instead of wrapping.", [`${GH}/crates/leash-runtime/src/safety.rs`], { accent: C.red, codeSize: 13.8 });
+
+// 30 — priority
+codeSlide(30, "PRIORITY", "The receiver checks E-stop before stop.", "leash-runtime/src/safety.rs", String.raw`
+pub fn try_recv(&mut self)
+    -> Result<Option<SafetySignal>, SafetyReceiveError> {
+    let estop = self.shared.estop.load(Ordering::Acquire);
+    if estop > self.seen_estop {
+        let signal = signal(SafetyKind::EStop, self.seen_estop, estop);
+        self.seen_estop = estop;
+        return Ok(Some(signal));
+    }
+
+    let stop = self.shared.stop.load(Ordering::Acquire);
+    if stop > self.seen_stop {
+        let signal = signal(SafetyKind::Stop, self.seen_stop, stop);
+        self.seen_stop = stop;
+        return Ok(Some(signal));
+    }
+
+    if self.shared.closed.load(Ordering::Acquire) {
+        return Err(SafetyReceiveError::Closed);
+    }
+    Ok(None)
+}`, [
+  "E-stop wins if both flags are present.",
+  "Per-kind counters preserve coalesced requests.",
+  "Closed is distinct from no pending signal.",
+], "Priority is visible in control flow. E-stop is loaded before stop and returns immediately. Each counter is compared with its own seen watermark, preserving request counts without allocating a queue.", [`${GH}/crates/leash-runtime/src/safety.rs`], { accent: C.red, codeSize: 14.2 });
+
+// 31 — latest slot
+codeSlide(31, "FRESHNESS", "Option::replace makes latest-only semantics explicit.", "leash-runtime/src/latest.rs", String.raw`
+pub fn publish(&self, value: Stamped<T>)
+    -> Result<Option<Stamped<T>>, PublishError<T>> {
+    let mut state = lock(&self.state);
+
+    if state.last_sequence
+        .is_some_and(|sequence| value.sequence <= sequence) {
+        state.rejected_out_of_order =
+            state.rejected_out_of_order.saturating_add(1);
+        return Err(PublishError::SequenceNotIncreasing(value));
+    }
+
+    state.last_sequence = Some(value.sequence);
+    state.published = state.published.saturating_add(1);
+    let replaced = state.value.replace(value);
+    if replaced.is_some() {
+        state.replaced = state.replaced.saturating_add(1);
+    }
+    Ok(replaced)
+}
+
+pub fn take(&mut self) -> Option<Stamped<T>> {
+    let mut state = lock(&self.state);
+    let value = state.value.take();
+    if value.is_some() {
+        state.taken = state.taken.saturating_add(1);
+    }
+    value
+}`, [
+  "Stale sequence numbers are rejected.",
+  "replace returns the displaced observation.",
+  "take moves the newest value out exactly once.",
+], "Some data should queue; high-rate observations often should not. The latest slot models that directly. Option replace and take express displacement and consumption without sentinel values or cloning.", [`${GH}/crates/leash-runtime/src/latest.rs`], { accent: C.cyan, codeSize: 14.7 });
+
+// 32 — serde command enum
+codeSlide(32, "WIRE CONTRACTS", "Serde turns the network shape into an enum.", "leash-gateway/src/lib.rs", String.raw`
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(
+    tag = "command",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum CommandRequest {
+    Authorize {
+        operator: String,
+        expires_at_ns: u64,
+    },
+    Drive {
+        left: f64,
+        right: f64,
+        deadline_ns: u64,
+    },
+    Stop {},
+    EStop {},
+    ResetEStop { approved: bool },
+    SetPlannerActive { active: bool },
+    CancelPlanner {},
+}
+
+`, [
+  "Tagged enum gives one explicit command discriminator.",
+  "deny_unknown_fields rejects schema drift.",
+  "Decode errors enter the typed error path.",
+], "The gateway does not pass loosely typed JSON inward. A tagged enum defines the allowed command set. Unknown fields fail closed, and serde errors are mapped into a domain error before any command reaches runtime.", [`${GH}/crates/leash-gateway/src/lib.rs`], { accent: C.pink, codeSize: 14.9 });
+
+// 33 — error pipeline
+codeSlide(33, "ERRORS", "map_err and ? preserve context without nesting.", "leash-gateway/src/lib.rs", String.raw`
+pub enum GatewayError {
+    InvalidJson(Box<str>),
+    InvalidDomain(Box<str>),
+    Proposal(SupervisorSubmitError),
+    Safety(Box<str>),
+    Timeout,
+    Supervisor(Box<str>),
+    Encode(Box<str>),
+}
+
+pub fn decode_and_execute(&self, json: &[u8])
+    -> Result<Vec<u8>, GatewayError> {
+    let request = serde_json::from_slice(json)
+        .map_err(|error| GatewayError::InvalidJson(
+            error.to_string().into_boxed_str()
+        ))?;
+    let response = self.execute(request)?;
+    serde_json::to_vec(&response)
+        .map_err(|error| GatewayError::Encode(
+            error.to_string().into_boxed_str()
+        ))
+}`, [
+  "The enum retains the failure category.",
+  "? keeps the happy path visually flat.",
+  "Boundary details become owned Box<str> values.",
+], "This is idiomatic error plumbing with a safety benefit: failures stay categorized. map_err adapts errors at subsystem boundaries, while the question-mark operator exits immediately and keeps the success path easy to audit.", [`${GH}/crates/leash-gateway/src/lib.rs`], { accent: C.yellow, codeSize: 14.7 });
+
+// 34 — let else
+codeSlide(34, "LET-ELSE", "A missing acknowledgement ticket exits immediately.", "leash-waveshare/src/lib.rs", String.raw`
+fn try_acknowledgement(&mut self)
+    -> Result<Option<Self::Acknowledgement>, Self::Error> {
+    let Some(ticket) = self.pending.front() else {
+        return Ok(None);
+    };
+
+    match ticket.try_take().map_err(PortError::Submit)? {
+        Some(ack) => {
+            self.pending.pop_front();
+            Ok(Some(ack))
+        }
+        None => Ok(None),
+    }
+}`, [
+  "let-else handles the precondition at the top.",
+  "Empty is normal; disconnected is an error.",
+  "front borrows; pop_front happens only after an acknowledgement.",
+], "let-else is ideal when the interesting path requires a value. front borrows the oldest ticket without removing it. Only an available acknowledgement causes pop_front, so a pending ticket retains its exact queue position.", [`${GH}/crates/leash-waveshare/src/lib.rs`], { accent: C.cyan, codeSize: 15.0 });
+
+// 35 — adapter implementation
+codeSlide(35, "ADAPTERS", "The hardware adapter maps concrete protocol into the trait.", "leash-waveshare/src/lib.rs", String.raw`
+impl ActuationAcknowledgement for CommandAck {
+    fn applied(&self) -> bool {
+        self.outcome == AckOutcome::Applied
+    }
+    fn verified_zero(&self) -> bool {
+        self.verified_zero
+    }
+    fn command_id(&self) -> Option<CommandId> {
+        Some(self.command_id)
+    }
+}
+
+impl ActuationPort for WaveshareActuationPort {
+    type Acknowledgement = CommandAck;
+    type Error = PortError;
+
+    fn submit_drive(
+        &mut self,
+        command: Authorized<DifferentialDrive>,
+    ) -> Result<(), Self::Error> {
+        let ticket = self.handle.submit_drive(command)
+            .map_err(PortError::Submit)?;
+        self.pending.push_back(ticket);
+        Ok(())
+    }
+}`, [
+  "Associated types become concrete here.",
+  "Authorization remains present at the last adapter.",
+  "Hardware errors are not erased prematurely.",
+], "The adapter is where abstract runtime contracts become controller messages. It chooses CommandAck and PortError, accepts only an Authorized drive, and preserves the typed acknowledgement contract back into runtime.", [`${GH}/crates/leash-waveshare/src/lib.rs`], { accent: C.lime, codeSize: 13.8 });
+
+// 36 — ROS typed path
+codeSlide(36, "ROS2 / NAV2", "Navigation proposals carry their frame in the type.", "leash-ros2/src/lib.rs", String.raw`
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathProposal {
+    pub frame: Frame<Map>,
+    pub at: MonotonicNanos,
+    pub poses: Box<[Pose2<Map>]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanarTransform<Parent, Child> {
+    pub parent: Frame<Parent>,
+    pub child: Frame<Child>,
+    pub at: MonotonicNanos,
+    pub x: Meters,
+    pub y: Meters,
+    pub yaw: Radians,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NavigationGoal {
+    pub activity_id: ActivityId,
+    pub pose: Pose2<Map>,
+    pub received_at: MonotonicNanos,
+}`, [
+  "Map is encoded in every navigation pose.",
+  "Transforms name both parent and child types.",
+  "ROS2 is an adapter—not an authority bypass.",
+], "The ROS2 crate carries the phantom-frame discipline to path proposals and navigation goals. A transform names both endpoints in its type. The adapter can translate Nav2 intent, but it still cannot produce motor authority directly.", [`${GH}/crates/leash-ros2/src/lib.rs`], { accent: C.paleBlue, codeSize: 14.7 });
+
+// 37 — CUDA unsafe island
+codeSlide(37, "CUDA", "The unsafe launch is narrow, validated, and non-authoritative.", "leash-cuda/src/device.rs [abridged]", String.raw`
+let output_count = cells.len()
+    .checked_mul(depth as usize)
+    .ok_or(ComputeInputError::LengthOverflow)?;
+let cell_count = u32::try_from(cells.len())
+    .map_err(|_| WorkError::InvalidInput(
+        ComputeInputError::LengthOverflow))?;
+let launch_count = u32::try_from(output_count)
+    .map_err(|_| WorkError::InvalidInput(
+        ComputeInputError::LengthOverflow))?;
+
+ensure_capacity(&self.stream,
+    &mut self.occupancy_output, output_count)?;
+
+let cells_view = self.occupancy_cells.slice(..cells.len());
+let mut output_view =
+    self.occupancy_output.slice_mut(..output_count);
+
+{
+    unsafe {
+        self.stream.launch_builder(&self.project_occupancy)
+            .arg(&cells_view)
+            .arg(&mut output_view)
+            .arg(&cell_count)
+            .arg(&depth)
+            .launch(LaunchConfig::for_num_elems(launch_count))
+    }
+    .map_err(|error| backend_error("launch project_occupancy", error))?;
+}
+
+let output_view = self.occupancy_output.slice(..output_count);
+self.stream.clone_dtoh(&output_view)
+    .map_err(|error| backend_error("download output", error))
+}`, [
+  "Validation sits immediately before unsafe.",
+  "Typed CudaSlice views bound the launch arguments.",
+  "CUDA computes shadow evidence; CPU authorizes motion.",
+], "This is the unsafe island opened on slide seven. Checked multiplication, integer conversion, capacity checks, and typed device slices precede the cudarc kernel launch. CUDA accelerates compute and shadow evaluation; the CPU control kernel remains final motion authority.", [`${GH}/crates/leash-cuda/src/lib.rs`, `${GH}/crates/leash-cuda/src/device.rs`, `${GH}/crates/leash-cuda/README.md`], { accent: C.pink, codeSize: 15.0 });
+
+// 38 — replay and evidence
+{
+  const s = slide(C.paper, "PROOF", 38);
+  title(s, "Determinism and measurements close the loop.", { size: 30 });
+  codeBlock(s, "leash-replay/src/lib.rs", String.raw`
+#[derive(Debug, Clone, Copy)]
+struct StableDigest(u64);
+
+impl StableDigest {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x00000100000001b3;
+
+    fn u64(&mut self, value: u64) {
+        for byte in value.to_le_bytes() {
+            self.0 ^= u64::from(byte);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+    }
+}
+
+let first = scenario.verify().unwrap();
+let second = scenario.verify().unwrap();
+assert_eq!(first, second);`, 0.55, 1.5, 7.2, 4.88, { accent: C.lime, size: 15.2 });
+  box(s, "58.306 µs\np99 transition", 8.08, 1.5, 2.18, 1.28, C.lime, { size: 18 });
+  box(s, "0\ndeadline misses", 10.55, 1.5, 2.18, 1.28, C.paleBlue, { size: 18 });
+  box(s, "110,293\ndurable records/s", 8.08, 3.08, 2.18, 1.28, C.paleYellow, { size: 18 });
+  box(s, "37.622 ms\nphysical E-stop ack", 10.55, 3.08, 2.18, 1.28, C.palePink, { size: 17 });
+  body(s, "Same input → same transitions → same digest", 8.15, 5.03, 4.5, 0.75, { size: 21, bold: true, align: "center" });
   footer(s);
-  note(s, 10, "Capabilities name the effect and its contract. Unknown verbs do not fall through to magic. Unavailable hardware is not silently simulated. Each call ends as authorized, rejected, or unavailable, and that outcome can be recorded.", [`${GH}/src/capability.rs`, `${GH}/src/types.rs`]);
+  note(s, 38, "Types prevent classes of misuse, but the runtime still needs empirical proof. Replay runs the same scenario twice and checks exact transitions and a stable digest. Recorded Jetson evidence supplies latency, deadline, durability, and physical E-stop measurements.", [`${GH}/crates/leash-replay/src/lib.rs`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
 }
 
-// 11
+// 39 — Qualia boundary
 {
-  const s = slide(C.paper, "AUTHORITY", 11);
-  title(s, "Supertraits describe the hardware boundary.", { size: 34 });
-  box(s, "pub trait ControllerIo:\n    Read + Write + Send {}\n\nimpl<T> ControllerIo for T\nwhere\n    T: Read + Write + Send\n{}", 0.65, 1.45, 7.1, 4.65, C.ink, { mono: true, size: 20, align: "left", color: C.white, pad: 0.36 });
-  body(s, "Read + Write", 8.38, 1.75, 3.85, 0.42, { size: 24, bold: true, color: C.blue });
-  body(s, "the byte-level contract", 8.4, 2.25, 3.7, 0.34, { size: 15, bold: true, color: C.grey });
-  body(s, "Send", 8.38, 3.15, 3.85, 0.42, { size: 24, bold: true, color: C.pink });
-  body(s, "safe to move into owner thread", 8.4, 3.65, 3.7, 0.42, { size: 15, bold: true, color: C.grey });
-  body(s, "blanket impl", 8.38, 4.62, 3.85, 0.42, { size: 24, bold: true, color: C.ink });
-  body(s, "any conforming I/O becomes usable", 8.4, 5.12, 3.7, 0.42, { size: 15, bold: true, color: C.grey });
-  pill(s, "ZERO METHODS • STRONG BOUNDS", 8.4, 5.75, 3.65, C.lime, C.ink, 10);
+  const s = slide(C.paper, "THE SLOWER CLOCK", 39);
+  title(s, "Qualia reasons. Leash retains physical authority.", { size: 30 });
+  photo(s, "qualia-world-current.png", 0.64, 1.48, 7.55, 4.66, C.blue);
+  box(s, "MISSION\nONTOLOGY\nSEMANTICS", 8.65, 1.5, 3.65, 1.4, C.paleBlue, { size: 22 });
+  arrow(s, 10.47, 3.16, 0, 0.72, C.ink, 3);
+  box(s, "PROPOSALS +\nEVIDENCE", 8.65, 4.02, 3.65, 1.05, C.paleYellow, { size: 21 });
+  arrow(s, 10.47, 5.3, 0, 0.56, C.ink, 3);
+  pill(s, "LEASH AUTHORIZES", 8.82, 6.02, 3.3, C.lime, C.ink, 12);
   footer(s);
-  note(s, 11, "This is real Leash syntax. ControllerIo is a marker trait with three supertraits: Read, Write, and Send. The blanket implementation means any type satisfying those bounds automatically implements ControllerIo. There are no methods to fake and no inheritance tree. The Send bound is architectural: ownership of the I/O object can move into the controller-owner thread.", [`${GH}/crates/leash-waveshare/src/lib.rs`]);
+  note(s, 39, "Qualia is intentionally outside the open-source Leash boundary. It may build missions, ontologies, and semantic evidence asynchronously. It proposes. Leash remains the small, fast, local authority path that decides whether a physical command may proceed.", [REPO]);
 }
 
-// 12
+// 40 — live demo
 {
-  const s = slide(C.ink, "THE KERNEL", 12);
-  title(s, "The safety kernel is a deterministic loop—not a conversation.", { size: 29, color: C.white });
-  const loop = [["READ", 1.0, 2.5, C.paleBlue], ["DECIDE", 4.25, 1.45, C.yellow], ["WRITE", 7.5, 2.5, C.pink], ["PROVE", 4.25, 4.45, C.lime]];
-  loop.forEach(([t, x, y, fill]) => {
-    box(s, t, x, y, 2.1, 0.9, fill, { size: 20 });
-  });
-  arrow(s, 3.12, 2.72, 1.05, -0.55, C.white, 3);
-  arrow(s, 6.38, 2.17, 1.05, 0.55, C.white, 3);
-  arrow(s, 8.55, 3.45, -2.1, 1.25, C.white, 3);
-  arrow(s, 4.2, 4.72, -2.0, -1.2, C.white, 3);
-  body(s, "10 ms tick", 10.2, 2.32, 2.1, 0.45, { size: 24, bold: true, color: C.lime, align: "center" });
-  body(s, "bounded mailbox\npriority E-stop\nexplicit states", 10.2, 3.05, 2.1, 1.4, { size: 17, color: C.white, align: "center" });
-  body(s, "A model may miss a token deadline.\nThe motor boundary may not.", 1.0, 5.85, 8.5, 0.48, { size: 22, bold: true, color: C.white });
-  footer(s, REPO);
-  note(s, 12, "Leash’s CPU supervisor runs with a default ten-millisecond tick. It reads bounded inputs, makes a deterministic transition, writes an effect, and records evidence. The language-model loop is outside this deadline.", [`${GH}/crates/leash-runtime/src/safety_supervisor.rs`]);
-}
-
-// 13
-{
-  const s = slide(C.paper, "RUST TYPES", 13);
-  title(s, "Smart constructors close numeric ranges.", { size: 32 });
-  box(s, "pub struct NormalizedDrive(f64);\n\nimpl NormalizedDrive {\n  pub fn new(value: f64)\n    -> Result<Self, DomainError>\n  {\n    if !value.is_finite() { … }\n    if !(-1.0..=1.0).contains(&value) { … }\n    Ok(Self(value))\n  }\n}", 0.65, 1.4, 7.15, 4.95, C.ink, { mono: true, size: 18.5, align: "left", color: C.white, pad: 0.34 });
-  box(s, "f64", 8.55, 1.62, 1.35, 0.75, C.palePink, { mono: true, size: 21 });
-  arrow(s, 10.02, 2.0, 0.65, 0, C.ink, 2.5);
-  box(s, "Result", 10.8, 1.62, 1.55, 0.75, C.yellow, { mono: true, size: 19 });
-  body(s, "private field", 8.38, 2.82, 3.85, 0.38, { size: 22, bold: true, color: C.blue });
-  body(s, "outside modules cannot bypass new()", 8.4, 3.32, 3.7, 0.55, { size: 15, bold: true, color: C.grey });
-  body(s, "finite + bounded", 8.38, 4.25, 3.85, 0.38, { size: 22, bold: true, color: C.pink });
-  body(s, "NaN and ±∞ never reach encoding", 8.4, 4.75, 3.7, 0.55, { size: 15, bold: true, color: C.grey });
-  pill(s, "INVALID AT CONSTRUCTION", 8.4, 5.78, 3.7, C.lime, C.ink, 10);
-  footer(s);
-  note(s, 13, "NormalizedDrive is a one-field tuple struct whose field is private. Callers cannot construct NormalizedDrive(2.0); they must use new, which rejects non-finite and out-of-range values and returns Result. After construction, the rest of the program can rely on the invariant instead of rechecking every float.", [`${GH}/crates/leash-core/src/drive.rs`]);
-}
-
-// 14
-{
-  const s = slide(C.pink, "BOUNDED EFFECTS", 14);
-  title(s, "Generics encode the authority transition.", { size: 32 });
-  box(s, "pub struct Candidate<C> {\n  pub deadline: MonotonicNanos,\n  pub command: C,\n}", 0.65, 1.55, 4.0, 2.2, C.paper2, { mono: true, size: 19, align: "left", pad: 0.32 });
-  arrow(s, 4.88, 2.65, 1.05, 0, C.ink, 4);
-  box(s, "SafetyGate\n.authorize(candidate, now)", 6.05, 1.76, 2.35, 1.8, C.yellow, { mono: true, size: 17 });
-  arrow(s, 8.55, 2.65, 1.0, 0, C.ink, 4);
-  box(s, "pub struct Authorized<C> {\n  command_id: CommandId,\n  evidence_id: EvidenceId,\n  authorized_at: MonotonicNanos,\n  command: C,\n}", 9.65, 1.35, 3.05, 2.65, C.lime, { mono: true, size: 14.5, align: "left", pad: 0.25 });
-  box(s, "Err(SafetyDenial::Expired)", 4.88, 4.72, 3.95, 0.8, C.ink, { mono: true, size: 16, color: C.white });
-  arrow(s, 7.22, 3.72, -0.45, 0.85, C.ink, 2.5);
-  body(s, "C is generic: the transition works for any command payload.\nAuthorized fields are private: gateways cannot forge the post-policy state.", 0.82, 5.82, 11.6, 0.63, { size: 18, bold: true, align: "center" });
-  footer(s);
-  note(s, 14, "Candidate<C> and Authorized<C> carry the same generic command type C, but they are different states. authorize consumes the candidate, checks the gate and deadline, allocates evidence identity, and returns Authorized<C>. Authorized’s fields are private, so a transport cannot assemble one with a struct literal. The compile-fail doctest proves that forgery does not compile.", [`${GH}/crates/leash-core/src/drive.rs`]);
-}
-
-// 15
-{
-  const s = slide(C.paper, "STOP PATH", 15);
-  title(s, "E-stop skips the queue. CPU keeps authority.", { size: 32 });
-  const y = 2.0;
-  box(s, "NORMAL\nPROPOSALS", 0.7, y, 2.3, 1.3, C.paleBlue, { size: 18 });
-  box(s, "BOUNDED\nMAILBOX 32", 4.0, y, 2.3, 1.3, C.yellow, { size: 18 });
-  box(s, "100 Hz CPU\nSUPERVISOR", 7.3, y, 2.3, 1.3, C.lime, { size: 18 });
-  box(s, "MOTORS", 10.6, y, 2.0, 1.3, C.ink, { size: 20, color: C.white });
-  arrow(s, 3.08, 2.65, 0.82, 0, C.ink, 2.5);
-  arrow(s, 6.38, 2.65, 0.82, 0, C.ink, 2.5);
-  arrow(s, 9.68, 2.65, 0.82, 0, C.ink, 2.5);
-  box(s, "E-STOP", 3.95, 4.55, 2.35, 0.86, C.red, { size: 22, color: C.white });
-  arrow(s, 6.42, 4.85, 1.98, -1.25, C.red, 5);
-  body(s, "priority safety mailbox", 6.75, 4.75, 2.75, 0.32, { size: 13, bold: true, color: C.red, align: "center" });
-  body(s, "Safety traffic is not ordinary traffic.", 3.2, 5.95, 7.0, 0.5, { size: 24, bold: true, align: "center" });
-  footer(s);
-  note(s, 15, "The supervisor has a bounded proposal channel and a separate priority safety path. Emergency stop is not allowed to wait behind ordinary motion requests. The CPU loop remains the final authority even when CUDA shadow computation is active.", [`${GH}/crates/leash-runtime/src/safety_supervisor.rs`, `${GH}/crates/leash-cuda/README.md`]);
-}
-
-// 16
-{
-  const s = slide(C.paleYellow, "OWNERSHIP", 16);
-  title(s, "Associated types keep adapters concrete.", { size: 33 });
-  box(s, "pub trait ActuationPort: Send + 'static {\n  type Acknowledgement:\n    ActuationAcknowledgement;\n  type Error:\n    Display + Send + 'static;\n\n  fn submit_drive(\n    &mut self,\n    command: Authorized<DifferentialDrive>,\n  ) -> Result<(), Self::Error>;\n}", 0.62, 1.35, 7.3, 5.28, C.ink, { mono: true, size: 17.5, align: "left", color: C.white, pad: 0.32 });
-  body(s, "&mut self", 8.58, 1.68, 3.8, 0.4, { size: 25, bold: true, color: C.blue });
-  body(s, "exclusive mutable access", 8.6, 2.2, 3.65, 0.36, { size: 15, bold: true, color: C.grey });
-  body(s, "Self::Error", 8.58, 3.0, 3.8, 0.4, { size: 25, bold: true, color: C.pink });
-  body(s, "adapter-specific, statically known", 8.6, 3.52, 3.65, 0.5, { size: 15, bold: true, color: C.grey });
-  body(s, "Authorized<…>", 8.58, 4.45, 3.8, 0.4, { size: 25, bold: true, color: C.ink });
-  body(s, "raw candidates cannot cross", 8.6, 4.98, 3.65, 0.4, { size: 15, bold: true, color: C.grey });
-  pill(s, "DYNAMIC HARDWARE • STATIC CONTRACT", 8.48, 5.88, 3.95, C.lime, C.ink, 9.2);
-  footer(s);
-  note(s, 16, "ActuationPort uses associated types rather than trait generics. Each implementation chooses one acknowledgement and error type, so the supervisor can be generic over the port without erasing its concrete contract. The Send plus static bounds allow the port to live in the supervisor thread. submit_drive takes mutable self and only Authorized<DifferentialDrive>, enforcing exclusive access and post-policy input at the signature.", [`${GH}/crates/leash-runtime/src/supervisor.rs`, `${GH}/crates/leash-waveshare/src/lib.rs`]);
-}
-
-// 17
-{
-  const s = slide(C.paper, "SENSORS", 17);
-  title(s, "Freshness is a first-class input to motion.", { size: 34 });
-  const sensors = [
-    ["LIDAR", "range + clearance", C.lime],
-    ["CAMERA", "context + evidence", C.paleBlue],
-    ["IMU", "orientation + dynamics", C.yellow],
-    ["ODOMETRY", "motion + displacement", C.pink],
-    ["BATTERY", "83.3% live", C.paper2],
-  ];
-  sensors.forEach(([a, b, fill], i) => {
-    const x = 0.72 + (i % 3) * 4.15;
-    const y = 1.62 + Math.floor(i / 3) * 2.05;
-    s.addShape(SH.ellipse, { x, y, w: 0.78, h: 0.78, fill: { color: fill }, line: { color: C.ink, width: 2.3 } });
-    body(s, String(i + 1), x, y + 0.2, 0.78, 0.3, { size: 18, bold: true, align: "center" });
-    body(s, a, x + 1.02, y + 0.02, 2.7, 0.35, { size: 19, bold: true });
-    body(s, b, x + 1.02, y + 0.48, 2.7, 0.42, { size: 14, color: C.grey });
-  });
-  s.addShape(SH.line, { x: 0.75, y: 5.75, w: 11.85, h: 0, line: { color: C.ink, width: 2 } });
-  body(s, "STALE ≠ SAFE", 0.78, 6.0, 2.6, 0.42, { size: 22, bold: true, color: C.red });
-  body(s, "A value without an age is not a control input.", 3.5, 6.03, 7.4, 0.4, { size: 19, bold: true });
-  footer(s);
-  note(s, 17, "Today’s read-only sensor endpoint reported fresh LiDAR, camera, IMU, and odometry plus 83.3 percent battery. The design lesson is that a sensor value must carry freshness and health; stale but plausible values are dangerous.", [`${GH}/src/types.rs`, `${GH}/src/http.rs`]);
-}
-
-// 18
-{
-  const s = slide(C.blue, "EVIDENCE", 18);
-  title(s, "Replay should explain the crossing—not invent a story.", { size: 29, color: C.white });
-  const events = [["PROPOSAL", C.paper2], ["POLICY", C.yellow], ["TRANSITION", C.lime], ["WRITE", C.pink], ["TELEMETRY", C.paleBlue], ["RESULT", C.paper2]];
-  events.forEach(([t, fill], i) => {
-    const x = 0.62 + i * 2.06;
-    box(s, t, x, 2.45, 1.65, 0.78, fill, { size: 12.5 });
-    if (i < events.length - 1) arrow(s, x + 1.7, 2.84, 0.28, 0, C.white, 2.3);
-    body(s, `${i + 1}`, x + 0.58, 1.82, 0.5, 0.34, { size: 16, bold: true, color: C.white, align: "center" });
-  });
-  s.addShape(SH.line, { x: 0.72, y: 4.35, w: 11.75, h: 0, line: { color: C.white, width: 2 } });
-  body(s, "4,807,319", 0.75, 4.72, 3.2, 0.75, { size: 36, bold: true, color: C.lime });
-  body(s, "durable records on live Pinkie", 0.78, 5.52, 4.1, 0.35, { size: 15, bold: true, color: C.white });
-  body(s, "Evidence is useful only if it survives\nthe process that made the decision.", 6.1, 4.72, 5.85, 1.05, { size: 23, bold: true, color: C.white, align: "right" });
-  footer(s, REPO);
-  note(s, 18, "The live runtime reported more than 4.8 million durable records. The point is not the number; it is the sequence. Replay should reconstruct the request, authorization, state transition, hardware write, telemetry, and result without asking an agent to narrate what it thinks happened.", [`${GH}/crates/leash-evidence/src`, `${GH}/crates/leash-runtime/src`]);
-}
-
-// 19
-{
-  const s = slide(C.paper, "STATE", 19);
-  title(s, "Safety is a state machine with visible exits.", { size: 34 });
-  const states = [
-    ["IDLE", 0.75, 2.25, C.paper2],
-    ["ARMED", 3.35, 1.3, C.yellow],
-    ["MOVING", 6.15, 2.25, C.lime],
-    ["STOPPING", 8.95, 1.3, C.pink],
-    ["VERIFIED\nZERO", 10.55, 3.7, C.paleBlue],
-    ["FAULT", 4.25, 4.7, C.red],
-  ];
-  states.forEach(([t, x, y, fill]) => box(s, t, x, y, 2.0, 0.95, fill, { size: 16, color: fill === C.red ? C.white : C.ink }));
-  arrow(s, 2.83, 2.55, 0.42, -0.62);
-  arrow(s, 5.45, 1.82, 0.62, 0.65);
-  arrow(s, 8.25, 2.48, 0.62, -0.65);
-  arrow(s, 10.35, 2.22, 0.82, 1.35);
-  arrow(s, 10.45, 4.22, -4.1, 0.9, C.red, 2.5);
-  arrow(s, 4.35, 4.72, -2.3, -1.35, C.red, 2.5);
-  body(s, "timeout • E-stop • stale sensor • ownership loss", 3.2, 6.1, 7.1, 0.35, { size: 16, bold: true, color: C.red, align: "center" });
-  footer(s);
-  note(s, 19, "The safety lifecycle is explicit. Motion is not a boolean. Arm, move, stop, verify zero, and fault are different states with defined exits. Timeouts, E-stop, stale sensors, and ownership loss all have an explicit route away from motion.", [`${GH}/crates/leash-runtime/src/safety_supervisor.rs`, `${GH}/crates/leash-core/src/drive.rs`]);
-}
-
-// 20
-{
-  const s = slide(C.lime, "VERIFIED STOP", 20);
-  title(s, "A stop command is a request. Zero is the proof.", { size: 32 });
-  body(s, "37.622 ms", 0.65, 1.65, 6.3, 1.0, { size: 46, bold: true });
-  body(s, "physical E-stop acknowledgement", 0.7, 2.66, 5.8, 0.4, { size: 18, bold: true });
-  s.addShape(SH.line, { x: 0.75, y: 3.55, w: 11.65, h: 0, line: { color: C.ink, width: 3 } });
-  const xs = [1.0, 3.6, 6.2, 8.8, 11.4];
-  const labs = ["REQUEST", "ACK", "WRITE 0", "READBACK", "PROOF"];
-  xs.forEach((x, i) => {
-    dot(s, x, 4.33, 0.52, i === 4 ? C.blue : C.paper2);
-    body(s, labs[i], x - 0.4, 5.08, 1.32, 0.3, { size: 11, bold: true, align: "center", color: i === 4 ? C.blue : C.ink });
-    if (i < xs.length - 1) arrow(s, x + 0.55, 4.59, xs[i + 1] - x - 0.72, 0, C.ink, 2.2);
-  });
-  body(s, "The evidence bundle also verified final zero.", 5.95, 1.88, 6.05, 0.55, { size: 23, bold: true, align: "right" });
-  pill(s, "MEASURED ON JETSON ORIN NX", 4.85, 6.05, 3.55, C.paper2, C.ink, 10.5);
-  footer(s);
-  note(s, 20, "In the physical rollout evidence, E-stop acknowledgement was measured at 37.622 milliseconds and the final state was verified zero. This is the distinction: sending a stop is not the success condition. Observing and recording zero is.", [`${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
-}
-
-// 21
-{
-  const s = slide(C.ink, "CUDA", 21);
-  title(s, "CUDA accelerates. CPU owns motion.", { size: 34, color: C.white });
-  box(s, "CPU\nAUTHORITATIVE", 0.8, 2.05, 3.2, 2.05, C.lime, { size: 24 });
-  box(s, "CUDA\nSHADOW", 5.05, 2.05, 3.2, 2.05, C.blue, { size: 24, color: C.white });
-  box(s, "MOTOR\nWRITE", 9.3, 2.05, 3.2, 2.05, C.paper2, { size: 24 });
-  arrow(s, 4.12, 3.08, 0.8, 0, C.white, 3);
-  arrow(s, 8.38, 3.08, 0.8, 0, C.white, 3);
-  s.addShape(SH.line, { x: 5.34, y: 4.65, w: 2.6, h: 0, line: { color: C.red, width: 5 } });
-  body(s, "NO DIRECT AUTHORITY", 5.18, 4.9, 2.95, 0.34, { size: 12, bold: true, color: C.red, align: "center" });
-  body(s, "promote only after parity + performance evidence", 2.45, 5.85, 8.45, 0.38, { size: 18, bold: true, color: C.white, align: "center" });
-  footer(s, REPO);
-  note(s, 21, "CUDA is active on Pinkie, but the live runtime reports CPU final authority. The CUDA design is shadow-first: compare results, measure performance, and fall back. Acceleration is not permission, and GPU availability is not a reason to widen the authority surface.", [`${GH}/crates/leash-cuda/README.md`, `${GH}/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json`]);
-}
-
-// 22
-{
-  const s = slide(C.paleBlue, "INTEGRATION", 22);
-  title(s, "Phantom types stop coordinate frames from drifting.", { size: 30 });
-  box(s, "pub enum Map {}\npub enum Odom {}\n\npub struct Frame<Tag> {\n  name: FrameName,\n  marker: PhantomData<fn() -> Tag>,\n}\n\npub struct Pose2<Tag> {\n  frame: Frame<Tag>,\n  x: Meters, y: Meters, yaw: Radians,\n}", 0.62, 1.3, 7.15, 5.42, C.ink, { mono: true, size: 17.2, align: "left", color: C.white, pad: 0.32 });
-  box(s, "Pose2<Map>", 8.42, 1.62, 3.6, 0.82, C.lime, { mono: true, size: 21 });
-  box(s, "Pose2<Odom>", 8.42, 3.0, 3.6, 0.82, C.yellow, { mono: true, size: 21 });
-  s.addShape(SH.line, { x: 8.62, y: 4.3, w: 3.18, h: 0, line: { color: C.red, width: 5, beginArrowType: "triangle", endArrowType: "triangle" } });
-  body(s, "won’t unify", 9.2, 4.52, 2.0, 0.34, { size: 16, bold: true, color: C.red, align: "center" });
-  box(s, "Nav2 path → typed proposal → Leash", 8.15, 5.42, 4.2, 0.78, C.pink, { mono: true, size: 14.5 });
-  footer(s);
-  note(s, 22, "Map and Odom are zero-variant marker enums. Frame<Tag> carries PhantomData, so the tag exists at compile time without runtime storage. Pose2<Map> and Pose2<Odom> are different types; the compile-fail doctest proves they cannot be exchanged silently. The ROS2 bridge converts Nav2 output into typed proposals, but Leash still authorizes the effect.", [`${GH}/crates/leash-core/src/frame.rs`, `${GH}/crates/leash-ros2/src/lib.rs`]);
-}
-
-// 23
-{
-  const s = slide(C.paper, "MEASURED", 23);
-  title(s, "The boundary is small enough to measure.", { size: 35 });
-  const metrics = [
-    ["58,306 ns", "p99 CPU transition", C.lime],
-    ["0", "deadline misses at 100 Hz", C.paleBlue],
-    ["110,293/s", "durable evidence records", C.yellow],
-    ["37.622 ms", "physical E-stop acknowledgement", C.pink],
-  ];
-  metrics.forEach(([v, l, fill], i) => {
-    const x = 0.68 + (i % 2) * 6.18;
-    const y = 1.52 + Math.floor(i / 2) * 2.4;
-    s.addShape(SH.rect, { x, y, w: 5.75, h: 1.75, fill: { color: fill }, line: { color: C.ink, width: 2.5 } });
-    body(s, v, x + 0.3, y + 0.24, 5.15, 0.58, { size: 31, bold: true });
-    body(s, l, x + 0.32, y + 1.06, 5.1, 0.32, { size: 15, bold: true });
-  });
-  body(s, "JETSON ORIN NX • RECORDED EVIDENCE • NOT A SIMULATION", 2.6, 6.38, 8.1, 0.34, { size: 13, bold: true, color: C.blue, align: "center" });
-  footer(s);
-  note(s, 23, "These are measured artifacts committed with Leash: 58,306 nanoseconds p99 transition latency, zero deadline misses at 100 hertz, 110,293 durable records per second in the evidence run, and 37.622 milliseconds physical E-stop acknowledgement. They are not promises for every machine; they are reproducible evidence from this Jetson.", [`${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
-}
-
-// 24
-{
-  const s = slide(C.yellow, "OPEN SOURCE", 24);
-  title(s, "Leash is a boundary you can replace piece by piece.", { size: 30 });
-  const pieces = [
-    ["CORE", "types + contracts", C.paper2, 0.8, 1.7],
-    ["RUNTIME", "policy + supervisor", C.lime, 4.75, 1.7],
-    ["ADAPTER", "hardware encoding", C.pink, 8.7, 1.7],
-    ["EVIDENCE", "append + replay", C.paleBlue, 2.78, 4.0],
-    ["CUDA", "shadow acceleration", C.blue, 6.73, 4.0],
-  ];
-  pieces.forEach(([a, b, fill, x, y]) => {
-    box(s, a, x, y, 3.05, 1.15, fill, { size: 21, color: fill === C.blue ? C.white : C.ink });
-    body(s, b, x + 0.18, y + 1.32, 2.7, 0.32, { size: 13, bold: true, align: "center" });
-  });
-  arrow(s, 3.95, 2.28, 0.7, 0);
-  arrow(s, 7.9, 2.28, 0.7, 0);
-  arrow(s, 5.25, 3.0, -0.65, 0.85);
-  arrow(s, 7.55, 3.0, 0.65, 0.85);
-  pill(s, "MIT LICENSE", 5.15, 6.05, 3.0, C.ink, C.white, 13);
-  footer(s);
-  note(s, 24, "Leash is MIT licensed and modular. Core types, runtime policy, hardware adapters, evidence, and CUDA can evolve independently so long as they preserve the authority contract. The goal is not a universal robotics framework; it is a sharp boundary that can fit inside different stacks.", [`${GH}/LICENSE`, `${GH}/Cargo.toml`, REPO]);
-}
-
-// 25
-{
-  const s = slide(C.paper, "HONEST STATUS", 25);
-  title(s, "Live today is not the same as claimed tomorrow.", { size: 31 });
-  body(s, "LIVE + VERIFIED", 0.78, 1.48, 5.55, 0.42, { size: 22, bold: true, color: C.blue });
-  body(s, "NOT CLAIMED", 7.0, 1.48, 5.55, 0.42, { size: 22, bold: true, color: C.red });
-  const live = ["controller ownership", "CPU final authority", "fresh LiDAR / IMU / odometry", "camera snapshot", "CUDA available in shadow", "durable evidence"];
-  const not = ["whole-house autonomy", "active mapping at this moment", "visual odometry lock", "GPU motor authority", "RL policy in the control loop", "semantic room understanding"];
-  live.forEach((t, i) => {
-    dot(s, 0.82, 2.18 + i * 0.68, 0.3, C.lime);
-    body(s, t, 1.3, 2.12 + i * 0.68, 5.15, 0.35, { size: 16, bold: true });
-  });
-  not.forEach((t, i) => {
-    dot(s, 7.02, 2.18 + i * 0.68, 0.3, C.pink);
-    body(s, t, 7.5, 2.12 + i * 0.68, 5.05, 0.35, { size: 16, bold: true });
-  });
-  s.addShape(SH.line, { x: 6.68, y: 1.38, w: 0, h: 4.9, line: { color: C.ink, width: 2 } });
-  footer(s);
-  note(s, 25, "For the demo, I am separating live proof from future direction. Today we verified ownership, CPU authority, fresh sensors, camera, CUDA availability, and evidence. Mapping is currently initializing and visual odometry is unavailable, so I will not claim autonomous mapping or SLAM lock.", [`${GH}/README.md`]);
-}
-
-// 26
-{
-  const s = slide(C.ink, "QUALIA • 2 MINUTES", 26);
-  title(s, "Qualia thinks on a slower clock.", { size: 35, color: C.white });
-  photoFrame(s, "qualia-world-current.png", 0.65, 1.45, 8.4, 4.12, C.lime, true);
-  box(s, "LEASH\n10 ms", 9.65, 1.55, 2.6, 1.2, C.lime, { size: 22 });
-  arrow(s, 10.95, 2.88, 0, 0.85, C.white, 3);
-  box(s, "QUALIA\nseconds → minutes", 9.65, 3.85, 2.6, 1.3, C.blue, { size: 19, color: C.white });
-  body(s, "scene • mission • ontology • learning", 1.2, 5.96, 7.6, 0.4, { size: 18, bold: true, color: C.white, align: "center" });
-  footer(s, REPO);
-  note(s, 26, "Qualia is intentionally outside Leash. It works on scene understanding, missions, ontologies, and longer-lived learning. Those asynchronous updates may improve future proposals, but they do not enter the ten-millisecond safety loop or gain motor authority.", [REPO]);
-}
-
-// 27
-{
-  const s = slide(C.paper, "THE HANDOFF", 27);
-  title(s, "Intelligence crosses as a typed proposal.", { size: 33 });
-  photoFrame(s, "hermes-terminal-current.png", 0.65, 1.55, 5.0, 2.68, C.blue, true);
-  box(s, "MISSION", 0.85, 5.0, 2.0, 0.78, C.paleBlue, { size: 17 });
-  arrow(s, 2.98, 5.38, 0.8, 0);
-  box(s, "CANDIDATE", 3.9, 5.0, 2.0, 0.78, C.yellow, { size: 17 });
-  arrow(s, 6.03, 5.38, 0.8, 0);
-  box(s, "LEASH", 6.95, 5.0, 2.0, 0.78, C.lime, { size: 17 });
-  arrow(s, 9.08, 5.38, 0.8, 0);
-  box(s, "EFFECT", 10.0, 5.0, 2.0, 0.78, C.pink, { size: 17 });
-  s.addShape(SH.rect, { x: 6.4, y: 1.5, w: 5.7, h: 2.68, fill: { color: C.ink }, line: { color: C.ink, width: 2.5 } });
-  body(s, "{\n  \"linear\": 0.08,\n  \"angular\": 0.0,\n  \"duration_ms\": 400,\n  \"reason\": \"bounded demo\"\n}", 6.78, 1.83, 4.95, 2.08, { size: 17, mono: true, color: C.white });
-  footer(s);
-  note(s, 27, "This is the entire relationship in one slide. Hermes or Qualia can form a mission and candidate. The candidate includes bounded magnitude, duration, and context. Leash validates and either authorizes an effect or records a refusal. The mission system remains replaceable.", [`${GH}/src/types.rs`, `${GH}/src/capability.rs`, REPO]);
-}
-
-// 28
-{
-  const s = slide(C.yellow, "LIVE DEMO", 28);
-  title(s, "Observe. Approve. Pulse. Prove zero.", { size: 36 });
+  const s = slide(C.yellow, "LIVE PROOF", 40);
+  title(s, "Demo the boundary, not a heroic autonomy claim.", { size: 30 });
   const steps = [
-    ["1", "READ-ONLY\nPREFLIGHT", C.paper2],
-    ["2", "HUMAN\nAPPROVAL", C.paleBlue],
-    ["3", "≤ 0.10\n≤ 500 ms", C.pink],
-    ["4", "VERIFY\nSTOP", C.lime],
-    ["5", "SHOW\nEVIDENCE", C.blue],
+    ["1", "read-only preflight", C.paleBlue],
+    ["2", "show proposal + evidence", C.paleYellow],
+    ["3", "approve one ≤ 0.10 pulse", C.palePink],
+    ["4", "verify zero + acknowledgement", C.lime],
   ];
-  steps.forEach(([n, t, fill], i) => {
-    const x = 0.48 + i * 2.56;
-    dot(s, x + 0.72, 1.65, 0.65, fill === C.blue ? C.lime : C.blue);
-    body(s, n, x + 0.72, 1.82, 0.65, 0.3, { size: 17, bold: true, color: fill === C.blue ? C.ink : C.white, align: "center" });
-    box(s, t, x, 2.65, 2.1, 1.5, fill, { size: 17, color: fill === C.blue ? C.white : C.ink });
-    if (i < steps.length - 1) arrow(s, x + 2.16, 3.4, 0.32, 0, C.ink, 2.5);
+  steps.forEach(([n, label, fill], index) => {
+    const y = 1.48 + index * 1.15;
+    box(s, n, 0.72, y, 0.72, 0.72, C.ink, { size: 22, color: C.white, mono: true });
+    box(s, label, 1.68, y, 5.15, 0.72, fill, { size: 19, align: "left", pad: 0.2 });
   });
-  s.addShape(SH.line, { x: 0.68, y: 4.85, w: 12.0, h: 0, line: { color: C.ink, width: 2.5 } });
-  body(s, "ANY RED GATE → RECORDED FALLBACK", 0.75, 5.25, 5.6, 0.42, { size: 20, bold: true, color: C.red });
-  body(s, "No improvising around the boundary.", 6.6, 5.25, 5.7, 0.42, { size: 20, bold: true, align: "right" });
-  pill(s, "NO AUTONOMY CLAIM", 4.97, 6.18, 3.25, C.ink, C.white, 11);
+  codeBlock(s, "operator contract", String.raw`
+if preflight.is_red() {
+    play_recorded_fallback();
+    return;
+}
+
+assert!(operator_token.is_active());
+assert!(pulse.drive <= 0.10);
+assert!(pulse.duration <= 500_ms);
+
+let evidence = run_once(pulse)?;
+assert_eq!(evidence.final_drive, STOP);`, 7.3, 1.48, 5.35, 4.92, { accent: C.red, size: 16.2 });
+  body(s, "Never improvise movement on stage.", 0.82, 6.38, 6.0, 0.4, { size: 21, bold: true, color: C.red });
   footer(s);
-  note(s, 28, "The demo sequence is intentionally boring. First a read-only preflight. Then an explicit human approval and operator token. One low-speed pulse, no more than 0.10 normalized drive and no more than 500 milliseconds. Then verified stop and evidence. If any gate is red, I use the recorded fallback instead of improvising.", [`${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
+  note(s, 40, "The live demo is deliberately bounded. First run the observation-only preflight. Motion requires an active operator token and explicit approval. Perform one low-drive, short-duration pulse, then show the verified-zero acknowledgement. If any gate is red, play the recorded fallback. Do not improvise motion.", [REPO]);
 }
 
-// 29
+// 41 — close and QR
 {
-  const s = slide(C.blue, "TAKE IT WITH YOU", 29);
-  body(s, "THE PLANNER\nPROPOSES.", 0.7, 0.95, 6.3, 1.55, { size: 38, bold: true, color: C.white });
-  body(s, "THE BOUNDARY\nDECIDES.", 0.7, 2.75, 6.3, 1.55, { size: 38, bold: true, color: C.lime });
-  body(s, "Questions?", 0.75, 5.2, 4.5, 0.62, { size: 31, bold: true, color: C.white });
-  body(s, "github.com/specdog/leash", 0.78, 6.0, 5.1, 0.35, { size: 16, bold: true, color: C.white });
-  s.addShape(SH.rect, { x: 8.3, y: 0.92, w: 4.2, h: 4.2, fill: { color: C.white }, line: { color: C.ink, width: 3 } });
-  if (fs.existsSync(qrPath)) {
-    s.addImage({ path: qrPath, x: 8.52, y: 1.14, w: 3.76, h: 3.76 });
-  } else {
-    body(s, "QR\nADDED AFTER\nPUBLICATION", 8.78, 2.1, 3.2, 1.4, { size: 24, bold: true, align: "center" });
-  }
-  pill(s, "DECK + NOTES + EVIDENCE", 8.55, 5.45, 3.7, C.yellow, C.ink, 10.5);
-  body(s, qrExpiry, 8.45, 6.08, 3.9, 0.34, { size: 10.5, bold: true, color: C.white, align: "center" });
-  footer(s, REPO);
-  note(s, 29, "The takeaway is the rule: the planner proposes and the boundary decides. The QR points directly to this deck’s PDF and expires on the date shown. The repository is public and MIT licensed. Thank you—questions are welcome.", [REPO, RAILWAY_BUCKETS]);
+  const s = slide(C.blue, "TAKE IT HOME", 41);
+  body(s, "WRITE THE\nAUTHORITY RULE\nIN TYPES.", 0.68, 0.82, 7.45, 2.55, { size: 40, bold: true, color: C.white });
+  const lines = [
+    "newtypes validate",
+    "typestate authorizes",
+    "ownership isolates",
+    "Drop closes",
+    "evidence proves",
+  ];
+  lines.forEach((line, index) => pill(s, line.toUpperCase(), 0.78 + (index % 2) * 3.15, 4.05 + Math.floor(index / 2) * 0.63, 2.8, index % 2 ? C.pink : C.lime, C.ink, 10.5));
+  s.addShape(SH.rect, { x: 9.05, y: 0.85, w: 3.25, h: 4.55, fill: { color: C.paper2 }, line: { color: C.ink, width: 3 } });
+  if (fs.existsSync(qrPath)) s.addImage({ path: qrPath, x: 9.42, y: 1.18, w: 2.5, h: 2.5 });
+  body(s, "SLIDES + CODE", 9.35, 3.95, 2.65, 0.35, { size: 17, bold: true, align: "center" });
+  body(s, qrExpiry, 9.3, 4.48, 2.75, 0.5, { size: 10.5, bold: true, align: "center", color: C.grey });
+  body(s, "github.com/specdog/leash", 8.42, 5.9, 4.55, 0.4, { size: 17, bold: true, color: C.white, align: "center" });
+  footer(s, "Rust Tuesdays • thank you");
+  note(s, 41, "The closing idea is simple: when software crosses into physical authority, make the rule visible in the type system. The QR opens the editable deck package and the source is at specdog/leash.", [REPO]);
 }
 
-fs.writeFileSync(notesOutput, `# Geek on a Leash — Speaker Notes\n\n${notes.join("\n")}`, "utf8");
+fs.writeFileSync(notesOutput, `# Geek on a Leash — Rust Tuesdays speaker notes\n\n${notes.join("\n")}`);
 await pptx.writeFile({ fileName: output, compression: true });
-console.log(JSON.stringify({ output, slides: pptx._slides.length, notes: notes.length, qr: fs.existsSync(qrPath) ? qrPath : null }));
+console.log(`Wrote ${output}`);
+console.log(`Wrote ${notesOutput}`);

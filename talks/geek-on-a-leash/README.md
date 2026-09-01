@@ -1,15 +1,15 @@
 # Geek on a Leash
 
-An editable 29-slide, one-hour engineering talk about Leash: a Rust boundary between agent intent and physical motion.
+An editable 41-slide, one-hour Rust Tuesdays talk about Leash: a Rust boundary between agent intent and physical motion.
 
-The deck spends approximately 45 minutes on architecture and Rust, 10 minutes on a bounded live UGV demonstration, and 5 minutes on questions. Qualia appears only as the slower mission/ontology layer; it is not presented as part of Leash.
+The deck spends approximately 50 minutes in pinned Leash source, 5 minutes on a bounded live UGV demonstration, and 5 minutes on questions. Thirty-one slides show Rust directly: newtypes, checked domain values, typestate, `PhantomData`, compile-fail doctests, traits and associated types, static and dynamic dispatch, ownership across threads, `Drop`, bounded generics, atomics and memory ordering, `Option` ownership operations, Serde wire contracts, error conversion, ROS2 frame types, and the isolated CUDA `unsafe` boundary. Qualia appears once as the slower mission/ontology layer; it is not presented as part of Leash.
 
 ## Artifacts
 
-- `output/geek-on-a-leash.pptx` — editable PowerPoint with 29 speaker-note sections
+- `output/geek-on-a-leash.pptx` — editable PowerPoint with 41 speaker-note sections
 - `output/geek-on-a-leash.pdf` — presentation PDF
 - `output/speaker-notes.md` — portable copy of the embedded notes
-- `output/fallback-demo.mp4` — 23-second, explicitly labelled recorded fallback
+- `output/fallback-demo.mp4` — 24-second, explicitly labelled recorded fallback
 - `output/geek-on-a-leash-qr.svg` and `.png` — direct-PDF QR
 - `output/manifest.json` — public artifact hashes and Railway object metadata after publication
 
