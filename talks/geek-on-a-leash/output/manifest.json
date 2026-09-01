@@ -1,0 +1,41 @@
+{
+  "schema_version": "leash.talk-publish-manifest.v1",
+  "title": "Geek on a Leash",
+  "published_at": "2026-09-01T17:05:36.517Z",
+  "source_commit": "22529a438b5b766f0340cbde87c2a85a88df1902",
+  "railway": {
+    "project_id": "057d7401-cd33-4e41-80cd-a5efe62f78c0",
+    "environment_id": "9edde6fa-a01b-47cb-ad35-5d3e2dae0b8f",
+    "bucket_id": "da7e9c21-a660-4363-ad69-adb9da5fc69d",
+    "bucket_name": "yail-gpu-talk-pdfs-yigi5l",
+    "prefix": "geek-on-a-leash/v1",
+    "signed_pdf_expires_at": "2026-09-08T16:59:02.216Z"
+  },
+  "objects": {
+    "pdf": {
+      "key": "geek-on-a-leash/v1/geek-on-a-leash.pdf",
+      "bytes": 822201,
+      "content_type": "application/pdf",
+      "sha256": "484d954cc8c530827d4eb674898aab99d9eb07eb600666b333fb81268f0857d1"
+    },
+    "pptx": {
+      "key": "geek-on-a-leash/v1/geek-on-a-leash.pptx",
+      "bytes": 1413470,
+      "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "sha256": "1ecd4d7d49d843a378930dbadbb3767255d233b435dcbbc180ef62513c1f118d"
+    },
+    "video": {
+      "key": "geek-on-a-leash/v1/fallback-demo.mp4",
+      "bytes": 570446,
+      "content_type": "video/mp4",
+      "sha256": "24ad9b65b3402a7b4910a0430ac23a859787b6561d523ae285525e4bf2235d6e"
+    }
+  },
+  "manifest_key": "geek-on-a-leash/v1/manifest.json",
+  "signed_pdf_verification": {
+    "status": 200,
+    "bytes": 822201,
+    "content_type": "application/pdf",
+    "sha256": "484d954cc8c530827d4eb674898aab99d9eb07eb600666b333fb81268f0857d1"
+  }
+}
