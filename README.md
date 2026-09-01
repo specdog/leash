@@ -36,6 +36,18 @@ leash mcp list-tools
 leash mcp call observe
 ```
 
+## Demo
+
+[Geek on a Leash](talks/geek-on-a-leash/README.md) is the full Leash demo and Rust Tuesdays talk. It walks through the agent-to-motor safety boundary, the Rust runtime, ROS 2 integration, CUDA processing, and a bounded UGV demo.
+
+The demo package includes:
+
+- [editable deck source](talks/geek-on-a-leash/deck.mjs)
+- [PowerPoint](talks/geek-on-a-leash/output/geek-on-a-leash.pptx) and [PDF](talks/geek-on-a-leash/output/geek-on-a-leash.pdf)
+- [speaker notes](talks/geek-on-a-leash/output/speaker-notes.md)
+- [demo preflight](talks/geek-on-a-leash/demo-preflight.mjs)
+- [recorded fallback demo](talks/geek-on-a-leash/output/fallback-demo.mp4)
+
 ## What Leash does
 
 - CLI, HTTP, WebSocket/SSE, and MCP control surfaces
@@ -113,6 +125,7 @@ src/                         CLI, HTTP, MCP, and harness integration
 implementations/             robot-specific implementations and field proof
 operator/                    operator-side code and tests
 examples/                    simulation, replay, and client examples
+talks/                       demos, talks, and presentation artifacts
 docs/                        guides and protocol documentation
 schemas/                     generated JSON Schema
 scripts/                     smoke tests, packaging, and deployment helpers
