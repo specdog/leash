@@ -1,150 +1,138 @@
 # Leash
 
-> One safety-gated control surface for agents, operators, simulations, and physical robots.
+> Safe robot control from the CLI, HTTP, and MCP.
 
-Leash is an open-source Rust robotics runtime. CLI, HTTP, and MCP requests converge on the same typed capability and safety boundary. An AI or operator can request motion; **Leash decides whether motion is allowed**.
+Leash is an open-source Rust runtime for controlling robots. Start in simulation, replay recorded runs, or connect real hardware behind explicit safety checks.
 
-Simulation and replay are non-actuating by default. Physical actuation and physical navigation require separate compile/runtime gates plus normal authorization, approval, freshness, deadman, collision, stop, and E-stop checks.
+Humans, apps, and agents use the same control path. Agents can request motion. Leash decides whether motion is allowed.
 
-## Current main
-
-The current repository is an active multi-crate workspace, not a crate skeleton.
-
-| Area | Current implementation |
-| --- | --- |
-| Control surfaces | CLI, HTTP, WebSocket/SSE telemetry, MCP stdio, MCP Streamable HTTP |
-| Safe local use | simulation, deterministic replay, record/replay JSONL, generated schemas |
-| Navigation | planner/patrol primitives plus bounded idempotent HTTP goals, status, cancellation, deadlines, and verified stop |
-| Compute | authenticated async advisory jobs with bounded temporal-spatial evidence, CPU execution, qualified CUDA acceleration, parity checks, and CPU fallback |
-| Hardware | feature-gated Waveshare UGV implementation with calibration/deployment/rollout evidence kept outside reusable core |
-| Localization | typed localization/map contracts and provider boundaries; ROS 2 supplies proposals/evidence and never owns motors |
-| Safety | capability policy, pilot ownership, approval, deadman, stale-provider checks, collision clearance, soft odometry limits, stop, and latching E-stop |
-
-```mermaid
-flowchart LR
-  human["Human operator"] --> surface
-  agent["Agent"] --> surface
-  surface["CLI · HTTP · MCP"] --> registry["Typed capability registry"]
-  registry --> policy{"Leash policy allows it?"}
-  policy -- no --> denied["Typed denial + zero motion"]
-  policy -- yes --> runtime["Leash runtime"]
-  runtime --> adapter{"Selected adapter"}
-  adapter --> sim["Simulation / replay"]
-  adapter --> robot["Physical robot"]
-  runtime --> telemetry["Telemetry · events · recordings"]
-  telemetry --> human
-  telemetry --> agent
-```
-
-### Rust workspace
-
-- `crates/leash-core` — reusable contracts and core types
-- `crates/leash-runtime` — runtime orchestration
-- `crates/leash-cuda` — bounded advisory CUDA compute with CPU parity/fallback
-- `crates/leash-gateway` — gateway boundary
-- `crates/leash-replay` — replay support
-- `crates/leash-ros2` — ROS 2 provider/proposal boundary
-- `crates/leash-waveshare` — reusable Waveshare adapter code
-- `src/` — top-level CLI/HTTP/MCP harness integration
-- `implementations/waveshare-ugv/` — concrete robot deployment, calibration, and field proof
-
-## Try it safely
-
-Install the CLI and start the simulated HTTP stack:
+## Quick start
 
 ```bash
 cargo install leash-harness
 leash run sim-http
 ```
 
-In another terminal:
+Then, in another terminal:
 
 ```bash
 leash health --url http://127.0.0.1:8000
 curl -s http://127.0.0.1:8000/telemetry | jq
-leash agent-send "inspect the battery"
 ```
 
-Nothing in that path can touch hardware.
+This runs entirely in simulation. It cannot move physical hardware.
 
-Run MCP over stdio:
+For MCP over stdio:
 
 ```bash
 leash run sim-mcp
 ```
 
-Or run the local MCP HTTP endpoint:
+For MCP over localhost HTTP:
 
 ```bash
 leash serve mcp-http --listen 127.0.0.1:9990
 leash mcp list-tools
-leash mcp call health
 leash mcp call observe
 ```
 
-Inspect built-in stacks and configuration:
+## What Leash does
 
-```bash
-leash list
-leash show-config sim-http
-```
-
-## Bounded navigation API
-
-Leash exposes a goal-level HTTP surface for clients that need mission orchestration without owning a motor refresh loop:
-
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `POST` | `/navigation/goals` | Submit an idempotent bounded planner goal |
-| `GET` | `/navigation/status?mission_id=...` | Reconcile planner state |
-| `POST` | `/navigation/goals/:mission_id/cancel` | Cancel and command zero output |
-| `POST` | `/motors/stop/verified` | Command and confirm zero output |
-
-The caller must already hold a short pilot lease. Goal submission does not create or extend that lease. Current physical goals are low-speed, bounded by deadline, and remain subordinate to all Leash safety checks.
-
-See [`docs/NAVIGATION_API.md`](docs/NAVIGATION_API.md) and [`docs/PHYSICAL_NAVIGATION.md`](docs/PHYSICAL_NAVIGATION.md).
-
-## Advisory compute
-
-The asynchronous compute API accepts authenticated, bounded jobs and returns typed evidence. Compute never receives motor authority.
-
-The current `spatial_window` workload can transform recent range scans into odometry-frame spatial evidence. Small workloads stay on CPU. CUDA is allowed only after CPU-authoritative shadow comparisons qualify the accelerator; a mismatch or CUDA failure falls back to CPU with an explicit receipt.
-
-See [`docs/COMPUTE_API.md`](docs/COMPUTE_API.md).
-
-## Physical robot boundary
-
-Leash owns the final device command boundary. Perception, mapping, localization, planning, ROS 2, CUDA, model providers, and external agents may provide typed evidence or requests; they do not write motors directly.
+- CLI, HTTP, WebSocket/SSE, and MCP control surfaces
+- simulation with no robot required
+- deterministic record and replay
+- typed telemetry and sensor contracts
+- bounded navigation goals, patrols, cancellation, and verified stop
+- localization and map provider interfaces
+- feature-gated hardware adapters
+- CPU and optional CUDA processing for bounded spatial workloads
+- one safety path for manual, programmatic, and agent control
 
 ```mermaid
 flowchart LR
-  providers["Mapping · localization · planner · agent · CUDA"] --> proposal["Typed request / evidence"]
-  proposal --> leash["Leash"]
-  leash --> checks{"Token · approval · freshness · collision · deadman · E-stop"}
-  checks -- pass --> motors["Bounded adapter command"]
-  checks -- fail --> zero["Reject + zero speed"]
+  client["CLI · HTTP · MCP"] --> leash["Leash"]
+  leash --> checks{"Safety checks"}
+  checks -- allowed --> adapter["Robot adapter"]
+  checks -- denied --> stop["Reject / stop"]
+  adapter --> sim["Simulation"]
+  adapter --> robot["Hardware"]
+  sim --> telemetry["Telemetry"]
+  robot --> telemetry
 ```
 
-The current concrete implementation is [`implementations/waveshare-ugv/`](implementations/waveshare-ugv/README.md). Robot identity, device paths, calibration, deployment, rollback, and field proof remain implementation-owned rather than leaking into reusable core.
+## Safety
 
-## Development state
+Leash owns the final command sent to the robot.
 
-The README describes merged `main` as shipped repository state. Draft pull requests are not treated as current behavior.
+A planner, ROS 2 node, model, CUDA job, web app, or agent can provide a request or data, but it cannot write to the motors directly.
 
-Active draft work includes:
+Physical motion is off by default. Hardware paths require the relevant build feature and runtime opt-in, then pass the normal authorization, approval, sensor freshness, deadman, collision, distance-limit, stop, and E-stop checks.
 
-- [#187](https://github.com/specdog/leash/pull/187) — durable agent sessions/tasks and headful operator workflow;
-- [#188](https://github.com/specdog/leash/pull/188) — compact Qualia telemetry, gimbal state, and standard MCP mounting, stacked on #187;
-- [#191](https://github.com/specdog/leash/pull/191) — lossless post-safety applied-action evidence;
-- [#179–#181](https://github.com/specdog/leash/pulls) — older stacked calibration/map/physical-navigation field-evidence work that intentionally remains draft until physical acceptance evidence exists.
+Simulation and replay never actuate hardware.
 
-Do not merge stale draft branches directly. Bring them current with `main`, rerun verification, and reconcile docs/contracts first.
+See [Physical navigation](docs/PHYSICAL_NAVIGATION.md).
 
-## Open source: humans
+## Real hardware
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The current concrete implementation is the [Waveshare UGV stack](implementations/waveshare-ugv/README.md).
 
-Minimal setup:
+Robot-specific device paths, calibration, deployment, rollback, and field evidence live under `implementations/waveshare-ugv/` instead of the reusable Leash core.
+
+ROS 2 can provide mapping, localization, and navigation data. Leash remains the motor owner.
+
+## Navigation
+
+Leash provides a bounded HTTP API for clients that want to submit goals without running their own motor command loop.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/navigation/goals` | Submit a goal |
+| `GET` | `/navigation/status?mission_id=...` | Read goal status |
+| `POST` | `/navigation/goals/:mission_id/cancel` | Cancel a goal |
+| `POST` | `/motors/stop/verified` | Stop and verify zero output |
+
+Physical goals require an existing pilot lease and remain subject to all normal safety checks.
+
+See [Navigation API](docs/NAVIGATION_API.md).
+
+## Compute
+
+Leash also has an authenticated asynchronous compute API for bounded sensor-processing jobs.
+
+The current `spatial_window` job transforms recent range scans into spatial points in the odometry frame. Small jobs run on CPU. Larger jobs can use CUDA after parity checks prove that the GPU result matches the CPU result. CUDA failures fall back to CPU.
+
+Compute results never authorize motion.
+
+See [Compute API](docs/COMPUTE_API.md).
+
+## Repository
+
+```text
+crates/                      Rust workspace crates
+src/                         CLI, HTTP, MCP, and harness integration
+implementations/             robot-specific implementations and field proof
+operator/                    operator-side code and tests
+examples/                    simulation, replay, and client examples
+docs/                        guides and protocol documentation
+schemas/                     generated JSON Schema
+scripts/                     smoke tests, packaging, and deployment helpers
+specs/leash/                 DotDog source and compiled project graph
+.github/workflows/           CI and release automation
+```
+
+Key crates:
+
+- `leash-core` — shared contracts and types
+- `leash-runtime` — runtime orchestration
+- `leash-cuda` — optional CUDA compute
+- `leash-gateway` — gateway boundary
+- `leash-replay` — replay support
+- `leash-ros2` — ROS 2 integration boundary
+- `leash-waveshare` — reusable Waveshare adapter code
+
+## Contributing
+
+Leash is MIT licensed. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/specdog/leash.git
@@ -154,57 +142,9 @@ cargo build
 cargo run -- run sim-http
 ```
 
-Work on a branch from current `main`. Before requesting merge, run the repository proof appropriate to the change; the full CI-equivalent set is listed below.
+Work on a branch from current `main`. Keep hardware changes feature-gated and test simulation paths without hardware.
 
-## Open source: coding agents
-
-Start with [`AGENTS.md`](AGENTS.md). The repository also includes reusable verification guidance under [`.agents/skills/`](.agents/skills/).
-
-For project structure, agents query the compiled DotDog graph rather than parsing human `.dog` source:
-
-```bash
-npm ci
-npx dotdog serve
-```
-
-`specs/leash/leash.dag` is the compiled agent graph. Human contributors own `specs/leash/*.dog`. If the graph and current implementation disagree, report the drift instead of silently inventing structure.
-
-## Repository guide
-
-```text
-AGENTS.md                    coding-agent entry point
-CONTRIBUTING.md              human contributor workflow
-crates/                      reusable Rust workspace crates
-src/                         top-level harness integration
-implementations/             concrete robot implementations and field proof
-operator/                    operator-side code/tests
-examples/                    simulation, replay, and client fixtures
-docs/                        operator, protocol, safety, and extension guides
-schemas/                     generated external JSON Schema
-scripts/                     smoke, packaging, deployment, and proof helpers
-specs/leash/                 DotDog source + compiled DAG
-.github/workflows/           CI, ROS 2, and release automation
-```
-
-Useful guides:
-
-- [`docs/ADAPTERS.md`](docs/ADAPTERS.md)
-- [`docs/MCP_HTTP.md`](docs/MCP_HTTP.md)
-- [`docs/SENSORS.md`](docs/SENSORS.md)
-- [`docs/LOCALIZATION.md`](docs/LOCALIZATION.md)
-- [`docs/LOCALIZATION_PROVIDERS.md`](docs/LOCALIZATION_PROVIDERS.md)
-- [`docs/NAVIGATION.md`](docs/NAVIGATION.md)
-- [`docs/NAVIGATION_API.md`](docs/NAVIGATION_API.md)
-- [`docs/PHYSICAL_NAVIGATION.md`](docs/PHYSICAL_NAVIGATION.md)
-- [`docs/COMPUTE_API.md`](docs/COMPUTE_API.md)
-- [`docs/OPERATOR_SESSIONS.md`](docs/OPERATOR_SESSIONS.md)
-- [`docs/SCHEMAS.md`](docs/SCHEMAS.md)
-- [`docs/RELEASE.md`](docs/RELEASE.md)
-- [`docs/SOURCE_MAP.md`](docs/SOURCE_MAP.md)
-
-## Verification
-
-The full repository proof mirrors CI:
+Before merge, the full repository check is:
 
 ```bash
 cargo fmt --check
@@ -218,7 +158,32 @@ cargo package --workspace --locked
 scripts/smoke-all.sh
 ```
 
-CI also checks core-only, default, MCP-only, HTTP simulation, hardware-adapter, and all-feature builds.
+## Coding agents
+
+See [AGENTS.md](AGENTS.md) before changing the repository.
+
+The human-authored project spec lives in `specs/leash/*.dog`. Agents should query the compiled `specs/leash/leash.dag` through DotDog MCP:
+
+```bash
+npm ci
+npx dotdog serve
+```
+
+If the graph and the code disagree, report the mismatch rather than guessing.
+
+## Docs
+
+- [Adapters](docs/ADAPTERS.md)
+- [MCP HTTP](docs/MCP_HTTP.md)
+- [Sensors](docs/SENSORS.md)
+- [Localization](docs/LOCALIZATION.md)
+- [Navigation](docs/NAVIGATION.md)
+- [Navigation API](docs/NAVIGATION_API.md)
+- [Physical navigation](docs/PHYSICAL_NAVIGATION.md)
+- [Compute API](docs/COMPUTE_API.md)
+- [Replay](docs/OPERATOR_SESSIONS.md)
+- [Schemas](docs/SCHEMAS.md)
+- [Release](docs/RELEASE.md)
 
 ## License
 
