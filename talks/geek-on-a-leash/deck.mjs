@@ -48,7 +48,11 @@ const BASE_SHA = "566bc569b24bf5f392291b142469282fcdfac2b3";
 const GH = `https://github.com/specdog/leash/blob/${BASE_SHA}`;
 const REPO = "https://github.com/specdog/leash";
 const WAVESHARE = "https://www.waveshare.com/product/ai/robots/ugv-rover-pt-jetson-orin-ai-kit.htm";
+const DIMOS = "https://github.com/dimensionalOS/dimos";
+const DIMOS_API = "https://api.github.com/repos/dimensionalOS/dimos";
+const DIMOS_MODULES = "https://github.com/dimensionalOS/dimos/blob/main/docs/usage/modules.md";
 const notes = [];
+let slideSequence = 0;
 
 function body(s, text, x, y, w, h, opts = {}) {
   s.addText(text, {
@@ -68,11 +72,13 @@ function body(s, text, x, y, w, h, opts = {}) {
 
 function slide(bg = C.paper, section = "RUST TUESDAYS", number = null) {
   const s = pptx.addSlide();
+  const sequence = ++slideSequence;
+  s.__talkNumber = sequence;
   s.background = { color: bg };
   s.addShape(SH.line, { x: 0.32, y: 0.29, w: 12.69, h: 0, line: { color: C.ink, width: 1.25 } });
   body(s, section, 0.43, 0.08, 4.4, 0.19, { size: 9.5, bold: true });
-  body(s, "RUST TUESDAYS", 5.2, 0.08, 3.0, 0.19, { size: 9.5, bold: true, align: "center", color: C.blue });
-  if (number !== null) body(s, String(number).padStart(2, "0"), 12.45, 0.08, 0.4, 0.19, { size: 9.5, bold: true, mono: true, align: "right" });
+  body(s, "RUST TUESDAYS", 5.2, 0.08, 3.0, 0.19, { size: 9.5, bold: true, align: "center", color: bg === C.blue ? C.white : C.blue });
+  if (number !== null) body(s, String(sequence).padStart(2, "0"), 12.45, 0.08, 0.4, 0.19, { size: 9.5, bold: true, mono: true, align: "right" });
   return s;
 }
 
@@ -120,8 +126,9 @@ function photo(s, file, x, y, w, h, accent = C.ink) {
 function note(s, number, talk, sources = []) {
   const sourceText = sources.length ? `\n\n[Sources]\n${sources.map((url) => `- ${url}`).join("\n")}` : "";
   const all = `${talk}${sourceText}`;
+  const sequence = s.__talkNumber ?? number;
   s.addNotes(all);
-  notes.push(`## ${String(number).padStart(2, "0")}\n\n${all}\n`);
+  notes.push(`## ${String(sequence).padStart(2, "0")}\n\n${all}\n`);
 }
 
 function codeBlock(s, label, code, x, y, w, h, opts = {}) {
@@ -171,7 +178,59 @@ function codeSlide(number, section, heading, file, code, items, talk, sources, o
   note(s, 1, "This is the Rust Tuesdays version: substantially more source code, fewer broad architecture slides, and a line-by-line tour of the language mechanisms that make Leash safe enough to sit near motors.", [REPO, WAVESHARE]);
 }
 
-// 02 — authority question
+// 02 — why DimOS matters
+{
+  const s = slide(C.lime, "WHY THIS TALK", 2);
+  title(s, "DimOS showed that agent-native robotics has real pull.", { size: 31 });
+  body(s, "4,448", 0.67, 1.48, 4.0, 1.22, { size: 58, bold: true, mono: true });
+  body(s, "GITHUB STARS", 0.73, 2.67, 3.0, 0.36, { size: 16, bold: true, mono: true });
+  body(s, "798 forks", 0.73, 3.25, 3.0, 0.42, { size: 24, bold: true });
+  body(s, "Snapshot: September 1, 2026", 0.73, 3.82, 3.4, 0.28, { size: 13.5, bold: true, color: C.grey });
+  s.addShape(SH.line, { x: 4.43, y: 1.5, w: 0, h: 4.55, line: { color: C.ink, width: 2.2 } });
+  body(s, "Python modules", 5.03, 1.54, 3.05, 0.5, { size: 24, bold: true });
+  body(s, "typed streams", 8.48, 1.54, 3.05, 0.5, { size: 24, bold: true });
+  body(s, "blueprints", 5.03, 2.52, 3.05, 0.5, { size: 24, bold: true });
+  body(s, "agent skills", 8.48, 2.52, 3.05, 0.5, { size: 24, bold: true });
+  body(s, "The signal is not that every robotics problem is solved.\nThe signal is that developers want one composable stack from agents to hardware.", 5.03, 3.62, 7.23, 1.42, { size: 24, bold: true });
+  pill(s, "PRE-RELEASE BETA", 5.03, 5.45, 2.45, C.pink, C.ink, 11);
+  body(s, "Popularity creates the question. Rust sharpens the boundary.", 7.78, 5.46, 4.45, 0.46, { size: 18.5, bold: true, align: "right" });
+  footer(s, "DimOS GitHub snapshot • September 1, 2026");
+  note(s, 2, "This is the origin of the talk's why. DimOS made the agent-native robotics idea concrete and legible: modules, typed streams, blueprints, and skills spanning cameras, LiDAR, planners, and actuators. Its current popularity—4,448 GitHub stars and 798 forks in the September 1, 2026 API snapshot—is evidence of developer pull, not evidence that the safety problem is finished. The repository itself labels the project pre-release beta. I saw that momentum and asked what the same direction would reveal if the physical authority boundary were pushed into Rust.", [DIMOS, DIMOS_API, DIMOS_MODULES]);
+}
+
+// 03 — conceptual port into Rust
+{
+  const s = slide(C.blue, "THE EXPERIMENT", 3);
+  title(s, "Port the idea into Rust—then expand the physical boundary.", { size: 31, color: C.white });
+  codeBlock(s, "DimOS • Python module surface", String.raw`
+class RobotConnection(Module):
+    cmd_vel: In[Twist]
+    color_image: Out[Image]
+
+autoconnect(
+    RobotConnection.blueprint(),
+    Listener.blueprint(),
+).build().loop()`, 0.58, 1.55, 5.83, 3.78, { accent: C.lime, size: 16.2 });
+  codeBlock(s, "Leash • Rust authority surface", String.raw`
+pub trait ActuationPort: Send + 'static {
+    type Acknowledgement:
+        ActuationAcknowledgement;
+    type Error: fmt::Display + Send + 'static;
+
+    fn submit_drive(&mut self,
+        command: Authorized<DifferentialDrive>)
+        -> Result<(), Self::Error>;
+}`, 6.91, 1.55, 5.84, 3.78, { accent: C.pink, size: 15.1 });
+  body(s, "KEEP", 0.67, 5.65, 0.82, 0.26, { size: 12, bold: true, mono: true, color: C.lime });
+  body(s, "agent-native composition", 1.56, 5.59, 3.85, 0.38, { size: 20, bold: true, color: C.white });
+  body(s, "EXPAND", 6.97, 5.65, 1.05, 0.26, { size: 12, bold: true, mono: true, color: C.pink });
+  body(s, "authority, deadlines, ownership, evidence", 8.1, 5.59, 4.58, 0.38, { size: 18.2, bold: true, color: C.white });
+  body(s, "Conceptual port • independent implementation • not a DimOS fork", 2.48, 6.44, 8.35, 0.35, { size: 17, bold: true, mono: true, color: C.white, align: "center" });
+  footer(s, "DimOS inspiration • Leash implementation");
+  note(s, 3, "This is a conceptual port, not a source-code port, compatibility claim, or fork. DimOS demonstrates a productive agent-native composition model. Leash keeps that direction but asks a narrower systems question: how do we make the final path to physical actuation explicit, bounded, testable, and hard to bypass? The Python excerpt is DimOS's public module and blueprint pattern. The Rust excerpt is Leash's real ActuationPort trait: associated acknowledgement and error types, a Send plus static ownership boundary, and an Authorized command rather than a raw velocity. That expansion—from convenient composition into typed physical authority—is the thesis for the rest of the talk.", [DIMOS, DIMOS_MODULES, `${GH}/crates/leash-runtime/src/supervisor.rs`]);
+}
+
+// 04 — authority question
 {
   const s = slide(C.yellow, "THE BOUNDARY", 2);
   title(s, "Who is allowed to write the motors?", { size: 34 });

@@ -2,6 +2,13 @@
 
 Deck source commit: `566bc569b24bf5f392291b142469282fcdfac2b3` from `specdog/leash` `origin/main`.
 
+## DimOS inspiration
+
+- `https://github.com/dimensionalOS/dimos` — public repository, pre-release beta framing, agent-native robotics scope, Python module/stream/blueprint/skill vocabulary, and hardware reach.
+- `https://api.github.com/repos/dimensionalOS/dimos` — September 1, 2026 popularity snapshot used in the deck: 4,448 stars and 798 forks.
+- `https://github.com/dimensionalOS/dimos/blob/main/docs/usage/modules.md` — modules as autonomous robot subsystems communicating through standardized messages.
+- Leash is described as a conceptual port and independent Rust expansion of the agent-native direction. It is not described as a DimOS fork, API port, or compatibility layer.
+
 ## Primary code
 
 - Canonical rule and architecture: `README.md`
