@@ -14,6 +14,7 @@ The current repository is an active multi-crate workspace, not a crate skeleton.
 | --- | --- |
 | Control surfaces | CLI, HTTP, WebSocket/SSE telemetry, MCP stdio, MCP Streamable HTTP |
 | Safe local use | simulation, deterministic replay, record/replay JSONL, generated schemas |
+| Agent workflows | persisted sessions, headless or browser runs, permission-scoped capability calls, and supervised recurring tasks |
 | Navigation | planner/patrol primitives plus bounded idempotent HTTP goals, status, cancellation, deadlines, and verified stop |
 | Compute | authenticated async advisory jobs with bounded temporal-spatial evidence, CPU execution, qualified CUDA acceleration, parity checks, and CPU fallback |
 | Hardware | feature-gated Waveshare UGV implementation with calibration/deployment/rollout evidence kept outside reusable core |
@@ -89,6 +90,22 @@ leash list
 leash show-config sim-http
 ```
 
+## Agent workflows
+
+Current `main` includes durable agent sessions, a browser console, direct
+capability calls, and supervised recurring tasks:
+
+```bash
+leash agent run "summarize current health" --session demo
+leash agent sessions list
+leash agent headful --no-open
+leash agent capability call health --allow health
+```
+
+Model turns support deterministic-test, local HTTP, and OpenAI-compatible HTTP
+providers. Agent capability calls and tasks have explicit allow/deny patterns
+and still pass through the shared capability registry and safety policy.
+
 ## Bounded navigation API
 
 Leash exposes a goal-level HTTP surface for clients that need mission orchestration without owning a motor refresh loop:
@@ -126,19 +143,6 @@ flowchart LR
 ```
 
 The current concrete implementation is [`implementations/waveshare-ugv/`](implementations/waveshare-ugv/README.md). Robot identity, device paths, calibration, deployment, rollback, and field proof remain implementation-owned rather than leaking into reusable core.
-
-## Development state
-
-The README describes merged `main` as shipped repository state. Draft pull requests are not treated as current behavior.
-
-Active draft work includes:
-
-- [#187](https://github.com/specdog/leash/pull/187) — durable agent sessions/tasks and headful operator workflow;
-- [#188](https://github.com/specdog/leash/pull/188) — compact Qualia telemetry, gimbal state, and standard MCP mounting, stacked on #187;
-- [#191](https://github.com/specdog/leash/pull/191) — lossless post-safety applied-action evidence;
-- [#179–#181](https://github.com/specdog/leash/pulls) — older stacked calibration/map/physical-navigation field-evidence work that intentionally remains draft until physical acceptance evidence exists.
-
-Do not merge stale draft branches directly. Bring them current with `main`, rerun verification, and reconcile docs/contracts first.
 
 ## Open source: humans
 
