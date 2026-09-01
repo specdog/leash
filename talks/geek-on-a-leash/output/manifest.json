@@ -1,8 +1,8 @@
 {
   "schema_version": "leash.talk-publish-manifest.v1",
   "title": "Geek on a Leash",
-  "published_at": "2026-09-01T17:40:41.506Z",
-  "source_commit": "f324508e8a9f5fae6deb353de4a6983ff6edf1f3",
+  "published_at": "2026-09-01T17:51:45.929Z",
+  "source_commit": "6a61ea4d930b05167fe6dd5c6a8473c2d7ba9def",
   "railway": {
     "project_id": "057d7401-cd33-4e41-80cd-a5efe62f78c0",
     "environment_id": "9edde6fa-a01b-47cb-ad35-5d3e2dae0b8f",
@@ -14,28 +14,28 @@
   "objects": {
     "pdf": {
       "key": "geek-on-a-leash/v1/geek-on-a-leash.pdf",
-      "bytes": 849358,
+      "bytes": 865566,
       "content_type": "application/pdf",
-      "sha256": "47dc4fda2d38333529708bef8b91e09b44931a9456c965a2556f915eb925cc1e"
+      "sha256": "63788d146576ca4656050a8155e3e0a91c8c7b98d6a9b9e2a1e81969a48e11bb"
     },
     "pptx": {
       "key": "geek-on-a-leash/v1/geek-on-a-leash.pptx",
-      "bytes": 1894571,
+      "bytes": 1942952,
       "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "sha256": "5deb436a6c7145c187677ad25fb84e6a3580aa91e53583325f7fab3e54d1bfb8"
+      "sha256": "0a6c9fef6386e94a501160521caa8f6edafb13dafd6badb9377e0a71027a7539"
     },
     "video": {
       "key": "geek-on-a-leash/v1/fallback-demo.mp4",
-      "bytes": 402065,
+      "bytes": 402353,
       "content_type": "video/mp4",
-      "sha256": "6aa317295ea6773f41f74d1d101fb6c1c35474478a6fcfb929a2994e7159e216"
+      "sha256": "afa6dbb6907b0944e0c6378beb69f6a348c9eb8b0d65fa1038bdc01a95a2060d"
     }
   },
   "manifest_key": "geek-on-a-leash/v1/manifest.json",
   "signed_pdf_verification": {
     "status": 200,
-    "bytes": 849358,
+    "bytes": 865566,
     "content_type": "application/pdf",
-    "sha256": "47dc4fda2d38333529708bef8b91e09b44931a9456c965a2556f915eb925cc1e"
+    "sha256": "63788d146576ca4656050a8155e3e0a91c8c7b98d6a9b9e2a1e81969a48e11bb"
   }
 }
