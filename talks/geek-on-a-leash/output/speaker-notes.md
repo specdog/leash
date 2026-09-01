@@ -261,14 +261,65 @@ The ROS2 crate carries the phantom-frame discipline to path proposals and naviga
 
 ## 37
 
-This is the unsafe island opened on slide seven. Checked multiplication, integer conversion, capacity checks, and typed device slices precede the cudarc kernel launch. CUDA accelerates compute and shadow evaluation; the CPU control kernel remains final motion authority.
+Before discussing a kernel launch, establish where the machine code comes from. The CUDA source is compiled deliberately with nvcc into a fatbin containing native SM 8.7 code and compute 8.7 PTX. Normal production builds copy that checked artifact; include_bytes embeds it in the Rust binary. Rebuild is an explicit release operation, not a surprise at service startup. The artifact contract test checks source digest, fatbin digest, byte count, and exported symbols.
 
 [Sources]
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/device.rs
-- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/README.md
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/build.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/tests/artifact_contract.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/kernels/prebuilt/sm_87/manifest.json
 
 ## 38
+
+This is the kernel model in its smallest useful form. The host launches a grid of blocks. Each thread derives a global index from blockIdx, blockDim, and threadIdx. LaunchConfig may round the thread count upward, so the first correctness rule is a bounds check. Consecutive threads write consecutive output elements, producing coalesced global writes. index divided by depth maps the expanded output back to its source occupancy cell.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/kernels/leash_kernels.cu
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
+
+## 39
+
+The unsafe block is narrow because everything Rust can prove happens first. Arithmetic is checked. Device allocations are grown before views are borrowed. The input view is shared and the output view is mutable, so Rust still prevents overlapping host-side access. unsafe remains necessary because the compiler cannot inspect the external kernel ABI, prove device pointer validity, or know that the launch will respect those lengths. That is the exact proof obligation under review.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/device.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
+
+## 40
+
+Each valid ray independently decides whether it belongs to the collision sector. The angular delta is wrapped through atan2 of sine and cosine so the sector works across the negative-pi to positive-pi seam. CUDA lacks a direct portable atomic minimum for f32 in this target contract, so Leash first proves the range is finite and non-negative, reinterprets its bits as u32, and uses atomicMin. IEEE-754 bit ordering matches numeric ordering only under that non-negative constraint. Contention is acceptable for this small two-value reduction, but the output remains advisory to the CPU safety path.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/kernels/leash_kernels.cu
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/gate.rs
+
+## 41
+
+This kernel is both inference and bounded online adaptation. Each thread owns one scalar lane across state, weight, bias, lower input, and top-down input, so there is no inter-thread dependency in the update. Separate arrays produce coalesced access for a warp. The kernel computes the prediction, two error terms, corrected activation, weight update, and bias update before writing back. Clamps are part of the numerical contract and match the Rust CPU oracle. A second variant adds three atomic reductions for prediction error, activation mean, and RMS while keeping the full resident state on device.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/kernels/leash_kernels.cu
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/lib.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/device.rs
+
+## 42
+
+Do not time only the device function. These numbers include the executor queue, host-to-device transfer, kernel launch, synchronization, and readback. Voxel projection is dramatically slower on CUDA end to end. Large lidar and the combined spatial path cross the break-even point. Large camera normalization wins only when a GPU consumer can keep the tensor on device. Resident cognition still loses at the measured sizes. This evidence is encoded back into the Rust workload decision rather than replaced by a blanket GPU preference.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/gate.rs
+
+## 43
+
+The gate has three explicit modes. In Shadow, the CPU result is returned to the caller while CUDA runs the same owned ComputeJob. compare_results walks the typed ComputeResult variants and records maximum absolute and relative error. Sixteen matching samples are required for each eligible workload; the recorded gate probe performed forty-eight randomized comparisons. Only then does mode become CUDA. A mismatch or CUDA failure sets mode back to CPU and degraded true. Context loss, launch error, timeout, and worker panic were injected; every case returned CPU authority within the overall 100 millisecond compute deadline.
+
+[Sources]
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/src/gate.rs
+- https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json
+
+## 44
 
 Types prevent classes of misuse, but the runtime still needs empirical proof. Replay runs the same scenario twice and checks exact transitions and a stable digest. Recorded Jetson evidence supplies latency, deadline, durability, and physical E-stop measurements.
 
@@ -278,21 +329,21 @@ Types prevent classes of misuse, but the runtime still needs empirical proof. Re
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json
 - https://github.com/specdog/leash/blob/566bc569b24bf5f392291b142469282fcdfac2b3/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json
 
-## 39
+## 45
 
 Qualia is intentionally outside the open-source Leash boundary. It may build missions, ontologies, and semantic evidence asynchronously. It proposes. Leash remains the small, fast, local authority path that decides whether a physical command may proceed.
 
 [Sources]
 - https://github.com/specdog/leash
 
-## 40
+## 46
 
 The live demo is deliberately bounded. First run the observation-only preflight. Motion requires an active operator token and explicit approval. Perform one low-drive, short-duration pulse, then show the verified-zero acknowledgement. If any gate is red, play the recorded fallback. Do not improvise motion.
 
 [Sources]
 - https://github.com/specdog/leash
 
-## 41
+## 47
 
 The closing idea is simple: when software crosses into physical authority, make the rule visible in the type system. The QR opens the editable deck package and the source is at specdog/leash.
 

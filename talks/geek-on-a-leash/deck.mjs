@@ -1058,8 +1058,64 @@ pub struct NavigationGoal {
   "ROS2 is an adapter—not an authority bypass.",
 ], "The ROS2 crate carries the phantom-frame discipline to path proposals and navigation goals. A transform names both endpoints in its type. The adapter can translate Nav2 intent, but it still cannot produce motor authority directly.", [`${GH}/crates/leash-ros2/src/lib.rs`], { accent: C.paleBlue, codeSize: 14.7 });
 
-// 37 — CUDA unsafe island
-codeSlide(37, "CUDA", "The unsafe launch is narrow, validated, and non-authoritative.", "leash-cuda/src/device.rs [abridged]", String.raw`
+// 37 — CUDA artifact contract
+codeSlide(37, "CUDA ARTIFACT", "Production loads checked kernel bytes; it does not compile at startup.", "leash-cuda/src/lib.rs + build.rs [abridged]", String.raw`
+pub const KERNEL_NAMES: [&str; 7] = [
+    "project_occupancy",
+    "lidar_transform",
+    "spatial_window_transform",
+    "collision_sector_reduce",
+    "normalize_rgb_u8",
+    "predictive_step",
+    "predictive_step_metrics",
+];
+
+#[cfg(feature = "cuda")]
+pub static PREBUILT_FATBIN: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"),
+        "/leash_kernels.fatbin"));
+
+if env::var_os("LEASH_CUDA_REBUILD").as_deref()
+    == Some(OsStr::new("1")) {
+    rebuild(&source, &output);
+} else {
+    fs::copy(&prebuilt, &output)
+        .unwrap_or_else(|error| panic!(
+            "copy prebuilt CUDA artifact: {error}"));
+}`, [
+  "include_bytes! embeds the exact fatbin in the Rust binary.",
+  "SM 8.7 cubin + compute 8.7 PTX are release inputs.",
+  "Source and artifact SHA-256 are tested together.",
+], "Before discussing a kernel launch, establish where the machine code comes from. The CUDA source is compiled deliberately with nvcc into a fatbin containing native SM 8.7 code and compute 8.7 PTX. Normal production builds copy that checked artifact; include_bytes embeds it in the Rust binary. Rebuild is an explicit release operation, not a surprise at service startup. The artifact contract test checks source digest, fatbin digest, byte count, and exported symbols.", [`${GH}/crates/leash-cuda/src/lib.rs`, `${GH}/crates/leash-cuda/build.rs`, `${GH}/crates/leash-cuda/tests/artifact_contract.rs`, `${GH}/crates/leash-cuda/kernels/prebuilt/sm_87/manifest.json`], { accent: C.pink, codeSize: 15.4 });
+
+// 38 — simplest kernel
+codeSlide(38, "CUDA KERNEL", "One CUDA thread expands one output cell.", "leash-cuda/kernels/leash_kernels.cu", String.raw`
+extern "C" __global__ void project_occupancy(
+    const int8_t* cells,
+    int32_t* output,
+    uint32_t cell_count,
+    uint32_t depth
+) {
+    const uint32_t index =
+        blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t output_count = cell_count * depth;
+
+    if (index >= output_count) {
+        return;
+    }
+
+    const int8_t occupancy = cells[index / depth];
+    output[index] = occupancy > 0
+        ? static_cast<int32_t>(occupancy)
+        : 0;
+}`, [
+  "extern \"C\" gives Rust a stable, unmangled symbol name.",
+  "__global__ means host-called, device-executed.",
+  "The bounds mask makes excess launch threads harmless.",
+], "This is the kernel model in its smallest useful form. The host launches a grid of blocks. Each thread derives a global index from blockIdx, blockDim, and threadIdx. LaunchConfig may round the thread count upward, so the first correctness rule is a bounds check. Consecutive threads write consecutive output elements, producing coalesced global writes. index divided by depth maps the expanded output back to its source occupancy cell.", [`${GH}/crates/leash-cuda/kernels/leash_kernels.cu`, `${GH}/crates/leash-cuda/src/lib.rs`], { accent: C.lime, codeSize: 16.1 });
+
+// 39 — Rust launch boundary
+codeSlide(39, "RUST → CUDA", "Rust validates shape and ownership before the unsafe launch.", "leash-cuda/src/device.rs [abridged]", String.raw`
 let output_count = cells.len()
     .checked_mul(depth as usize)
     .ok_or(ComputeInputError::LengthOverflow)?;
@@ -1077,30 +1133,151 @@ let cells_view = self.occupancy_cells.slice(..cells.len());
 let mut output_view =
     self.occupancy_output.slice_mut(..output_count);
 
-{
-    unsafe {
-        self.stream.launch_builder(&self.project_occupancy)
-            .arg(&cells_view)
-            .arg(&mut output_view)
-            .arg(&cell_count)
-            .arg(&depth)
-            .launch(LaunchConfig::for_num_elems(launch_count))
-    }
-    .map_err(|error| backend_error("launch project_occupancy", error))?;
+unsafe {
+    self.stream.launch_builder(&self.project_occupancy)
+        .arg(&cells_view)
+        .arg(&mut output_view)
+        .arg(&cell_count)
+        .arg(&depth)
+        .launch(LaunchConfig::for_num_elems(launch_count))
+}
+.map_err(|error| backend_error(
+    "launch project_occupancy", error
+))?;`, [
+  "checked_mul and try_from prevent host-side size corruption.",
+  "CudaSlice views bind buffer length and mutability.",
+  "unsafe is the claim that Rust arguments match the kernel ABI.",
+], "The unsafe block is narrow because everything Rust can prove happens first. Arithmetic is checked. Device allocations are grown before views are borrowed. The input view is shared and the output view is mutable, so Rust still prevents overlapping host-side access. unsafe remains necessary because the compiler cannot inspect the external kernel ABI, prove device pointer validity, or know that the launch will respect those lengths. That is the exact proof obligation under review.", [`${GH}/crates/leash-cuda/src/device.rs`, `${GH}/crates/leash-cuda/src/lib.rs`], { accent: C.cyan, codeSize: 15.2 });
+
+// 40 — reduction kernel
+codeSlide(40, "CUDA REDUCTION", "The collision kernel reduces thousands of rays with two atomics.", "leash-cuda/kernels/leash_kernels.cu [abridged]", String.raw`
+const uint32_t index =
+    blockIdx.x * blockDim.x + threadIdx.x;
+if (index >= count) return;
+
+const float range = ranges_m[index];
+if (!isfinite(range)
+    || range < range_min_m
+    || range > range_max_m) {
+    return;
 }
 
-let output_view = self.occupancy_output.slice(..output_count);
-self.stream.clone_dtoh(&output_view)
-    .map_err(|error| backend_error("download output", error))
-}`, [
-  "Validation sits immediately before unsafe.",
-  "Typed CudaSlice views bound the launch arguments.",
-  "CUDA computes shadow evidence; CPU authorizes motion.",
-], "This is the unsafe island opened on slide seven. Checked multiplication, integer conversion, capacity checks, and typed device slices precede the cudarc kernel launch. CUDA accelerates compute and shadow evaluation; the CPU control kernel remains final motion authority.", [`${GH}/crates/leash-cuda/src/lib.rs`, `${GH}/crates/leash-cuda/src/device.rs`, `${GH}/crates/leash-cuda/README.md`], { accent: C.pink, codeSize: 15.0 });
+const float angle = angle_min_rad
+    + static_cast<float>(index) * angle_increment_rad;
+const float unwrapped_delta = angle - sector_center_rad;
+const float delta = atan2f(
+    sinf(unwrapped_delta), cosf(unwrapped_delta));
+if (fabsf(delta) > sector_half_width_rad) return;
 
-// 38 — replay and evidence
+const float non_negative_range =
+    range == 0.0f ? 0.0f : range;
+atomicMin(minimum_range_bits,
+    __float_as_uint(non_negative_range));
+atomicAdd(sample_count, 1U);`, [
+  "atan2(sin Δ, cos Δ) wraps angles across ±π.",
+  "Non-negative f32 bit ordering makes atomicMin valid here.",
+  "The result is advisory; CPU retains final stop authority.",
+], "Each valid ray independently decides whether it belongs to the collision sector. The angular delta is wrapped through atan2 of sine and cosine so the sector works across the negative-pi to positive-pi seam. CUDA lacks a direct portable atomic minimum for f32 in this target contract, so Leash first proves the range is finite and non-negative, reinterprets its bits as u32, and uses atomicMin. IEEE-754 bit ordering matches numeric ordering only under that non-negative constraint. Contention is acceptable for this small two-value reduction, but the output remains advisory to the CPU safety path.", [`${GH}/crates/leash-cuda/kernels/leash_kernels.cu`, `${GH}/crates/leash-cuda/src/lib.rs`, `${GH}/crates/leash-cuda/src/gate.rs`], { accent: C.yellow, codeSize: 15.0 });
+
+// 41 — predictive kernel
+codeSlide(41, "CUDA PREDICTION", "The predictive kernel fuses inference, correction, and learning.", "leash-cuda/kernels/leash_kernels.cu [abridged]", String.raw`
+const uint32_t index =
+    blockIdx.x * blockDim.x + threadIdx.x;
+if (index >= count) return;
+
+const float previous = state[index];
+const float prediction =
+    weights[index] * previous + bias[index];
+const float bottom_up_error = lower[index] - prediction;
+const float top_down_error = previous - top_down[index];
+
+const float next = previous
+    + 0.12f * source_precision
+        * weights[index] * bottom_up_error
+    - 0.05f * top_precision * top_down_error;
+
+state[index] = fminf(4.0f, fmaxf(-4.0f, next));
+weights[index] = fminf(1.8f, fmaxf(0.2f,
+    weights[index]
+        + 0.0005f * bottom_up_error * previous));
+bias[index] = fminf(1.0f, fmaxf(-1.0f,
+    bias[index] + 0.0001f * bottom_up_error));`, [
+  "One thread owns one state, weight, and bias index.",
+  "Structure-of-arrays gives adjacent threads adjacent loads.",
+  "Fusing three updates avoids intermediate global-memory traffic.",
+], "This kernel is both inference and bounded online adaptation. Each thread owns one scalar lane across state, weight, bias, lower input, and top-down input, so there is no inter-thread dependency in the update. Separate arrays produce coalesced access for a warp. The kernel computes the prediction, two error terms, corrected activation, weight update, and bias update before writing back. Clamps are part of the numerical contract and match the Rust CPU oracle. A second variant adds three atomic reductions for prediction error, activation mean, and RMS while keeping the full resident state on device.", [`${GH}/crates/leash-cuda/kernels/leash_kernels.cu`, `${GH}/crates/leash-cuda/src/lib.rs`, `${GH}/crates/leash-cuda/src/device.rs`], { accent: C.pink, codeSize: 14.9 });
+
+// 42 — break-even evidence
 {
-  const s = slide(C.paper, "PROOF", 38);
+  const s = slide(C.paper, "CUDA MEASUREMENT", 42);
+  title(s, "A kernel is only faster when the whole path is faster.", { size: 29 });
+  body(s, "End-to-end p50 on Jetson Orin NX • queue + transfer + launch + sync + readback • each row normalized", 0.62, 1.24, 11.9, 0.34, { size: 14.7, bold: true, color: C.grey });
+  const rows = [
+    ["voxel large", "1.299 ms", "5.896 ms", "CPU", 0.22, 1.0],
+    ["lidar large", "0.449 ms", "0.385 ms", "CUDA after shadow", 0.76, 0.65],
+    ["spatial combined", "1.520 ms", "0.534 ms", "CUDA after shadow", 1.0, 0.35],
+    ["camera large", "4.647 ms", "3.047 ms", "CUDA + GPU consumer", 1.0, 0.66],
+    ["resident cognition", "5.353 ms", "6.821 ms", "CPU", 0.78, 1.0],
+  ];
+  body(s, "WORKLOAD", 0.7, 1.78, 2.4, 0.24, { size: 11, bold: true, mono: true });
+  body(s, "CPU", 3.2, 1.78, 2.1, 0.24, { size: 11, bold: true, mono: true, color: C.blue });
+  body(s, "CUDA", 5.48, 1.78, 2.1, 0.24, { size: 11, bold: true, mono: true, color: C.pink });
+  body(s, "DECISION", 9.42, 1.78, 2.75, 0.24, { size: 11, bold: true, mono: true });
+  rows.forEach(([name, cpu, cuda, decision, cpuRatio, cudaRatio], index) => {
+    const y = 2.16 + index * 0.86;
+    body(s, name, 0.7, y + 0.09, 2.3, 0.34, { size: 17, bold: true });
+    s.addShape(SH.rect, { x: 3.2, y: y + 0.04, w: 2.05 * cpuRatio, h: 0.22, fill: { color: C.blue }, line: { color: C.blue, width: 0 } });
+    body(s, cpu, 3.2, y + 0.33, 1.95, 0.23, { size: 12.5, bold: true, mono: true, color: C.blue });
+    s.addShape(SH.rect, { x: 5.48, y: y + 0.04, w: 2.05 * cudaRatio, h: 0.22, fill: { color: C.pink }, line: { color: C.pink, width: 0 } });
+    body(s, cuda, 5.48, y + 0.33, 1.95, 0.23, { size: 12.5, bold: true, mono: true, color: C.pink });
+    pill(s, decision.toUpperCase(), 8.7, y + 0.08, 3.45, decision === "CPU" ? C.paleBlue : C.lime, C.ink, 9.5);
+  });
+  body(s, "GPU selection is measured policy—not an identity.", 1.55, 6.55, 10.2, 0.4, { size: 23, bold: true, align: "center" });
+  footer(s);
+  note(s, 42, "Do not time only the device function. These numbers include the executor queue, host-to-device transfer, kernel launch, synchronization, and readback. Voxel projection is dramatically slower on CUDA end to end. Large lidar and the combined spatial path cross the break-even point. Large camera normalization wins only when a GPU consumer can keep the tensor on device. Resident cognition still loses at the measured sizes. This evidence is encoded back into the Rust workload decision rather than replaced by a blanket GPU preference.", [`${GH}/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json`, `${GH}/crates/leash-cuda/src/gate.rs`]);
+}
+
+// 43 — shadow authority gate
+codeSlide(43, "CUDA AUTHORITY", "CUDA earns compute authority through shadow parity—and can lose it once.", "leash-cuda/src/gate.rs [abridged]", String.raw`
+pub fn execute(&self, job: ComputeJob)
+    -> Result<ComputeGateOutcome, WorkError> {
+    match self.status().mode {
+        GateMode::Cpu => self.execute_cpu(job),
+        GateMode::Shadow => self.execute_shadow(job),
+        GateMode::Cuda => self.execute_cuda_with_fallback(job),
+    }
+}
+
+let cpu_started = Instant::now();
+let authoritative = execute_before(&self.cpu, job.clone(),
+    cpu_started + self.config.deadline)?;
+let cpu_elapsed = cpu_started.elapsed();
+let cuda_started = Instant::now();
+let cuda = execute_before(&self.cuda, job,
+    cuda_started + self.config.deadline)?;
+let comparison = compare_results(&authoritative, &cuda,
+    self.config.tolerance, cpu_elapsed,
+    cuda_started.elapsed());
+
+if comparison.matched {
+    status.shadow_completed =
+        status.shadow_completed.saturating_add(1);
+    if status.shadow_completed
+        >= self.config.shadow_samples_required {
+        status.mode = GateMode::Cuda;
+    }
+} else {
+    status.mode = GateMode::Cpu;
+    status.degraded = true;
+}`, [
+  "48 randomized shadow comparisons; CPU authoritative throughout.",
+  "Absolute or relative tolerance: 1e-5; 16 passes per workload.",
+  "Mismatch, launch failure, timeout, or panic falls back to CPU.",
+], "The gate has three explicit modes. In Shadow, the CPU result is returned to the caller while CUDA runs the same owned ComputeJob. compare_results walks the typed ComputeResult variants and records maximum absolute and relative error. Sixteen matching samples are required for each eligible workload; the recorded gate probe performed forty-eight randomized comparisons. Only then does mode become CUDA. A mismatch or CUDA failure sets mode back to CPU and degraded true. Context loss, launch error, timeout, and worker panic were injected; every case returned CPU authority within the overall 100 millisecond compute deadline.", [`${GH}/crates/leash-cuda/src/gate.rs`, `${GH}/crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json`], { accent: C.red, codeSize: 15.2 });
+
+// 44 — replay and evidence
+{
+  const s = slide(C.paper, "PROOF", 44);
   title(s, "Determinism and measurements close the loop.", { size: 30 });
   codeBlock(s, "leash-replay/src/lib.rs", String.raw`
 #[derive(Debug, Clone, Copy)]
@@ -1127,12 +1304,12 @@ assert_eq!(first, second);`, 0.55, 1.5, 7.2, 4.88, { accent: C.lime, size: 15.2 
   box(s, "37.622 ms\nphysical E-stop ack", 10.55, 3.08, 2.18, 1.28, C.palePink, { size: 17 });
   body(s, "Same input → same transitions → same digest", 8.15, 5.03, 4.5, 0.75, { size: 21, bold: true, align: "center" });
   footer(s);
-  note(s, 38, "Types prevent classes of misuse, but the runtime still needs empirical proof. Replay runs the same scenario twice and checks exact transitions and a stable digest. Recorded Jetson evidence supplies latency, deadline, durability, and physical E-stop measurements.", [`${GH}/crates/leash-replay/src/lib.rs`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
+  note(s, 44, "Types prevent classes of misuse, but the runtime still needs empirical proof. Replay runs the same scenario twice and checks exact transitions and a stable digest. Recorded Jetson evidence supplies latency, deadline, durability, and physical E-stop measurements.", [`${GH}/crates/leash-replay/src/lib.rs`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-nomotion-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json`, `${GH}/crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json`]);
 }
 
-// 39 — Qualia boundary
+// 45 — Qualia boundary
 {
-  const s = slide(C.paper, "THE SLOWER CLOCK", 39);
+  const s = slide(C.paper, "THE SLOWER CLOCK", 45);
   title(s, "Qualia reasons. Leash retains physical authority.", { size: 30 });
   photo(s, "qualia-world-current.png", 0.64, 1.48, 7.55, 4.66, C.blue);
   box(s, "MISSION\nONTOLOGY\nSEMANTICS", 8.65, 1.5, 3.65, 1.4, C.paleBlue, { size: 22 });
@@ -1141,12 +1318,12 @@ assert_eq!(first, second);`, 0.55, 1.5, 7.2, 4.88, { accent: C.lime, size: 15.2 
   arrow(s, 10.47, 5.3, 0, 0.56, C.ink, 3);
   pill(s, "LEASH AUTHORIZES", 8.82, 6.02, 3.3, C.lime, C.ink, 12);
   footer(s);
-  note(s, 39, "Qualia is intentionally outside the open-source Leash boundary. It may build missions, ontologies, and semantic evidence asynchronously. It proposes. Leash remains the small, fast, local authority path that decides whether a physical command may proceed.", [REPO]);
+  note(s, 45, "Qualia is intentionally outside the open-source Leash boundary. It may build missions, ontologies, and semantic evidence asynchronously. It proposes. Leash remains the small, fast, local authority path that decides whether a physical command may proceed.", [REPO]);
 }
 
-// 40 — live demo
+// 46 — live demo
 {
-  const s = slide(C.yellow, "LIVE PROOF", 40);
+  const s = slide(C.yellow, "LIVE PROOF", 46);
   title(s, "Demo the boundary, not a heroic autonomy claim.", { size: 30 });
   const steps = [
     ["1", "read-only preflight", C.paleBlue],
@@ -1173,12 +1350,12 @@ let evidence = run_once(pulse)?;
 assert_eq!(evidence.final_drive, STOP);`, 7.3, 1.48, 5.35, 4.92, { accent: C.red, size: 16.2 });
   body(s, "Never improvise movement on stage.", 0.82, 6.38, 6.0, 0.4, { size: 21, bold: true, color: C.red });
   footer(s);
-  note(s, 40, "The live demo is deliberately bounded. First run the observation-only preflight. Motion requires an active operator token and explicit approval. Perform one low-drive, short-duration pulse, then show the verified-zero acknowledgement. If any gate is red, play the recorded fallback. Do not improvise motion.", [REPO]);
+  note(s, 46, "The live demo is deliberately bounded. First run the observation-only preflight. Motion requires an active operator token and explicit approval. Perform one low-drive, short-duration pulse, then show the verified-zero acknowledgement. If any gate is red, play the recorded fallback. Do not improvise motion.", [REPO]);
 }
 
-// 41 — close and QR
+// 47 — close and QR
 {
-  const s = slide(C.blue, "TAKE IT HOME", 41);
+  const s = slide(C.blue, "TAKE IT HOME", 47);
   body(s, "WRITE THE\nAUTHORITY RULE\nIN TYPES.", 0.68, 0.82, 7.45, 2.55, { size: 40, bold: true, color: C.white });
   const lines = [
     "newtypes validate",
@@ -1194,7 +1371,7 @@ assert_eq!(evidence.final_drive, STOP);`, 7.3, 1.48, 5.35, 4.92, { accent: C.red
   body(s, qrExpiry, 9.3, 4.48, 2.75, 0.5, { size: 10.5, bold: true, align: "center", color: C.grey });
   body(s, "github.com/specdog/leash", 8.42, 5.9, 4.55, 0.4, { size: 17, bold: true, color: C.white, align: "center" });
   footer(s, "Rust Tuesdays • thank you");
-  note(s, 41, "The closing idea is simple: when software crosses into physical authority, make the rule visible in the type system. The QR opens the editable deck package and the source is at specdog/leash.", [REPO]);
+  note(s, 47, "The closing idea is simple: when software crosses into physical authority, make the rule visible in the type system. The QR opens the editable deck package and the source is at specdog/leash.", [REPO]);
 }
 
 fs.writeFileSync(notesOutput, `# Geek on a Leash — Rust Tuesdays speaker notes\n\n${notes.join("\n")}`);

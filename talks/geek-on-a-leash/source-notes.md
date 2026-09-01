@@ -16,7 +16,12 @@ Deck source commit: `566bc569b24bf5f392291b142469282fcdfac2b3` from `specdog/lea
 - `ControllerIo` supertraits and blanket implementation, closure factory, trait objects, Waveshare adapter, `let-else`, and verified acknowledgements: `crates/leash-waveshare/src/lib.rs`
 - Tagged Serde command enum, strict unknown-field handling, transport-neutral service traits, and typed error conversion: `crates/leash-gateway/src/lib.rs`
 - ROS2/Nav2 typed proposals and conversions: `crates/leash-ros2/src/lib.rs`
-- Crate-wide unsafe denial and the feature-gated cudarc launch island: `crates/leash-cuda/src/lib.rs` and `crates/leash-cuda/src/device.rs`
+- Crate-wide unsafe denial, embedded fatbin metadata, and exported kernel list: `crates/leash-cuda/src/lib.rs`
+- Explicit nvcc rebuild path versus the normal checked-artifact copy path: `crates/leash-cuda/build.rs`
+- Kernel ABI, global indexing, bounds masks, coalesced transforms, collision atomics, RGB normalization, predictive updates, and metric reductions: `crates/leash-cuda/kernels/leash_kernels.cu`
+- Feature-gated cudarc module load, typed device slices, launch argument construction, resident device state, synchronization, and readback: `crates/leash-cuda/src/device.rs`
+- CPU/Shadow/CUDA state machine, typed result parity, workload selection, deadlines, circuit degradation, and bounded CPU fallback: `crates/leash-cuda/src/gate.rs`
+- Source/fatbin digest, byte-count, symbol, and no-NVRTC release tests: `crates/leash-cuda/tests/artifact_contract.rs`
 - Deterministic stable digests and cross-architecture replay oracle: `crates/leash-replay/src/lib.rs`
 
 ## Measured evidence
@@ -25,6 +30,8 @@ Deck source commit: `566bc569b24bf5f392291b142469282fcdfac2b3` from `specdog/lea
 - `crates/leash-runtime/evidence/jetson-orin-nx-evidence-20260829.json` — 110,293 durable records per second in the recorded evidence run.
 - `crates/leash-runtime/evidence/jetson-orin-nx-rv2-16-physical-rollout-20260829.json` — 37.622 ms physical E-stop acknowledgement and verified zero; CPU final authority with CUDA active but no motor authority.
 - `crates/leash-cuda/evidence/jetson-orin-nx-rv2-13-20260829.json` — CUDA shadow comparison and fallback evidence.
+- `crates/leash-cuda/kernels/prebuilt/sm_87/manifest.json` — 47,200-byte SM 8.7/compute 8.7 fatbin, exact source/artifact digests, seven symbols, byte-identical rebuilds, and target validation.
+- The Orin NX break-even record includes executor queueing, transfers, launch, synchronization, and readback; it keeps voxel, small lidar, advisory collision, and measured cognition paths on CPU while allowing large lidar, combined spatial, and large camera work onto CUDA only after shadow parity.
 
 ## Visual provenance
 
