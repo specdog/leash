@@ -21,7 +21,7 @@ use leash_runtime::{
     SupervisorEvent, SupervisorHandle, TransitionReceipt,
 };
 use leash_waveshare::{
-    AckOutcome, CommandAck, ControllerHandle, ControllerIoFactory, ControllerOwner, GimbalCommand,
+    AckOutcome, CommandAck, ControllerHandle, ControllerIoFactory, ControllerOwner, GimbalCommand, LightsCommand,
     OwnerConfig, SerialPortFactory, WaveshareActuationPort,
 };
 use parking_lot::Mutex;
@@ -277,6 +277,21 @@ fn runtime_v2_evidence_path() -> Result<PathBuf> {
 }
 
 impl RobotDriver for WaveshareUgvDriver {
+    fn set_lights(&self, chassis_pwm: u8, camera_pwm: u8) -> Result<crate::lighting::LightWriteReceipt> {
+        let acknowledgement = self.controller_handle.submit_lights(LightsCommand {
+            id: self.next_aux_command_id()?, chassis_pwm, camera_pwm,
+        }).context("queue Waveshare light-only command")?
+            .wait_timeout(V2_COMMAND_TIMEOUT).context("wait for Waveshare light write")?
+            .ok_or_else(|| anyhow!("Waveshare light serial-write acknowledgement timed out; lamp state unknown"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!("Waveshare light write failed: {:?}; lamp state unknown", acknowledgement.outcome));
+        }
+        Ok(crate::lighting::LightWriteReceipt {
+            controller_sequence: acknowledgement.applied_sequence.ok_or_else(|| anyhow!("Waveshare light write omitted its sequence"))?,
+            write_completed_at_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        })
+    }
+
     fn runtime_v2_status(&self) -> Option<Value> {
         let owner = self.controller_handle.status();
         let supervisor = self.supervisor_handle.status();

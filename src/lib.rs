@@ -20,6 +20,7 @@ pub mod gateway;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod localization;
+pub mod lighting;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 #[cfg(feature = "mcp")]

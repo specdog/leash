@@ -805,6 +805,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lighting_capability_is_available_over_mcp_without_a_pilot_lease() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let status = call_tool_value(&harness, "invoke_capability",
+            json!({"capability":"camera_lights_status"})).unwrap();
+        assert_eq!(status["schema_version"], "leash.camera-lights.v1");
+        assert_eq!(status["physical_feedback"], "unknown");
+        assert!(!harness.operator_token_status().active);
+    }
+
+    #[tokio::test]
     async fn invoke_capability_control_calls_use_typed_edge_decoding() {
         let harness = Harness::new(HarnessConfig::default()).unwrap();
         let stop: DriveOutcome = serde_json::from_value(

@@ -422,6 +422,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/camera/snapshot", get(camera_snapshot))
         .route("/camera/stream.mjpg", get(camera_stream))
         .route("/camera/aim", get(camera_aim_status).post(camera_aim))
+        .route("/camera/lights", get(camera_lights_status).post(camera_lights))
         .route("/gimbal/aim", get(camera_aim_status).post(camera_aim))
         .route("/agent", get(agent_page))
         .route("/agent/state", get(agent_console_state))
@@ -1094,6 +1095,32 @@ async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
     }))
 }
 
+async fn camera_lights_status(State(harness): State<Harness>) -> Json<crate::lighting::LightStatus> {
+    Json(harness.camera_lights_status())
+}
+
+async fn camera_lights(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    Json(mut args): Json<Value>,
+) -> Result<Json<Value>, HttpError> {
+    if let Some(header) = headers.get(AUTHORIZATION) {
+        let token = header.to_str().ok().and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|token| !token.is_empty()).ok_or_else(|| anyhow::anyhow!("invalid light authorization header"))?;
+        let fields = args.as_object_mut().ok_or_else(|| anyhow::anyhow!("light request must be an object"))?;
+        fields.insert("token".into(), Value::String(token.to_owned()));
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        harness.capability_registry().invoke_value_with_origin("camera_lights", args, InvocationOrigin::Http)
+    }).await.map_err(|_| anyhow::anyhow!("light request worker failed"))??;
+    Ok(Json(result))
+}
+
+async fn measure_camera_lighting(harness: Harness, jpeg: Bytes, started_ms: u64) {
+    let received_ms = camera_now_ms() as u64;
+    let _ = tokio::task::spawn_blocking(move || harness.observe_camera_lighting(&jpeg, started_ms, received_ms)).await;
+}
+
 fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>) -> Value {
     json!({
         "status": "available",
@@ -1189,7 +1216,8 @@ fn camera_stream_codec() -> CameraStreamCodec {
     }
 }
 
-async fn camera_snapshot() -> Result<Response, HttpError> {
+async fn camera_snapshot(State(harness): State<Harness>) -> Result<Response, HttpError> {
+    let capture_started_ms = camera_now_ms() as u64;
     let device = camera_device_path();
     if !Path::new(&device).exists() {
         camera_record_failure("snapshot", "device-unavailable");
@@ -1204,6 +1232,7 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
             .inspect_err(|_| {
                 camera_guard.record_failure("capture-failed");
             })?;
+        measure_camera_lighting(harness, frame.clone(), capture_started_ms).await;
         let mut response = frame.into_response();
         response
             .headers_mut()
@@ -1264,7 +1293,9 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         return Err(anyhow::anyhow!("ffmpeg camera capture failed: {stderr}").into());
     }
 
-    let mut response = Bytes::from(stdout).into_response();
+    let jpeg = Bytes::from(stdout);
+    measure_camera_lighting(harness, jpeg.clone(), capture_started_ms).await;
+    let mut response = jpeg.into_response();
     response.headers_mut().insert(
         CONTENT_TYPE,
         HeaderValue::from_str(&plan.content_type)
@@ -3269,6 +3300,20 @@ mod tests {
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static NAVIGATION_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[tokio::test]
+    async fn lighting_http_status_is_read_only_and_invalid_authority_is_refused() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let status = super::camera_lights_status(State(harness.clone())).await.0;
+        assert!(!status.enabled);
+        assert!(!status.physical_state_known);
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Basic test-only"));
+        assert!(super::camera_lights(State(harness.clone()), headers,
+            Json(json!({"mode":"off"}))).await.is_err());
+        assert!(!harness.operator_token_status().active);
+        assert!(harness.camera_lights_status().events.is_empty());
+    }
 
     #[tokio::test]
     async fn navigation_http_goal_is_low_speed_idempotent_and_cancellable() {

@@ -131,6 +131,10 @@ impl PatrolState {
 }
 
 pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
+    fn set_lights(&self, _chassis_pwm: u8, _camera_pwm: u8) -> Result<crate::lighting::LightWriteReceipt> {
+        Err(anyhow!("camera lighting is unavailable for this adapter"))
+    }
+
     #[cfg(feature = "waveshare-ugv")]
     fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
         Ok(None)
@@ -576,6 +580,7 @@ pub struct Harness {
     config: HarnessConfig,
     started_at: Instant,
     driver: Arc<dyn RobotDriver>,
+    lights: Arc<Mutex<crate::lighting::Lighting>>,
     command_io: Arc<Mutex<CommandIoState>>,
     command: Arc<Mutex<CommandState>>,
     action_evidence: Arc<Mutex<ActionEvidenceState>>,
@@ -631,6 +636,10 @@ impl Harness {
         driver_override: Option<Arc<dyn RobotDriver>>,
     ) -> Result<Self> {
         config.validate()?;
+        let lights = crate::lighting::Lighting::from_env(
+            config.profile == Profile::WaveshareUgv && config.allow_physical_actuation
+                && !matches!(config.policy_mode, crate::config::PolicyMode::Deny | crate::config::PolicyMode::DryRun),
+        )?;
         let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
         #[cfg(feature = "waveshare-ugv")]
         let waveshare_sensors = (config.profile == Profile::WaveshareUgv)
@@ -715,6 +724,7 @@ impl Harness {
             config,
             started_at: Instant::now(),
             driver,
+            lights: Arc::new(Mutex::new(lights)),
             command_io: Arc::new(Mutex::new(CommandIoState::default())),
             command: Arc::new(Mutex::new(CommandState::default())),
             action_evidence: Arc::new(Mutex::new(ActionEvidenceState::new(
@@ -2554,6 +2564,32 @@ impl Harness {
 
     pub fn camera_aim_state(&self) -> Option<CameraAimState> {
         self.command.lock().camera_aim.clone()
+    }
+
+    pub fn camera_lights_status(&self) -> crate::lighting::LightStatus {
+        self.lights.lock().status()
+    }
+
+    pub fn camera_lights(&self, request: crate::lighting::LightRequest) -> Result<crate::lighting::LightStatus> {
+        self.lights.lock().configure(request, now_ms() as u64, |chassis, camera| self.driver.set_lights(chassis, camera))
+    }
+
+    /// Feed only JPEG bytes captured by this service's existing camera owner.
+    /// Measurement and optional light writes never fail the camera response.
+    #[cfg(feature = "http")]
+    pub(crate) fn observe_camera_lighting(&self, jpeg: &[u8], started_ms: u64, received_ms: u64) {
+        if !self.lights.lock().begin_measurement(now_ms() as u64) { return; }
+        let sample = crate::lighting::measure_jpeg(jpeg, started_ms, received_ms);
+        let mut lights = self.lights.lock();
+        lights.end_measurement();
+        match sample {
+            Ok(sample) => {
+                if let Err(error) = lights.observe(sample, now_ms() as u64, |chassis, camera| self.driver.set_lights(chassis, camera)) {
+                    warn!(error = %error, "automatic camera light write failed");
+                }
+            }
+            Err(_) => lights.acquisition_failed("camera JPEG luminance measurement failed".into()),
+        }
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
