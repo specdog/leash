@@ -1223,23 +1223,35 @@ async fn camera_snapshot(State(harness): State<Harness>) -> Result<Response, Htt
         camera_record_failure("snapshot", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("snapshot")?;
-
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let frame = crate::v4l2_camera::capture_mjpeg_frame(device)
+        let mut receiver = crate::v4l2_camera::subscribe(device, harness.clone())?;
+        let frame = crate::v4l2_camera::latest_frame(&mut receiver)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("capture-failed");
+                camera_record_failure("snapshot", "shared-capture-failed");
             })?;
-        measure_camera_lighting(harness, frame.clone(), capture_started_ms).await;
-        let mut response = frame.into_response();
+        let mut response = frame.jpeg.clone().into_response();
         response
             .headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+        response.headers_mut().insert("cache-control", HeaderValue::from_static("no-store"));
+        for (name, value) in [
+            ("x-leash-camera-sequence", frame.sequence.to_string()),
+            ("x-leash-camera-dequeued-ms", frame.dequeued_ms.to_string()),
+            ("x-leash-camera-acquisition-started-ms", frame.acquisition_started_ms.to_string()),
+            ("x-leash-camera-driver-timestamp-us", frame.driver_timestamp_us.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into())),
+            ("x-leash-camera-driver-timestamp-flags", frame.driver_timestamp_flags.to_string()),
+        ] {
+            response.headers_mut().insert(name, HeaderValue::from_str(&value)
+                .map_err(|_| anyhow::anyhow!("invalid native camera metadata header"))?);
+        }
+        response.headers_mut().insert("x-leash-camera-timestamp-basis", HeaderValue::from_static(
+            if frame.driver_timestamp_flags & 0x00002000 != 0 { "v4l2-monotonic" } else { "dequeue-only-exposure-unknown" }));
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("snapshot")?;
     let plan = FfmpegV4l2CameraAdapter.capture_plan(&device, &camera_input_config());
     let mut child = TokioCommand::new(&plan.program)
         .args(&plan.args)
@@ -1304,42 +1316,34 @@ async fn camera_snapshot(State(harness): State<Harness>) -> Result<Response, Htt
     Ok(response)
 }
 
-async fn camera_stream() -> Result<Response, HttpError> {
+async fn camera_stream(State(_harness): State<Harness>) -> Result<Response, HttpError> {
     let device = camera_device_path();
     if !Path::new(&device).exists() {
         camera_record_failure("mjpeg", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("mjpeg")?;
-
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let receiver = crate::v4l2_camera::start_mjpeg_stream(device)
+        let mut receiver = crate::v4l2_camera::subscribe(device, _harness)?;
+        let first = crate::v4l2_camera::latest_frame(&mut receiver)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("stream-start-failed");
+                camera_record_failure("mjpeg", "shared-stream-start-failed");
             })?;
         let stream = stream::unfold(
-            (receiver, camera_guard),
-            |(mut receiver, camera_guard)| async move {
-                loop {
-                    if camera_guard.recovery_requested() {
+            (Some(first), receiver),
+            |(first, mut receiver)| async move {
+                let frame = if let Some(frame) = first { frame } else {
+                    if !matches!(time::timeout(Duration::from_secs(4), receiver.changed()).await, Ok(Ok(()))) {
                         return None;
                     }
-                    match time::timeout(Duration::from_millis(100), receiver.recv()).await {
-                        Err(_) => continue,
-                        Ok(Some(chunk)) => {
-                            return Some((
-                                Ok::<Bytes, Infallible>(chunk),
-                                (receiver, camera_guard),
-                            ));
-                        }
-                        Ok(None) => {
-                            camera_guard.record_failure("stream-ended");
-                            return None;
-                        }
+                    match crate::v4l2_camera::latest_frame(&mut receiver).await {
+                        Ok(frame) => frame,
+                        Err(_) => return None,
                     }
-                }
+                };
+                if !frame.fresh() { return None; }
+                Some((Ok::<Bytes, Infallible>(frame.multipart()), (None, receiver)))
             },
         );
         let mut response = Body::from_stream(stream).into_response();
@@ -1354,6 +1358,7 @@ async fn camera_stream() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("mjpeg")?;
     let plan =
         FfmpegV4l2CameraAdapter.stream_plan(&device, &camera_input_config(), camera_stream_codec());
     let mut command = TokioCommand::new(&plan.program);

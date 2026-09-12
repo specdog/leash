@@ -95,6 +95,7 @@ tower-http = { version = "0.6", optional = true, features = ["cors"] }
 webrtc = { version = "0.17.1", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 v4l = { version = "0.14", optional = true }
 
 [dev-dependencies]

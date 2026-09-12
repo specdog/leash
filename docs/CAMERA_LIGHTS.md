@@ -60,11 +60,13 @@ off and retains chassis PWM unless the request explicitly supplies `chassis_pwm`
 
 ## Automatic policy and evidence
 
-The service measures JPEGs from its existing `/camera/snapshot` path, including
-ffmpeg and v4l2 captures. A snapshot consumer must keep requesting frames; auto
-does not start its own camera process. MJPEG/WebRTC streams alone do not provide
-samples. Decoding runs outside the async executor, with one measurement in flight
-and a minimum 200 ms interval, regardless of snapshot request rate. JPEG input is
+Native V4L2 lighting consumes the shared camera owner's actual frame feed. The
+first snapshot or MJPEG request starts that persistent owner; no separate light
+capture process is opened. Lighting processing cannot block the camera worker.
+The ffmpeg backend still measures `/camera/snapshot` responses and requires a
+snapshot consumer; its MJPEG/WebRTC streams alone do not provide samples.
+Decoding runs outside the async executor, with one measurement in flight and a
+minimum 200 ms interval, regardless of request rate. JPEG input is
 limited to 4 MiB, 4096 pixels per dimension and a 64 MiB decoder allocation limit.
 
 The measurement is mean decoded grayscale pixel value divided by 255, not lux.
@@ -83,7 +85,10 @@ even then physical feedback remains unknown.
 Status retains up to 64 attempts with requested PWM, controller write sequence,
 write completion time, any error, and measured before/after camera observations.
 An observation contains dimensions, normalized luma, request/receive times and
-the JPEG SHA-256, without image bytes. A before observation must be fresh. An
+the JPEG SHA-256, without image bytes. For shared native frames, the existing
+request/receive fields carry the original acquisition interval and dequeue time,
+conservatively widened using driver frame age when known; a cache hit never
+refreshes them. A before observation must be fresh. An
 after observation must belong to the latest write attempt, have a request start
 at least 250 ms after acknowledged write completion and arrive within five
 seconds. Missing observations remain null. The sensor exposure timestamp is not

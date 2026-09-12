@@ -1731,6 +1731,7 @@ dependencies = [
  "leash-gateway",
  "leash-runtime",
  "leash-waveshare",
+ "libc",
  "parking_lot",
  "reqwest",
  "rmcp",
