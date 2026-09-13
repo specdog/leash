@@ -74,3 +74,69 @@ establish the physical left/right handedness of this mounting. Reflection
 about the forward axis does not change the symmetric forward/reverse clearance
 sectors; lateral turn-away decisions still need a known left/right observation.
 No vendor implementation was incorporated and no clockwise setting was changed.
+
+## Installed endpoint receipt
+
+The supervising agent installed the exact artifact above on 2026-09-12 at
+22:29:24 America/New_York. Its guarded deployment receipt records
+`installed: true`, the same SHA-256, backup
+`/home/jetson/.local/state/leash/clearance-install/20260912-222924`, CUDA backend
+`cuda`, and cognition boundary sequence 9. Existing service configuration was
+retained, including the operator-observed yaw 270 and body mask `135:226`.
+The supervisor reported the lease inactive after installation.
+
+The [captured live response](lidar-clearance-20260912-live.json) from
+`GET /motors/clearance` was observed at Unix ms 1789266609999, using a scan
+timestamp 1789266609928 (age 71 ms, under the unchanged 500 ms limit).
+It reports schema `leash.motor-clearance.v1`, threshold 0.25 m, clockwise false,
+drive inversion true, and swap false. Forward was not blocked: nearest observed
+range 1.418 m, 121 of 121 sector bins valid. Reverse and rotation were blocked
+by the 0.16 m return near +132 degrees. Reverse had 25 valid and 96 unknown
+sector bins. `grants_motion_authority` remained false.
+
+Host deployment receipts are
+`C:/Users/ericm/.local/state/qualia/console-runtime/clearance-install-result.json`
+and `clearance-live.json`. This review performed no deployment or actuator
+operation.
+
+## Subsequent motion-pause diagnosis
+
+Read-only inspection of `wheel-transport-20260912-223106` found four forwarded
+nonzero frames (ticks 129, 130, 131, 133), followed by twelve explicit zeros.
+Leash's nonzero ledger entries 897 through 912 cover Unix ns
+1789266667869853859 through 1789266669045813269 (1.176 seconds). Entry 913
+then applies zero while still armed, with safety flags zero, no deadman expiry,
+and no collision clamp. The final verified stop appears separately at entry
+953, with armed false and safety flags 16; the supervisor confirmed no active
+lease afterward. Thus this pause was not a Leash collision or deadman refusal.
+
+The exact producer journal for ticks 129 through 149 contains nine nonzero
+proposals. Five (132, 134, 136, 138, 141) were not forwarded; the bridge recorded
+nine freshness failures and six recoveries while camera acquisition age crossed
+its 1500 ms limit. All twelve explicit-zero records cite stale/unavailable
+vision, along with missing odometry history. No record in that window cites
+gyro/odometry disagreement. Tick 134's difference was 0.496512 rad/s, narrowly
+below the existing 0.5 rad/s threshold, and its hold list was empty.
+
+Static inspection of `qualia-flyvis/scripts/wheel_shadow.py` found that a vision
+parse failure resets `BodyHistory` before independently fresh body input is
+parsed. This creates the accompanying "waiting for two fresh odometry samples"
+message and an avoidable recovery delay. The narrow recommended repair is to
+retain body history across vision-only failures while preserving body freshness,
+rollback/gap checks and stale-vision zero output. Camera processing latency must
+also be reduced; extending the deadman or replaying stale commands is not needed.
+
+Signed encoder values did not cause this zero decision: the producer derives
+speed using the unsigned Euclidean displacement. Leash decodes firmware
+`odl`/`odr` from centimeters without applying outgoing drive inversion. The
+observed raw changes from (-2, 0) to (-5, -2) cm explain the negative derived
+odometry displacement, but do not establish physical backward motion. Encoder
+quantization and body-sign calibration remain relevant to future yaw comparison;
+neither was a recorded hold in this window.
+
+The three original host artifacts are `forwarded.jsonl`, `telemetry-window.json`,
+and `leash-applied-window.json` under
+`C:/Users/ericm/.local/state/qualia/console-runtime/wheel-transport-20260912-223106/`.
+The bounded producer extract is `shadow-window-diagnosis.json`, copied read-only
+from `/home/jetson/qualia-flyvis-20260912/service-runs/shadow-20260913T023041Z-947db1d7/decisions.jsonl`.
+No control code was modified during this diagnosis.
