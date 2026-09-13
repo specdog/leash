@@ -40,5 +40,35 @@ The user's uncommitted root `src/runtime.rs` patch was read without modification
 It promotes wheel odometry into a localization provider and does not repair the
 acknowledgement channel mismatch. This fix stays in the isolated worktree.
 
-No hardware commands or test cycles were run for this diagnosis. Deployment and
-the next bounded integration belong to the operator's coordinating agent.
+No hardware commands or test cycles were run for the diagnosis above.
+
+## Installed zero-only integration
+
+After deployment of source `a38bf1e071c76ac5951d6fd2e1a8a446639f1162`, one
+explicitly authorized zero-only integration ran at 2026-09-12 21:09:00 EDT
+(2026-09-13 01:09:00 UTC). The installed binary hash matched
+`d58117de7f61811e567cd273ea8febecfa4495cb62e844b7833bf9903e9291cd`.
+
+- Authorization: HTTP 200, `ttl_secs: 5`, `speed_mode: low`.
+- Drive: requested left/right 0/0; HTTP 200 in 19.392 ms, `ok: true`, returned
+  left/right 0/0, `max_speed: 0.22`, `soft_odometry_limited: false`.
+- Finally, verified stop with `reason: operator-request`: HTTP 200 in 87.554 ms,
+  `acknowledged: true`, command sequence 2, adapter sample sequence 2374.
+  Write completion was Unix ms 1789261740514; the confirming adapter sample was
+  received at 1789261740583. The operator lease was inactive afterward.
+- Both applied-action endpoints returned HTTP 200 with producer epoch
+  1789261501921313288. Entry 2360 records requested/clamped/applied left/right
+  0/0, speed scale 0.22, `valid: true`, `armed: true`, safety flags 0. Entry 2361
+  records 0/0 at the same scale, `armed: false`, safety flags 16 (verified zero).
+- The controller's verified-zero stop receipt covers safety requests 1 through
+  2, with applied sequence 482. Disconnects, write failures, and supervisor faults
+  remained zero.
+
+The sanitized full receipt is on the host at
+`C:/Users/ericm/.local/state/qualia/console-runtime/zero-drive-integration.json`
+and on the robot at
+`/home/jetson/.local/state/leash/zero-drive-integration/1789261740393.json`.
+The bearer was read only into the robot helper's memory and excluded from both
+receipts. No nonzero or head commands were issued. This proves removal of the
+zero-drive acknowledgement mismatch; it does not demonstrate physical wheel
+motion or deadman expiry.
