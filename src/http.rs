@@ -3147,12 +3147,13 @@ async fn sse_cognition(
     State(harness): State<Harness>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let receiver = harness.subscribe_cognition();
-    let stream = stream::unfold(receiver, |mut receiver| async move {
+    let stream = stream::unfold((harness, receiver), |(harness, mut receiver)| async move {
         loop {
             match receiver.recv().await {
                 Ok(frame) => {
+                    let frame = harness.canonical_cognition_boundary(frame);
                     let data = serde_json::to_string(&frame).unwrap_or_else(|_| "{}".to_string());
-                    return Some((Ok(Event::default().event("cognition").data(data)), receiver));
+                    return Some((Ok(Event::default().event("cognition").data(data)), (harness, receiver)));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,

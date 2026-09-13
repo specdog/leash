@@ -868,6 +868,10 @@ impl Harness {
         self.cognition.subscribe()
     }
 
+    pub(crate) fn canonical_cognition_boundary(&self, frame: CognitionBoundaryFrameV1) -> CognitionBoundaryFrameV1 {
+        self.cognition.canonical_boundary(frame)
+    }
+
     pub fn update_range_scan_status(&self, status: RangeScanStatus) -> Result<()> {
         status.validate()?;
         self.raw.write().range_scan = status;
