@@ -1521,12 +1521,24 @@ pub struct RawFrameStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
+pub struct CameraAimReceipt {
+    pub controller_sequence: u64,
+    pub write_completed_at_ms: u128,
+    pub physical_feedback: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "mcp", derive(schemars::JsonSchema))]
 pub struct CameraAimOutcome {
     pub ok: bool,
     pub pan_deg: f64,
     pub tilt_deg: f64,
     pub speed: u32,
     pub accel: u32,
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub serial_receipt: Option<CameraAimReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1538,6 +1550,8 @@ pub struct CameraAimState {
     pub accel: u32,
     pub updated_at_ms: u128,
     pub source: String,
+    #[serde(default)]
+    pub serial_receipt: Option<CameraAimReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

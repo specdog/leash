@@ -301,7 +301,8 @@ struct ActionEvidenceQuery {
     limit: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CameraAimReq {
     token: Option<String>,
     pan_deg: f64,
@@ -1072,7 +1073,7 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "camera": camera,
         "stream_health": camera_stream_health_snapshot(),
-        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state(), harness.camera_aim_authority_status())
     }))
 }
 
@@ -1091,7 +1092,7 @@ fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
 async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
     Json(json!({
         "ok": true,
-        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state(), harness.camera_aim_authority_status())
     }))
 }
 
@@ -1121,19 +1122,24 @@ async fn measure_camera_lighting(harness: Harness, jpeg: Bytes, started_ms: u64)
     let _ = tokio::task::spawn_blocking(move || harness.observe_camera_lighting(&jpeg, started_ms, received_ms)).await;
 }
 
-fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>) -> Value {
+fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>, authority: crate::head::HeadAuthorityStatus) -> Value {
     json!({
         "status": "available",
         "capability": "camera_aim",
         "endpoint": "/camera/aim",
         "aliases": ["/gimbal/aim"],
         "known": pose.is_some(),
+        "physical_pose_known": false,
+        "physical_feedback": "unknown",
+        "dedicated_authority": authority,
         "source": pose.as_ref().map(|state| state.source.as_str()).unwrap_or("unavailable"),
         "pose": pose,
         "range": {
             "pan_deg": [CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG],
             "tilt_deg": [CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG]
-        }
+        },
+        "limits": {"speed": [1, crate::head::MAX_SPEED], "accel": [1, crate::head::MAX_ACCEL]},
+        "defaults": {"speed": crate::head::DEFAULT_SPEED, "accel": crate::head::DEFAULT_ACCEL}
     })
 }
 
@@ -3046,9 +3052,14 @@ async fn drive(
 
 async fn camera_aim(
     State(harness): State<Harness>,
-    Json(req): Json<CameraAimReq>,
+    headers: HeaderMap,
+    Json(mut req): Json<CameraAimReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
+    if let Some(header) = headers.get(AUTHORIZATION) {
+        req.token = Some(header.to_str().ok().and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|value| !value.is_empty()).ok_or_else(|| anyhow::anyhow!("invalid camera authorization header"))?.to_owned());
+    }
+    let result = tokio::task::spawn_blocking(move || {
         harness.capability_registry().invoke_value_with_origin(
             "camera_aim",
             json!({
@@ -3060,8 +3071,9 @@ async fn camera_aim(
                 "approval": req.approval,
             }),
             InvocationOrigin::Http,
-        )?,
-    ))
+        )
+    }).await.map_err(|_| anyhow::anyhow!("camera aim worker failed"))??;
+    Ok(Json(result))
 }
 
 async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {

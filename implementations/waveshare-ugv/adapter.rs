@@ -277,6 +277,23 @@ fn runtime_v2_evidence_path() -> Result<PathBuf> {
 }
 
 impl RobotDriver for WaveshareUgvDriver {
+    fn aim_camera_with_receipt(&self, pan: f64, tilt: f64, speed: u32, accel: u32) -> Result<Option<crate::types::CameraAimReceipt>> {
+        let command = GimbalCommand::new(self.next_aux_command_id()?, pan, tilt, speed, accel)
+            .context("validate camera-only gimbal frame")?;
+        let acknowledgement = self.controller_handle.submit_gimbal(command)
+            .context("queue camera-only gimbal frame")?
+            .wait_timeout(V2_COMMAND_TIMEOUT).context("wait for camera-only serial write")?
+            .ok_or_else(|| anyhow!("camera serial-write acknowledgement timed out; physical pose unknown"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!("camera serial write refused: {:?}; physical pose unknown", acknowledgement.outcome));
+        }
+        Ok(Some(crate::types::CameraAimReceipt {
+            controller_sequence: acknowledgement.applied_sequence.ok_or_else(|| anyhow!("camera serial write omitted its sequence"))?,
+            write_completed_at_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),
+            physical_feedback: "unknown".to_string(),
+        }))
+    }
+
     fn set_lights(&self, chassis_pwm: u8, camera_pwm: u8) -> Result<crate::lighting::LightWriteReceipt> {
         let acknowledgement = self.controller_handle.submit_lights(LightsCommand {
             id: self.next_aux_command_id()?, chassis_pwm, camera_pwm,
@@ -538,27 +555,7 @@ impl MobileBaseAdapter for WaveshareUgvDriver {
 
 impl GimbalAdapter for WaveshareUgvDriver {
     fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        let command = GimbalCommand {
-            id: self.next_aux_command_id()?,
-            pan_degrees: pan_deg,
-            tilt_degrees: tilt_deg,
-            speed,
-            acceleration: accel,
-        };
-        let acknowledgement = self
-            .controller_handle
-            .submit_gimbal(command)
-            .context("queue runtime v2 Waveshare gimbal command")?
-            .wait_timeout(V2_COMMAND_TIMEOUT)
-            .context("wait for runtime v2 Waveshare gimbal command")?
-            .ok_or_else(|| anyhow!("runtime v2 Waveshare gimbal command timed out"))?;
-        if acknowledgement.outcome != AckOutcome::Applied {
-            return Err(anyhow!(
-                "runtime v2 Waveshare gimbal command was not applied: {:?}",
-                acknowledgement.outcome
-            ));
-        }
-        Ok(())
+        self.aim_camera_with_receipt(pan_deg, tilt_deg, speed, accel).map(|_| ())
     }
 }
 

@@ -18,6 +18,7 @@ pub enum SafetyClass {
     SimControl,
     PhysicalStop,
     PhysicalMotion,
+    PhysicalHead,
     PhysicalLight,
     PhysicalHighRisk,
 }
@@ -29,6 +30,7 @@ impl SafetyClass {
             Self::SimControl => "sim-control",
             Self::PhysicalStop => "physical-stop",
             Self::PhysicalMotion => "physical-motion",
+            Self::PhysicalHead => "physical-head",
             Self::PhysicalLight => "physical-light",
             Self::PhysicalHighRisk => "physical-high-risk",
         }
@@ -37,12 +39,12 @@ impl SafetyClass {
     fn is_physical_action(self) -> bool {
         matches!(
             self,
-            Self::PhysicalStop | Self::PhysicalMotion | Self::PhysicalLight | Self::PhysicalHighRisk
+            Self::PhysicalStop | Self::PhysicalMotion | Self::PhysicalHead | Self::PhysicalLight | Self::PhysicalHighRisk
         )
     }
 
     fn is_policy_gated(self) -> bool {
-        matches!(self, Self::PhysicalMotion | Self::PhysicalLight | Self::PhysicalHighRisk)
+        matches!(self, Self::PhysicalMotion | Self::PhysicalHead | Self::PhysicalLight | Self::PhysicalHighRisk)
     }
 }
 
@@ -747,8 +749,8 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
         ),
         descriptor(
             "camera_aim",
-            "Aim the camera gimbal in pan and tilt degrees through policy gates",
-            SafetyClass::PhysicalMotion,
+            "Aim only the camera gimbal using camera bearer or existing pilot authority; receipt is serial write, physical pose unknown",
+            SafetyClass::PhysicalHead,
             object_schema(&[
                 ("token", "string", false),
                 ("pan_deg", "number", true),

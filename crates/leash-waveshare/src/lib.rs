@@ -435,6 +435,7 @@ impl ControllerHandle {
     }
 
     pub fn submit_gimbal(&self, command: GimbalCommand) -> Result<AckTicket, SubmitError> {
+        if self.shared.estopped.load(Ordering::Acquire) { return Err(SubmitError::EStopped); }
         let (reply, receiver) = mpsc::channel();
         self.enqueue(ControllerCommand::Gimbal { command, reply })?;
         Ok(AckTicket { receiver })
@@ -1021,6 +1022,10 @@ fn process_command(
             )
         }
         ControllerCommand::Gimbal { command, reply } => {
+            if shared.estopped.load(Ordering::Acquire) {
+                reply_rejected(ControllerCommand::Gimbal { command, reply }, AckOutcome::EStopped, clock.now(), None);
+                return;
+            }
             (encode_gimbal(command), command.id, None, false, reply)
         }
         ControllerCommand::Lights { command, reply } => {
