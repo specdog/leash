@@ -41,3 +41,40 @@ weights, motor paths, service configuration, or user root files were changed.
 The source was inspected against the installed host decoder without test cycles;
 the full production-feature build and live belief integration are separate
 deployment evidence.
+
+## Installed read-only observations
+
+The coordinating agent installed source
+`445d56ba8d7009c1c0f04b770590cf0e4b35fc19`, binary SHA-256
+`a57a4ae4ecc0eb614d724723c66f0624902916a22bfec2e69ec0a0162a91c027`,
+at 21:20:05 EDT. The full eight-feature release cross-build completed in 1m47s;
+ELF inspection verified AArch64, GLIBC requirements no newer than 2.34, and
+the Cargo fingerprint retained CUDA and the other seven production features.
+
+Three GET observations of the existing host TLS `/belief/status` and
+`/belief/sketch` ran from 21:20:47 to 21:20:53 EDT without restarting the host.
+All four layers were fresh at the final observation:
+
+| Layer | Initial sequence | Final sequence | Changed activation sketch cells | Changed weight-RMS sketch cells |
+| --- | ---: | ---: | ---: | ---: |
+| L3 | 404 | 497 | 69 / 256 | 8 / 256 |
+| L4 | 109 | 135 | 71 / 256 | 8 / 256 |
+| L5 | 27 | 33 | 73 / 256 | 8 / 256 |
+| L6 | 6 | 7 | 73 / 256 | 8 / 256 |
+
+The parameter digest changed. The final accepted upstream was canonical v2,
+producer epoch `leash:84312:1789262418775496855`, sequence 676, timestamp
+1789262453228, expiry 1789262453728. These are actual host state changes;
+host capabilities reported `cpu-fallback`, so this is not evidence of host CUDA
+learning. Robot cognition separately reported active CUDA without degradation.
+
+Full sanitized observations are at
+`C:/Users/ericm/.local/state/qualia/console-runtime/belief-boundary-integration.json`.
+The first automatic robot checkpoint, created at Unix ms 1789262478778, still
+reported top-down precision 0 and expiry 0. Thus return-channel acceptance was
+not established by this observation. The robot ingress credential file is
+configured and exists; the host credential file is protected from the observing
+user. No credential was printed or copied to an evidence file. The checkpoint
+metadata is in `belief-return-checkpoint.json` beside the host observations.
+All observations were read-only; no boundary POST, actuator request, or manual
+checkpoint was issued.
