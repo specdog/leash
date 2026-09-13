@@ -301,7 +301,8 @@ struct ActionEvidenceQuery {
     limit: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CameraAimReq {
     token: Option<String>,
     pan_deg: f64,
@@ -396,6 +397,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
         .route("/action-evidence", get(action_evidence))
+        .route("/motors/clearance", get(motor_clearance_status))
         .route("/evidence/action/applied", get(action_evidence))
         .route("/telemetry/compact", get(compact_telemetry))
         .route("/telemetry/spatial-inputs", get(spatial_inputs))
@@ -422,6 +424,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/camera/snapshot", get(camera_snapshot))
         .route("/camera/stream.mjpg", get(camera_stream))
         .route("/camera/aim", get(camera_aim_status).post(camera_aim))
+        .route("/camera/lights", get(camera_lights_status).post(camera_lights))
         .route("/gimbal/aim", get(camera_aim_status).post(camera_aim))
         .route("/agent", get(agent_page))
         .route("/agent/state", get(agent_console_state))
@@ -1071,7 +1074,7 @@ async fn camera_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "camera": camera,
         "stream_health": camera_stream_health_snapshot(),
-        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state(), harness.camera_aim_authority_status())
     }))
 }
 
@@ -1090,23 +1093,58 @@ fn camera_stream_health_snapshot() -> crate::types::CameraStreamHealth {
 async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
     Json(json!({
         "ok": true,
-        "gimbal": camera_aim_descriptor(harness.camera_aim_state())
+        "gimbal": camera_aim_descriptor(harness.camera_aim_state(), harness.camera_aim_authority_status())
     }))
 }
 
-fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>) -> Value {
+async fn motor_clearance_status(State(harness): State<Harness>) -> Json<Value> {
+    Json(harness.motor_clearance_status())
+}
+
+async fn camera_lights_status(State(harness): State<Harness>) -> Json<crate::lighting::LightStatus> {
+    Json(harness.camera_lights_status())
+}
+
+async fn camera_lights(
+    State(harness): State<Harness>,
+    headers: HeaderMap,
+    Json(mut args): Json<Value>,
+) -> Result<Json<Value>, HttpError> {
+    if let Some(header) = headers.get(AUTHORIZATION) {
+        let token = header.to_str().ok().and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|token| !token.is_empty()).ok_or_else(|| anyhow::anyhow!("invalid light authorization header"))?;
+        let fields = args.as_object_mut().ok_or_else(|| anyhow::anyhow!("light request must be an object"))?;
+        fields.insert("token".into(), Value::String(token.to_owned()));
+    }
+    let result = tokio::task::spawn_blocking(move || {
+        harness.capability_registry().invoke_value_with_origin("camera_lights", args, InvocationOrigin::Http)
+    }).await.map_err(|_| anyhow::anyhow!("light request worker failed"))??;
+    Ok(Json(result))
+}
+
+async fn measure_camera_lighting(harness: Harness, jpeg: Bytes, started_ms: u64) {
+    let received_ms = camera_now_ms() as u64;
+    let _ = tokio::task::spawn_blocking(move || harness.observe_camera_lighting(&jpeg, started_ms, received_ms)).await;
+}
+
+fn camera_aim_descriptor(pose: Option<crate::types::CameraAimState>, authority: crate::head::HeadAuthorityStatus) -> Value {
     json!({
         "status": "available",
         "capability": "camera_aim",
         "endpoint": "/camera/aim",
         "aliases": ["/gimbal/aim"],
         "known": pose.is_some(),
+        "physical_pose_known": false,
+        "physical_feedback": "unknown",
+        "dedicated_authority": authority,
         "source": pose.as_ref().map(|state| state.source.as_str()).unwrap_or("unavailable"),
         "pose": pose,
         "range": {
             "pan_deg": [CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG],
             "tilt_deg": [CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG]
-        }
+        },
+        "limits": {"speed": [1, crate::head::MAX_SPEED], "accel": [1, crate::head::MAX_ACCEL]},
+        "defaults": {"speed": crate::head::DEFAULT_SPEED, "accel": crate::head::DEFAULT_ACCEL}
     })
 }
 
@@ -1189,28 +1227,42 @@ fn camera_stream_codec() -> CameraStreamCodec {
     }
 }
 
-async fn camera_snapshot() -> Result<Response, HttpError> {
+async fn camera_snapshot(State(harness): State<Harness>) -> Result<Response, HttpError> {
+    let capture_started_ms = camera_now_ms() as u64;
     let device = camera_device_path();
     if !Path::new(&device).exists() {
         camera_record_failure("snapshot", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("snapshot")?;
-
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let frame = crate::v4l2_camera::capture_mjpeg_frame(device)
+        let mut receiver = crate::v4l2_camera::subscribe(device, harness.clone())?;
+        let frame = crate::v4l2_camera::latest_frame(&mut receiver)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("capture-failed");
+                camera_record_failure("snapshot", "shared-capture-failed");
             })?;
-        let mut response = frame.into_response();
+        let mut response = frame.jpeg.clone().into_response();
         response
             .headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+        response.headers_mut().insert("cache-control", HeaderValue::from_static("no-store"));
+        for (name, value) in [
+            ("x-leash-camera-sequence", frame.sequence.to_string()),
+            ("x-leash-camera-dequeued-ms", frame.dequeued_ms.to_string()),
+            ("x-leash-camera-acquisition-started-ms", frame.acquisition_started_ms.to_string()),
+            ("x-leash-camera-driver-timestamp-us", frame.driver_timestamp_us.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into())),
+            ("x-leash-camera-driver-timestamp-flags", frame.driver_timestamp_flags.to_string()),
+        ] {
+            response.headers_mut().insert(name, HeaderValue::from_str(&value)
+                .map_err(|_| anyhow::anyhow!("invalid native camera metadata header"))?);
+        }
+        response.headers_mut().insert("x-leash-camera-timestamp-basis", HeaderValue::from_static(
+            if frame.driver_timestamp_flags & 0x00002000 != 0 { "v4l2-monotonic" } else { "dequeue-only-exposure-unknown" }));
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("snapshot")?;
     let plan = FfmpegV4l2CameraAdapter.capture_plan(&device, &camera_input_config());
     let mut child = TokioCommand::new(&plan.program)
         .args(&plan.args)
@@ -1264,7 +1316,9 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
         return Err(anyhow::anyhow!("ffmpeg camera capture failed: {stderr}").into());
     }
 
-    let mut response = Bytes::from(stdout).into_response();
+    let jpeg = Bytes::from(stdout);
+    measure_camera_lighting(harness, jpeg.clone(), capture_started_ms).await;
+    let mut response = jpeg.into_response();
     response.headers_mut().insert(
         CONTENT_TYPE,
         HeaderValue::from_str(&plan.content_type)
@@ -1273,42 +1327,34 @@ async fn camera_snapshot() -> Result<Response, HttpError> {
     Ok(response)
 }
 
-async fn camera_stream() -> Result<Response, HttpError> {
+async fn camera_stream(State(_harness): State<Harness>) -> Result<Response, HttpError> {
     let device = camera_device_path();
     if !Path::new(&device).exists() {
         camera_record_failure("mjpeg", "device-unavailable");
         return Err(anyhow::anyhow!("camera device {device} is not available").into());
     }
-    let camera_guard = camera_activity("mjpeg")?;
-
     #[cfg(all(feature = "v4l2-camera", target_os = "linux"))]
     if crate::v4l2_camera::enabled() {
-        let receiver = crate::v4l2_camera::start_mjpeg_stream(device)
+        let mut receiver = crate::v4l2_camera::subscribe(device, _harness)?;
+        let first = crate::v4l2_camera::latest_frame(&mut receiver)
             .await
             .inspect_err(|_| {
-                camera_guard.record_failure("stream-start-failed");
+                camera_record_failure("mjpeg", "shared-stream-start-failed");
             })?;
         let stream = stream::unfold(
-            (receiver, camera_guard),
-            |(mut receiver, camera_guard)| async move {
-                loop {
-                    if camera_guard.recovery_requested() {
+            (Some(first), receiver),
+            |(first, mut receiver)| async move {
+                let frame = if let Some(frame) = first { frame } else {
+                    if !matches!(time::timeout(Duration::from_secs(4), receiver.changed()).await, Ok(Ok(()))) {
                         return None;
                     }
-                    match time::timeout(Duration::from_millis(100), receiver.recv()).await {
-                        Err(_) => continue,
-                        Ok(Some(chunk)) => {
-                            return Some((
-                                Ok::<Bytes, Infallible>(chunk),
-                                (receiver, camera_guard),
-                            ));
-                        }
-                        Ok(None) => {
-                            camera_guard.record_failure("stream-ended");
-                            return None;
-                        }
+                    match crate::v4l2_camera::latest_frame(&mut receiver).await {
+                        Ok(frame) => frame,
+                        Err(_) => return None,
                     }
-                }
+                };
+                if !frame.fresh() { return None; }
+                Some((Ok::<Bytes, Infallible>(frame.multipart()), (None, receiver)))
             },
         );
         let mut response = Body::from_stream(stream).into_response();
@@ -1323,6 +1369,7 @@ async fn camera_stream() -> Result<Response, HttpError> {
         return Ok(response);
     }
 
+    let camera_guard = camera_activity("mjpeg")?;
     let plan =
         FfmpegV4l2CameraAdapter.stream_plan(&device, &camera_input_config(), camera_stream_codec());
     let mut command = TokioCommand::new(&plan.program);
@@ -3010,9 +3057,14 @@ async fn drive(
 
 async fn camera_aim(
     State(harness): State<Harness>,
-    Json(req): Json<CameraAimReq>,
+    headers: HeaderMap,
+    Json(mut req): Json<CameraAimReq>,
 ) -> Result<Json<Value>, HttpError> {
-    Ok(Json(
+    if let Some(header) = headers.get(AUTHORIZATION) {
+        req.token = Some(header.to_str().ok().and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|value| !value.is_empty()).ok_or_else(|| anyhow::anyhow!("invalid camera authorization header"))?.to_owned());
+    }
+    let result = tokio::task::spawn_blocking(move || {
         harness.capability_registry().invoke_value_with_origin(
             "camera_aim",
             json!({
@@ -3024,8 +3076,9 @@ async fn camera_aim(
                 "approval": req.approval,
             }),
             InvocationOrigin::Http,
-        )?,
-    ))
+        )
+    }).await.map_err(|_| anyhow::anyhow!("camera aim worker failed"))??;
+    Ok(Json(result))
 }
 
 async fn motors_stop(State(harness): State<Harness>) -> Result<Json<Value>, HttpError> {
@@ -3099,12 +3152,13 @@ async fn sse_cognition(
     State(harness): State<Harness>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let receiver = harness.subscribe_cognition();
-    let stream = stream::unfold(receiver, |mut receiver| async move {
+    let stream = stream::unfold((harness, receiver), |(harness, mut receiver)| async move {
         loop {
             match receiver.recv().await {
                 Ok(frame) => {
+                    let frame = harness.canonical_cognition_boundary(frame);
                     let data = serde_json::to_string(&frame).unwrap_or_else(|_| "{}".to_string());
-                    return Some((Ok(Event::default().event("cognition").data(data)), receiver));
+                    return Some((Ok(Event::default().event("cognition").data(data)), (harness, receiver)));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
@@ -3269,6 +3323,20 @@ mod tests {
     static LOCALIZATION_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static COMPUTE_ENV_LOCK: Mutex<()> = Mutex::const_new(());
     static NAVIGATION_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[tokio::test]
+    async fn lighting_http_status_is_read_only_and_invalid_authority_is_refused() {
+        let harness = Harness::new(HarnessConfig::default()).unwrap();
+        let status = super::camera_lights_status(State(harness.clone())).await.0;
+        assert!(!status.enabled);
+        assert!(!status.physical_state_known);
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Basic test-only"));
+        assert!(super::camera_lights(State(harness.clone()), headers,
+            Json(json!({"mode":"off"}))).await.is_err());
+        assert!(!harness.operator_token_status().active);
+        assert!(harness.camera_lights_status().events.is_empty());
+    }
 
     #[tokio::test]
     async fn navigation_http_goal_is_low_speed_idempotent_and_cancellable() {

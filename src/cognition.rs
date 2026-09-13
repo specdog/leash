@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use crate::{accelerator::AcceleratorStatus, config::AcceleratorBackend, types::TelemetryFrame};
 
 pub const COGNITION_CONTRACT_VERSION: &str = "leash.cognition.v1";
+pub const COGNITION_BOUNDARY_VERSION: &str = "qualia.cognition-boundary.v2";
 pub const COGNITION_STATE_VERSION: &str = "leash.cognition-state.v1";
 pub const COGNITION_STATE_DIM: usize = 1_024;
 pub const COGNITION_BOUNDARY_TIMEOUT_MS: u128 = 500;
@@ -73,6 +74,9 @@ pub struct CognitionBoundaryFrameV1 {
     pub source: String,
     pub destination: String,
     pub layer: u8,
+    /// Present on canonical inter-runtime frames; omitted from legacy status.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub producer_epoch: String,
     pub sequence: u64,
     pub precision: f32,
     pub state_digest: String,
@@ -224,6 +228,7 @@ struct CognitionState {
     top_down: Vec<f32>,
     top_down_precision: f32,
     top_down_expires_at_ms: u128,
+    top_down_identity: Option<(String, u64, u128, String)>,
     last_checkpoint_at_ms: u128,
     last_checkpoint: Option<CognitionCheckpointV1>,
 }
@@ -237,6 +242,7 @@ impl Default for CognitionState {
             top_down: vec![0.0; COGNITION_STATE_DIM],
             top_down_precision: 0.0,
             top_down_expires_at_ms: 0,
+            top_down_identity: None,
             last_checkpoint_at_ms: 0,
             last_checkpoint: None,
         }
@@ -249,6 +255,7 @@ pub struct CognitionRuntime {
     backend_status: Arc<Mutex<CognitionBackendStatusV1>>,
     compute_lock: Arc<Mutex<()>>,
     owner: Arc<str>,
+    producer_epoch: Arc<str>,
     checkpoint_dir: Arc<PathBuf>,
     boundary_tx: broadcast::Sender<CognitionBoundaryFrameV1>,
 }
@@ -282,6 +289,14 @@ impl CognitionRuntime {
             backend_status: Arc::new(Mutex::new(backend_status)),
             compute_lock: Arc::new(Mutex::new(())),
             owner: Arc::from(owner.trim()),
+            producer_epoch: Arc::from(format!(
+                "leash:{}:{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            )),
             checkpoint_dir: Arc::new(default_checkpoint_dir()),
             boundary_tx,
         };
@@ -491,6 +506,15 @@ impl CognitionRuntime {
         boundary_from_layer(layer, now_ms)
     }
 
+    /// Adapt the identical L2 latent contract for the Qualia inter-runtime wire.
+    /// The original timestamp, lifetime, sequence, precision and digest survive.
+    pub(crate) fn canonical_boundary(&self, mut frame: CognitionBoundaryFrameV1) -> CognitionBoundaryFrameV1 {
+        frame.schema_version = COGNITION_BOUNDARY_VERSION.to_string();
+        frame.destination = "qualia".to_string();
+        frame.producer_epoch = self.producer_epoch.to_string();
+        frame
+    }
+
     pub fn status(&self, now_ms: u128, zero_motion: bool) -> CognitionStatusV1 {
         let backend_status = self.backend_status.lock().clone();
         CognitionStatusV1 {
@@ -505,8 +529,28 @@ impl CognitionRuntime {
     }
 
     pub fn submit_boundary(&self, frame: CognitionBoundaryFrameV1, now_ms: u128) -> Result<()> {
-        validate_boundary(&frame, now_ms, "planner", "leash", 3)?;
+        let canonical = frame.schema_version == COGNITION_BOUNDARY_VERSION;
+        validate_boundary(&frame, now_ms, if canonical { "qualia" } else { "planner" }, "leash", 3)?;
         let mut state = self.state.lock();
+        if canonical {
+            if let Some((epoch, sequence, timestamp, digest)) = &state.top_down_identity {
+                if frame.producer_epoch == *epoch {
+                    if frame.sequence < *sequence {
+                        bail!("cognition boundary sequence rolled back within producer epoch");
+                    }
+                    if frame.sequence == *sequence {
+                        if frame.ts_ms == *timestamp && frame.state_digest == *digest {
+                            return Ok(());
+                        }
+                        bail!("cognition boundary reused a sequence with different evidence");
+                    }
+                } else if frame.ts_ms <= *timestamp {
+                    bail!("cognition boundary producer epoch changed without newer evidence");
+                }
+            }
+            state.top_down_identity = Some((frame.producer_epoch.clone(), frame.sequence,
+                frame.ts_ms, frame.state_digest.clone()));
+        }
         state.top_down.copy_from_slice(&frame.latent);
         state.top_down_precision = frame.precision;
         state.top_down_expires_at_ms = frame
@@ -797,6 +841,7 @@ fn runtime_state_from_checkpoint(
         top_down: checkpoint.top_down.clone(),
         top_down_precision: checkpoint.top_down_precision,
         top_down_expires_at_ms: checkpoint.top_down_expires_at_ms,
+        top_down_identity: None,
         last_checkpoint_at_ms: contract.created_at_ms,
         last_checkpoint: Some(contract.clone()),
     })
@@ -813,8 +858,14 @@ pub fn validate_boundary(
     expected_destination: &str,
     expected_layer: u8,
 ) -> Result<()> {
-    if frame.schema_version != COGNITION_CONTRACT_VERSION {
+    if frame.schema_version != COGNITION_CONTRACT_VERSION
+        && frame.schema_version != COGNITION_BOUNDARY_VERSION {
         bail!("unsupported cognition contract version");
+    }
+    if frame.schema_version == COGNITION_BOUNDARY_VERSION
+        && (frame.producer_epoch.trim().is_empty() || frame.producer_epoch.len() > 256
+            || frame.sequence == 0) {
+        bail!("canonical cognition boundary requires a bounded producer epoch and nonzero sequence");
     }
     if frame.source != expected_source || frame.destination != expected_destination {
         bail!("cognition boundary source or destination mismatch");
@@ -1006,6 +1057,7 @@ fn boundary_from_layer(layer: &LayerState, now_ms: u128) -> CognitionBoundaryFra
         source: "leash".to_string(),
         destination: "planner".to_string(),
         layer: 2,
+        producer_epoch: String::new(),
         sequence: layer.sequence,
         precision: layer.precision,
         state_digest: state_digest(&layer.activation),

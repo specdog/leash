@@ -21,7 +21,7 @@ use leash_runtime::{
     SupervisorEvent, SupervisorHandle, TransitionReceipt,
 };
 use leash_waveshare::{
-    AckOutcome, CommandAck, ControllerHandle, ControllerIoFactory, ControllerOwner, GimbalCommand,
+    AckOutcome, CommandAck, ControllerHandle, ControllerIoFactory, ControllerOwner, GimbalCommand, LightsCommand,
     OwnerConfig, SerialPortFactory, WaveshareActuationPort,
 };
 use parking_lot::Mutex;
@@ -204,15 +204,14 @@ impl WaveshareUgvDriver {
         Ok(receipt)
     }
 
-    fn wait_for_ack(&self, command_id: CommandId) -> Result<CommandAck> {
+    fn wait_for_ack(&self, command_id: CommandId) -> Result<()> {
         let deadline = Instant::now() + V2_COMMAND_TIMEOUT;
+        let mut safety_request = None;
         loop {
-            if let Some(SupervisorEvent::Acknowledged(ack)) =
-                self.supervisor.lock().take_event().map(|event| event.value)
-            {
-                if ack.command_id == command_id {
+            match self.supervisor.lock().take_event().map(|event| event.value) {
+                Some(SupervisorEvent::Acknowledged(ack)) if ack.command_id == command_id => {
                     if ack.outcome == AckOutcome::Applied {
-                        return Ok(ack);
+                        return Ok(());
                     }
                     return Err(anyhow!(
                         "runtime v2 Waveshare command was not applied: {:?}{}",
@@ -222,6 +221,32 @@ impl WaveshareUgvDriver {
                             .map(|detail| format!(": {detail}"))
                             .unwrap_or_default()
                     ));
+                }
+                Some(SupervisorEvent::SafetyRequested {
+                    kind,
+                    request_sequence,
+                    command_id: requested_command,
+                    ..
+                }) if requested_command == command_id => {
+                    // The supervisor routes a zero drive through its safety lane.
+                    // Match the command first, then await that exact safety request;
+                    // a healthy link or an unrelated stop receipt is insufficient.
+                    safety_request = Some((kind, request_sequence));
+                }
+                _ => {}
+            }
+            if let Some((kind, request_sequence)) = safety_request {
+                let status = self.controller_handle.status();
+                let receipt = match kind {
+                    SafetyKind::Stop => status.last_stop_receipt,
+                    SafetyKind::EStop => status.last_estop_receipt,
+                };
+                if receipt.is_some_and(|receipt| {
+                    receipt.verified_zero
+                        && receipt.first_request_sequence <= request_sequence
+                        && request_sequence <= receipt.through_request_sequence
+                }) {
+                    return Ok(());
                 }
             }
             if Instant::now() >= deadline {
@@ -277,6 +302,38 @@ fn runtime_v2_evidence_path() -> Result<PathBuf> {
 }
 
 impl RobotDriver for WaveshareUgvDriver {
+    fn aim_camera_with_receipt(&self, pan: f64, tilt: f64, speed: u32, accel: u32) -> Result<Option<crate::types::CameraAimReceipt>> {
+        let command = GimbalCommand::new(self.next_aux_command_id()?, pan, tilt, speed, accel)
+            .context("validate camera-only gimbal frame")?;
+        let acknowledgement = self.controller_handle.submit_gimbal(command)
+            .context("queue camera-only gimbal frame")?
+            .wait_timeout(V2_COMMAND_TIMEOUT).context("wait for camera-only serial write")?
+            .ok_or_else(|| anyhow!("camera serial-write acknowledgement timed out; physical pose unknown"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!("camera serial write refused: {:?}; physical pose unknown", acknowledgement.outcome));
+        }
+        Ok(Some(crate::types::CameraAimReceipt {
+            controller_sequence: acknowledgement.applied_sequence.ok_or_else(|| anyhow!("camera serial write omitted its sequence"))?,
+            write_completed_at_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),
+            physical_feedback: "unknown".to_string(),
+        }))
+    }
+
+    fn set_lights(&self, chassis_pwm: u8, camera_pwm: u8) -> Result<crate::lighting::LightWriteReceipt> {
+        let acknowledgement = self.controller_handle.submit_lights(LightsCommand {
+            id: self.next_aux_command_id()?, chassis_pwm, camera_pwm,
+        }).context("queue Waveshare light-only command")?
+            .wait_timeout(V2_COMMAND_TIMEOUT).context("wait for Waveshare light write")?
+            .ok_or_else(|| anyhow!("Waveshare light serial-write acknowledgement timed out; lamp state unknown"))?;
+        if acknowledgement.outcome != AckOutcome::Applied {
+            return Err(anyhow!("Waveshare light write failed: {:?}; lamp state unknown", acknowledgement.outcome));
+        }
+        Ok(crate::lighting::LightWriteReceipt {
+            controller_sequence: acknowledgement.applied_sequence.ok_or_else(|| anyhow!("Waveshare light write omitted its sequence"))?,
+            write_completed_at_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+        })
+    }
+
     fn runtime_v2_status(&self) -> Option<Value> {
         let owner = self.controller_handle.status();
         let supervisor = self.supervisor_handle.status();
@@ -523,27 +580,7 @@ impl MobileBaseAdapter for WaveshareUgvDriver {
 
 impl GimbalAdapter for WaveshareUgvDriver {
     fn aim_camera(&self, pan_deg: f64, tilt_deg: f64, speed: u32, accel: u32) -> Result<()> {
-        let command = GimbalCommand {
-            id: self.next_aux_command_id()?,
-            pan_degrees: pan_deg,
-            tilt_degrees: tilt_deg,
-            speed,
-            acceleration: accel,
-        };
-        let acknowledgement = self
-            .controller_handle
-            .submit_gimbal(command)
-            .context("queue runtime v2 Waveshare gimbal command")?
-            .wait_timeout(V2_COMMAND_TIMEOUT)
-            .context("wait for runtime v2 Waveshare gimbal command")?
-            .ok_or_else(|| anyhow!("runtime v2 Waveshare gimbal command timed out"))?;
-        if acknowledgement.outcome != AckOutcome::Applied {
-            return Err(anyhow!(
-                "runtime v2 Waveshare gimbal command was not applied: {:?}",
-                acknowledgement.outcome
-            ));
-        }
-        Ok(())
+        self.aim_camera_with_receipt(pan_deg, tilt_deg, speed, accel).map(|_| ())
     }
 }
 
@@ -631,6 +668,32 @@ impl WaveshareSensorConfig {
         self.lidar
             .as_ref()
             .map(|config| config.collision_threshold_m)
+    }
+
+    pub(crate) fn clearance_status(&self, status: RangeScanStatus, now_ms: u128) -> Value {
+        let Some(config) = &self.lidar else {
+            return json!({"available": false, "reason": "lidar-not-configured"});
+        };
+        let status = with_freshness(status, now_ms, config.stale_after_ms);
+        json!({
+            "schema": "leash.motor-clearance.v1",
+            "available": true, "observed_at_ms": now_ms,
+            "scan_status": status.status, "scan_ts_ms": status.last_ms,
+            "scan_age_ms": status.last_ms.map(|at| now_ms.saturating_sub(at)),
+            "scan_fresh": status.status == SensorDataStatus::Available,
+            "sample_present": status.sample.is_some(), "stale_after_ms": config.stale_after_ms,
+            "threshold_m": config.collision_threshold_m, "frame_id": config.frame_id,
+            "orientation": {
+                "logical_body_axes": "+X forward, +Y left, +Z up",
+                "yaw_offset_deg": config.yaw_offset_deg, "clockwise": config.clockwise,
+                "body_masks_deg": config.body_masks.iter().map(|mask| [mask.start_deg, mask.end_deg]).collect::<Vec<_>>(),
+                "mount_calibration": "not-verified-by-this-endpoint"
+            },
+            "geometry_model": "120-degree travel sectors; all-around in-place rotation",
+            "forward": clearance_sector(&status, config.collision_threshold_m, 1.0, 1.0),
+            "reverse": clearance_sector(&status, config.collision_threshold_m, -1.0, -1.0),
+            "rotation": clearance_sector(&status, config.collision_threshold_m, -1.0, 1.0)
+        })
     }
 }
 
@@ -1473,6 +1536,55 @@ fn wrapped_angle_delta(left: f64, right: f64) -> f64 {
         delta += std::f64::consts::TAU;
     }
     delta
+}
+
+/// Read-only explanation of the existing gate, including unknown scan bins.
+fn clearance_sector(status: &RangeScanStatus, threshold_m: f64, left: f64, right: f64) -> Value {
+    let linear = (left + right) * 0.5;
+    let center = if linear >= 0.0 {
+        0.0
+    } else {
+        std::f64::consts::PI
+    };
+    let mut considered = 0usize;
+    let mut valid = 0usize;
+    let mut nearest: Option<f64> = None;
+    let mut nearest_bearing: Option<f64> = None;
+    let mut angular_fallback = false;
+    if let Some(scan) = &status.sample {
+        angular_fallback = !scan.angle_min_rad.is_finite() || !scan.angle_increment_rad.is_finite();
+        for (index, range) in scan.ranges_m.iter().enumerate() {
+            let bearing = scan.angle_min_rad + index as f64 * scan.angle_increment_rad;
+            let in_sector = linear.abs() <= f64::EPSILON
+                || angular_fallback
+                || wrapped_angle_delta(bearing, center).abs()
+                    <= std::f64::consts::FRAC_PI_3;
+            if !in_sector {
+                continue;
+            }
+            considered += 1;
+            if let Some(range) = range {
+                valid += 1;
+                if nearest.is_none_or(|current| *range < current) {
+                    nearest = Some(*range);
+                    nearest_bearing = bearing.is_finite().then(|| bearing.to_degrees());
+                }
+            }
+        }
+    }
+    let collision_blocked = scan_blocks_drive(status, threshold_m, left, right);
+    let fresh = status.status == SensorDataStatus::Available;
+    json!({
+        "blocked": !fresh || collision_blocked, "collision_blocked": collision_blocked,
+        "reason": if !fresh { Some("scan-not-fresh") } else if collision_blocked { Some("close-return-in-sector") } else { None },
+        "closest_observed_m": nearest, "closest_observed_deg": nearest_bearing,
+        "considered_bins": considered,
+        "valid_bins": valid, "unknown_bins": considered - valid,
+        "angular_fallback": angular_fallback,
+        "sector_center_deg": center.to_degrees(),
+        "sector_half_width_deg": if linear.abs() <= f64::EPSILON || angular_fallback { 180.0 } else { 60.0 },
+        "logical_command": {"left": left, "right": right}
+    })
 }
 
 fn sensor_error_status<T>(status: SensorDataStatus, source: &str, error: impl Into<String>) -> T

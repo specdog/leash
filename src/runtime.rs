@@ -131,6 +131,15 @@ impl PatrolState {
 }
 
 pub(crate) trait RobotDriver: MobileBaseAdapter + GimbalAdapter {
+    fn aim_camera_with_receipt(&self, pan: f64, tilt: f64, speed: u32, accel: u32) -> Result<Option<crate::types::CameraAimReceipt>> {
+        self.aim_camera(pan, tilt, speed, accel)?;
+        Ok(None)
+    }
+
+    fn set_lights(&self, _chassis_pwm: u8, _camera_pwm: u8) -> Result<crate::lighting::LightWriteReceipt> {
+        Err(anyhow!("camera lighting is unavailable for this adapter"))
+    }
+
     #[cfg(feature = "waveshare-ugv")]
     fn telemetry_reader(&self) -> Result<Option<Box<dyn serialport::SerialPort>>> {
         Ok(None)
@@ -576,6 +585,8 @@ pub struct Harness {
     config: HarnessConfig,
     started_at: Instant,
     driver: Arc<dyn RobotDriver>,
+    lights: Arc<Mutex<crate::lighting::Lighting>>,
+    head: Arc<Mutex<crate::head::HeadAuthority>>,
     command_io: Arc<Mutex<CommandIoState>>,
     command: Arc<Mutex<CommandState>>,
     action_evidence: Arc<Mutex<ActionEvidenceState>>,
@@ -631,6 +642,14 @@ impl Harness {
         driver_override: Option<Arc<dyn RobotDriver>>,
     ) -> Result<Self> {
         config.validate()?;
+        let lights = crate::lighting::Lighting::from_env(
+            config.profile == Profile::WaveshareUgv && config.allow_physical_actuation
+                && !matches!(config.policy_mode, crate::config::PolicyMode::Deny | crate::config::PolicyMode::DryRun),
+        )?;
+        let head = crate::head::HeadAuthority::from_env(
+            config.profile == Profile::WaveshareUgv && config.allow_physical_actuation
+                && !matches!(config.policy_mode, crate::config::PolicyMode::Deny | crate::config::PolicyMode::DryRun),
+        )?;
         let accelerator = resolve_accelerator(config.accelerator, config.require_accelerator)?;
         #[cfg(feature = "waveshare-ugv")]
         let waveshare_sensors = (config.profile == Profile::WaveshareUgv)
@@ -715,6 +734,8 @@ impl Harness {
             config,
             started_at: Instant::now(),
             driver,
+            lights: Arc::new(Mutex::new(lights)),
+            head: Arc::new(Mutex::new(head)),
             command_io: Arc::new(Mutex::new(CommandIoState::default())),
             command: Arc::new(Mutex::new(CommandState::default())),
             action_evidence: Arc::new(Mutex::new(ActionEvidenceState::new(
@@ -845,6 +866,10 @@ impl Harness {
 
     pub fn subscribe_cognition(&self) -> broadcast::Receiver<CognitionBoundaryFrameV1> {
         self.cognition.subscribe()
+    }
+
+    pub(crate) fn canonical_cognition_boundary(&self, frame: CognitionBoundaryFrameV1) -> CognitionBoundaryFrameV1 {
+        self.cognition.canonical_boundary(frame)
     }
 
     pub fn update_range_scan_status(&self, status: RangeScanStatus) -> Result<()> {
@@ -2520,7 +2545,12 @@ impl Harness {
         speed: Option<u32>,
         accel: Option<u32>,
     ) -> Result<CameraAimOutcome> {
-        self.validate_session(token)?;
+        let mut head = self.head.lock();
+        let authority = if head.accepts(token) { "camera-only-bearer" } else {
+            let session = self.validate_session(token)?;
+            if !self.config.profile.is_physical() { "simulation" }
+            else if session.is_some() { "pilot-session" } else { "legacy-untokened" }
+        };
         {
             let command = self.command.lock();
             if command.estop {
@@ -2530,11 +2560,25 @@ impl Harness {
             }
         }
 
-        let pan_deg = clamp(pan_deg, CAMERA_PAN_MIN_DEG, CAMERA_PAN_MAX_DEG);
-        let tilt_deg = clamp(tilt_deg, CAMERA_TILT_MIN_DEG, CAMERA_TILT_MAX_DEG);
-        let speed = speed.unwrap_or(0);
-        let accel = accel.unwrap_or(0);
-        self.driver.aim_camera(pan_deg, tilt_deg, speed, accel)?;
+        if !pan_deg.is_finite() || !(CAMERA_PAN_MIN_DEG..=CAMERA_PAN_MAX_DEG).contains(&pan_deg)
+            || !tilt_deg.is_finite() || !(CAMERA_TILT_MIN_DEG..=CAMERA_TILT_MAX_DEG).contains(&tilt_deg) {
+            return Err(anyhow!("camera aim requires finite pan -180..180 and tilt -30..90 degrees"));
+        }
+        let speed = speed.unwrap_or(crate::head::DEFAULT_SPEED);
+        let accel = accel.unwrap_or(crate::head::DEFAULT_ACCEL);
+        if !(1..=crate::head::MAX_SPEED).contains(&speed) || !(1..=crate::head::MAX_ACCEL).contains(&accel) {
+            return Err(anyhow!("camera aim requires speed 1..40 and accel 1..20"));
+        }
+        head.begin_attempt(now_ms())?;
+        let serial_receipt = match self.driver.aim_camera_with_receipt(pan_deg, tilt_deg, speed, accel) {
+            Ok(receipt) => receipt,
+            Err(error) => { head.failed(&error); return Err(error); }
+        };
+        if authority == "camera-only-bearer" && serial_receipt.is_none() {
+            let error = anyhow!("camera-only command has no serial-write receipt; physical pose unknown");
+            head.failed(&error);
+            return Err(error);
+        }
         self.command.lock().camera_aim = Some(CameraAimState {
             pan_deg,
             tilt_deg,
@@ -2542,6 +2586,7 @@ impl Harness {
             accel,
             updated_at_ms: now_ms(),
             source: "last-commanded".to_string(),
+            serial_receipt: serial_receipt.clone(),
         });
         Ok(CameraAimOutcome {
             ok: true,
@@ -2549,11 +2594,62 @@ impl Harness {
             tilt_deg,
             speed,
             accel,
+            authority: authority.to_string(),
+            serial_receipt,
         })
     }
 
     pub fn camera_aim_state(&self) -> Option<CameraAimState> {
         self.command.lock().camera_aim.clone()
+    }
+
+    pub fn motor_clearance_status(&self) -> Value {
+        #[cfg(feature = "waveshare-ugv")]
+        if self.config.profile == Profile::WaveshareUgv {
+            if let Some(config) = &self.waveshare_sensors {
+                let mut status = config.clearance_status(self.raw.read().range_scan.clone(), now_ms());
+                if let Some(fields) = status.as_object_mut() {
+                    fields.insert("grants_motion_authority".into(), json!(false));
+                    fields.insert("gate_scope".into(), json!("lidar collision and freshness only"));
+                    fields.insert("wire_mapping".into(), json!({
+                        "drive_invert": self.config.drive_invert, "drive_swap": self.config.drive_swap,
+                        "applied_after_collision_check": true
+                    }));
+                }
+                return status;
+            }
+        }
+        json!({"available": false, "grants_motion_authority": false, "reason": "profile-has-no-lidar-clearance"})
+    }
+
+    pub fn camera_aim_authority_status(&self) -> crate::head::HeadAuthorityStatus {
+        self.head.lock().status()
+    }
+
+    pub fn camera_lights_status(&self) -> crate::lighting::LightStatus {
+        self.lights.lock().status()
+    }
+
+    pub fn camera_lights(&self, request: crate::lighting::LightRequest) -> Result<crate::lighting::LightStatus> {
+        self.lights.lock().configure(request, now_ms() as u64, |chassis, camera| self.driver.set_lights(chassis, camera))
+    }
+
+    /// Feed only JPEG bytes captured by this service's existing camera owner.
+    /// Measurement and optional light writes never fail the camera response.
+    #[cfg(feature = "http")]
+    pub(crate) fn observe_camera_lighting(&self, jpeg: &[u8], started_ms: u64, received_ms: u64) {
+        if !self.lights.lock().begin_measurement(now_ms() as u64) { return; }
+        let sample = crate::lighting::measure_jpeg(jpeg, started_ms, received_ms);
+        let mut lights = self.lights.lock();
+        lights.end_measurement();
+        match sample {
+            Ok(sample) => {
+                if let Err(error) = lights.observe(sample, now_ms() as u64, |chassis, camera| self.driver.set_lights(chassis, camera)) {
+                    warn!(error = %error, "automatic camera light write failed");
+                }
+            }
+            Err(_) => lights.acquisition_failed("camera JPEG luminance measurement failed".into()),
+        }
     }
 
     pub fn stop(&self) -> Result<DriveOutcome> {
