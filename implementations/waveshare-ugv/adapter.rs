@@ -204,15 +204,14 @@ impl WaveshareUgvDriver {
         Ok(receipt)
     }
 
-    fn wait_for_ack(&self, command_id: CommandId) -> Result<CommandAck> {
+    fn wait_for_ack(&self, command_id: CommandId) -> Result<()> {
         let deadline = Instant::now() + V2_COMMAND_TIMEOUT;
+        let mut safety_request = None;
         loop {
-            if let Some(SupervisorEvent::Acknowledged(ack)) =
-                self.supervisor.lock().take_event().map(|event| event.value)
-            {
-                if ack.command_id == command_id {
+            match self.supervisor.lock().take_event().map(|event| event.value) {
+                Some(SupervisorEvent::Acknowledged(ack)) if ack.command_id == command_id => {
                     if ack.outcome == AckOutcome::Applied {
-                        return Ok(ack);
+                        return Ok(());
                     }
                     return Err(anyhow!(
                         "runtime v2 Waveshare command was not applied: {:?}{}",
@@ -222,6 +221,32 @@ impl WaveshareUgvDriver {
                             .map(|detail| format!(": {detail}"))
                             .unwrap_or_default()
                     ));
+                }
+                Some(SupervisorEvent::SafetyRequested {
+                    kind,
+                    request_sequence,
+                    command_id: requested_command,
+                    ..
+                }) if requested_command == command_id => {
+                    // The supervisor routes a zero drive through its safety lane.
+                    // Match the command first, then await that exact safety request;
+                    // a healthy link or an unrelated stop receipt is insufficient.
+                    safety_request = Some((kind, request_sequence));
+                }
+                _ => {}
+            }
+            if let Some((kind, request_sequence)) = safety_request {
+                let status = self.controller_handle.status();
+                let receipt = match kind {
+                    SafetyKind::Stop => status.last_stop_receipt,
+                    SafetyKind::EStop => status.last_estop_receipt,
+                };
+                if receipt.is_some_and(|receipt| {
+                    receipt.verified_zero
+                        && receipt.first_request_sequence <= request_sequence
+                        && request_sequence <= receipt.through_request_sequence
+                }) {
+                    return Ok(());
                 }
             }
             if Instant::now() >= deadline {
