@@ -2603,6 +2603,25 @@ impl Harness {
         self.command.lock().camera_aim.clone()
     }
 
+    pub fn motor_clearance_status(&self) -> Value {
+        #[cfg(feature = "waveshare-ugv")]
+        if self.config.profile == Profile::WaveshareUgv {
+            if let Some(config) = &self.waveshare_sensors {
+                let mut status = config.clearance_status(self.raw.read().range_scan.clone(), now_ms());
+                if let Some(fields) = status.as_object_mut() {
+                    fields.insert("grants_motion_authority".into(), json!(false));
+                    fields.insert("gate_scope".into(), json!("lidar collision and freshness only"));
+                    fields.insert("wire_mapping".into(), json!({
+                        "drive_invert": self.config.drive_invert, "drive_swap": self.config.drive_swap,
+                        "applied_after_collision_check": true
+                    }));
+                }
+                return status;
+            }
+        }
+        json!({"available": false, "grants_motion_authority": false, "reason": "profile-has-no-lidar-clearance"})
+    }
+
     pub fn camera_aim_authority_status(&self) -> crate::head::HeadAuthorityStatus {
         self.head.lock().status()
     }

@@ -397,6 +397,7 @@ pub fn router(harness: Harness) -> Router {
         .route("/modules", get(modules))
         .route("/telemetry", get(telemetry))
         .route("/action-evidence", get(action_evidence))
+        .route("/motors/clearance", get(motor_clearance_status))
         .route("/evidence/action/applied", get(action_evidence))
         .route("/telemetry/compact", get(compact_telemetry))
         .route("/telemetry/spatial-inputs", get(spatial_inputs))
@@ -1094,6 +1095,10 @@ async fn camera_aim_status(State(harness): State<Harness>) -> Json<Value> {
         "ok": true,
         "gimbal": camera_aim_descriptor(harness.camera_aim_state(), harness.camera_aim_authority_status())
     }))
+}
+
+async fn motor_clearance_status(State(harness): State<Harness>) -> Json<Value> {
+    Json(harness.motor_clearance_status())
 }
 
 async fn camera_lights_status(State(harness): State<Harness>) -> Json<crate::lighting::LightStatus> {

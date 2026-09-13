@@ -669,6 +669,32 @@ impl WaveshareSensorConfig {
             .as_ref()
             .map(|config| config.collision_threshold_m)
     }
+
+    pub(crate) fn clearance_status(&self, status: RangeScanStatus, now_ms: u128) -> Value {
+        let Some(config) = &self.lidar else {
+            return json!({"available": false, "reason": "lidar-not-configured"});
+        };
+        let status = with_freshness(status, now_ms, config.stale_after_ms);
+        json!({
+            "schema": "leash.motor-clearance.v1",
+            "available": true, "observed_at_ms": now_ms,
+            "scan_status": status.status, "scan_ts_ms": status.last_ms,
+            "scan_age_ms": status.last_ms.map(|at| now_ms.saturating_sub(at)),
+            "scan_fresh": status.status == SensorDataStatus::Available,
+            "sample_present": status.sample.is_some(), "stale_after_ms": config.stale_after_ms,
+            "threshold_m": config.collision_threshold_m, "frame_id": config.frame_id,
+            "orientation": {
+                "logical_body_axes": "+X forward, +Y left, +Z up",
+                "yaw_offset_deg": config.yaw_offset_deg, "clockwise": config.clockwise,
+                "body_masks_deg": config.body_masks.iter().map(|mask| [mask.start_deg, mask.end_deg]).collect::<Vec<_>>(),
+                "mount_calibration": "not-verified-by-this-endpoint"
+            },
+            "geometry_model": "120-degree travel sectors; all-around in-place rotation",
+            "forward": clearance_sector(&status, config.collision_threshold_m, 1.0, 1.0),
+            "reverse": clearance_sector(&status, config.collision_threshold_m, -1.0, -1.0),
+            "rotation": clearance_sector(&status, config.collision_threshold_m, -1.0, 1.0)
+        })
+    }
 }
 
 fn text(lookup: &mut impl FnMut(&str) -> Option<String>, key: &str, default: &str) -> String {
@@ -1510,6 +1536,55 @@ fn wrapped_angle_delta(left: f64, right: f64) -> f64 {
         delta += std::f64::consts::TAU;
     }
     delta
+}
+
+/// Read-only explanation of the existing gate, including unknown scan bins.
+fn clearance_sector(status: &RangeScanStatus, threshold_m: f64, left: f64, right: f64) -> Value {
+    let linear = (left + right) * 0.5;
+    let center = if linear >= 0.0 {
+        0.0
+    } else {
+        std::f64::consts::PI
+    };
+    let mut considered = 0usize;
+    let mut valid = 0usize;
+    let mut nearest: Option<f64> = None;
+    let mut nearest_bearing: Option<f64> = None;
+    let mut angular_fallback = false;
+    if let Some(scan) = &status.sample {
+        angular_fallback = !scan.angle_min_rad.is_finite() || !scan.angle_increment_rad.is_finite();
+        for (index, range) in scan.ranges_m.iter().enumerate() {
+            let bearing = scan.angle_min_rad + index as f64 * scan.angle_increment_rad;
+            let in_sector = linear.abs() <= f64::EPSILON
+                || angular_fallback
+                || wrapped_angle_delta(bearing, center).abs()
+                    <= std::f64::consts::FRAC_PI_3;
+            if !in_sector {
+                continue;
+            }
+            considered += 1;
+            if let Some(range) = range {
+                valid += 1;
+                if nearest.is_none_or(|current| *range < current) {
+                    nearest = Some(*range);
+                    nearest_bearing = bearing.is_finite().then(|| bearing.to_degrees());
+                }
+            }
+        }
+    }
+    let collision_blocked = scan_blocks_drive(status, threshold_m, left, right);
+    let fresh = status.status == SensorDataStatus::Available;
+    json!({
+        "blocked": !fresh || collision_blocked, "collision_blocked": collision_blocked,
+        "reason": if !fresh { Some("scan-not-fresh") } else if collision_blocked { Some("close-return-in-sector") } else { None },
+        "closest_observed_m": nearest, "closest_observed_deg": nearest_bearing,
+        "considered_bins": considered,
+        "valid_bins": valid, "unknown_bins": considered - valid,
+        "angular_fallback": angular_fallback,
+        "sector_center_deg": center.to_degrees(),
+        "sector_half_width_deg": if linear.abs() <= f64::EPSILON || angular_fallback { 180.0 } else { 60.0 },
+        "logical_command": {"left": left, "right": right}
+    })
 }
 
 fn sensor_error_status<T>(status: SensorDataStatus, source: &str, error: impl Into<String>) -> T
