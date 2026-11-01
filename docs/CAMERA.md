@@ -1,9 +1,18 @@
 # Camera Capture And Streaming
 
-Leash gives snapshots, MJPEG, native V4L2 capture, and WebRTC one camera
-ownership boundary. Only one capture or stream may own the device at a time.
-Concurrent callers receive `camera is busy` instead of opening a second encoder
-or racing the active stream.
+Native V4L2 snapshots and MJPEG streams share one persistent camera owner. The
+first request starts capture; subsequent callers consume the latest actual JPEG
+through a watch channel. A slow stream skips frames without blocking capture.
+FFmpeg and WebRTC retain exclusive device ownership and cannot open a second
+device owner while native capture is active.
+
+Frames must be at most 500 ms old. When V4L2 supplies a monotonic timestamp, this
+bound includes time spent in the driver queue. Otherwise it bounds time since
+dequeue, and the snapshot explicitly reports `dequeue-only-exposure-unknown` in
+`X-Leash-Camera-Timestamp-Basis`. Snapshot headers also expose the unchanged
+driver sequence, timestamp in microseconds, timestamp flags, acquisition-start
+time and dequeue time. Requests never replace those times with a cache-hit time.
+The native worker drains the device continuously and owns no client output queue.
 
 ## Build
 
@@ -74,12 +83,53 @@ curl -s -X POST http://127.0.0.1:8000/camera/stream/recover
 ```
 
 `GET /camera/stream/health` (also `/camera/health`) reports device availability,
-the active owner (`snapshot`, `mjpeg`, or `webrtc`), start time, recovery
+the active owner (`v4l2-shared`, `snapshot`, `mjpeg`, or `webrtc`), start time, recovery
 generation/count, and the last 16 sanitized failure reasons. `/camera/status`
 includes the same object as `stream_health`.
 
-`POST /camera/stream/recover` advances the recovery generation. An active MJPEG
-or WebRTC stream observes the new generation, stops its capture process, releases
-the single-owner guard, and can then be reconnected by the operator. Recovery is
+`POST /camera/stream/recover` advances the recovery generation. The native owner,
+active FFmpeg MJPEG stream, or WebRTC stream observes the new generation, closes
+capture, and releases the owner guard. Native capture is restarted by the next
+snapshot or stream subscription after the old owner exits. Recovery is
 safe to call while idle; it does not touch motors, serial ownership, or actuation
 policy.
+
+## Camera-only gimbal authority
+
+`POST /camera/aim` (alias `/gimbal/aim`) accepts a camera-only bearer when
+`LEASH_ALLOW_CAMERA_AIM=1` is enabled on the existing Waveshare physical profile
+with its existing physical-actuation permission and policy gates. The bearer is
+read at startup from `LEASH_CAMERA_AIM_AUTH_TOKEN_FILE`, falling back to
+`LEASH_OPERATOR_AUTH_TOKEN_FILE`; no credential is included in status or logs.
+This path never creates or refreshes a pilot lease and never emits a wheel frame.
+Existing valid pilot-token callers remain supported. The camera bearer does not
+grant wheel authority or alter any wheel gate.
+
+Supply HTTP `Authorization: Bearer` privately, with a JSON body containing
+`pan_deg` and `tilt_deg`, optional `speed` and `accel`, and `approval` if required
+by the existing policy. MCP uses `invoke_capability` with
+`capability: camera_aim` and the same fields, supplying its authority as `token`.
+Pan must be finite and within -180..180 degrees; tilt within -30..90. Requests
+outside those bounds are rejected instead of clamped. Speed defaults to 8 and
+must be 1..40; acceleration defaults to 4 and must be 1..20, in the controller's
+units. Requests are serialized and must start at least 250 ms apart. These are
+bounded operating settings, not measurements of actual gimbal velocity.
+
+The only frame is the existing T133 command with `X`, `Y`, `SPD`, and `ACC`,
+queued through the existing single serial owner. The runtime estop check and
+the owner's estop latch both refuse camera commands while latched, including
+commands already queued when the owner observes the latch.
+
+Success retains `ok`, `pan_deg`, `tilt_deg`, `speed`, and `accel`, and adds
+`authority` (`camera-only-bearer` on this path) plus `serial_receipt` containing
+`controller_sequence`, `write_completed_at_ms`, and `physical_feedback: unknown`.
+It means the owner completed a serial write/flush, not that the requested physical
+pose was verified. No head command occurs merely by enabling this authority.
+
+`GET /camera/aim` retains the `gimbal` object. `gimbal.pose` remains null until a
+successful command; afterward it explicitly reports `source: last-commanded`
+and its write receipt. `gimbal.physical_pose_known` remains false. The new
+`gimbal.dedicated_authority` reports `enabled`, `token_configured`,
+`grants_wheel_authority: false`, request interval, last attempt time, and last
+write error. The limits/defaults are also published separately. A UI must not
+turn an unknown physical pose into an assumed centered gimbal.

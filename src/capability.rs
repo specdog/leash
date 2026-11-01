@@ -18,6 +18,8 @@ pub enum SafetyClass {
     SimControl,
     PhysicalStop,
     PhysicalMotion,
+    PhysicalHead,
+    PhysicalLight,
     PhysicalHighRisk,
 }
 
@@ -28,6 +30,8 @@ impl SafetyClass {
             Self::SimControl => "sim-control",
             Self::PhysicalStop => "physical-stop",
             Self::PhysicalMotion => "physical-motion",
+            Self::PhysicalHead => "physical-head",
+            Self::PhysicalLight => "physical-light",
             Self::PhysicalHighRisk => "physical-high-risk",
         }
     }
@@ -35,12 +39,12 @@ impl SafetyClass {
     fn is_physical_action(self) -> bool {
         matches!(
             self,
-            Self::PhysicalStop | Self::PhysicalMotion | Self::PhysicalHighRisk
+            Self::PhysicalStop | Self::PhysicalMotion | Self::PhysicalHead | Self::PhysicalLight | Self::PhysicalHighRisk
         )
     }
 
     fn is_policy_gated(self) -> bool {
-        matches!(self, Self::PhysicalMotion | Self::PhysicalHighRisk)
+        matches!(self, Self::PhysicalMotion | Self::PhysicalHead | Self::PhysicalLight | Self::PhysicalHighRisk)
     }
 }
 
@@ -247,6 +251,14 @@ impl CapabilityRegistry {
                     accel,
                 )?)
                 .map_err(Into::into)
+            }
+            "camera_lights_status" => {
+                ensure_fields(&args, &[])?;
+                serde_json::to_value(self.harness.camera_lights_status()).map_err(Into::into)
+            }
+            "camera_lights" => {
+                let request: crate::lighting::LightRequest = serde_json::from_value(Value::Object(args))?;
+                serde_json::to_value(self.harness.camera_lights(request)?).map_err(Into::into)
             }
             "speed_mode" => {
                 ensure_fields(&args, &["token", "speed_mode"])?;
@@ -737,8 +749,8 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
         ),
         descriptor(
             "camera_aim",
-            "Aim the camera gimbal in pan and tilt degrees through policy gates",
-            SafetyClass::PhysicalMotion,
+            "Aim only the camera gimbal using camera bearer or existing pilot authority; receipt is serial write, physical pose unknown",
+            SafetyClass::PhysicalHead,
             object_schema(&[
                 ("token", "string", false),
                 ("pan_deg", "number", true),
@@ -748,6 +760,29 @@ pub fn default_capability_descriptors() -> Vec<CapabilityDescriptor> {
                 ("approval", "boolean", false),
             ]),
             "CameraAimOutcome",
+        ),
+        descriptor(
+            "camera_lights_status",
+            "Read requested light PWM, serial receipts and camera luminance evidence; lamp feedback is unknown",
+            SafetyClass::ObserveOnly,
+            object_schema(&[]),
+            "LightStatus",
+        ),
+        descriptor(
+            "camera_lights",
+            "Control only chassis/camera LEDs or arm sustained-darkness auto-on; separate operator light authority required",
+            SafetyClass::PhysicalLight,
+            json!({
+                "type": "object", "additionalProperties": false,
+                "properties": {
+                    "mode": {"type": "string", "enum": ["auto", "manual", "off"]},
+                    "camera_pwm": {"type": "integer", "minimum": 0, "maximum": 255},
+                    "chassis_pwm": {"type": "integer", "minimum": 0, "maximum": 255},
+                    "token": {"type": "string"}, "approval": {"type": "boolean"}
+                },
+                "required": ["mode", "token"]
+            }),
+            "LightStatus",
         ),
         descriptor(
             "speed_mode",
@@ -1404,10 +1439,29 @@ mod tests {
             SafetyClass::SimControl,
             SafetyClass::PhysicalStop,
             SafetyClass::PhysicalMotion,
+            SafetyClass::PhysicalLight,
             SafetyClass::PhysicalHighRisk,
         ] {
             assert!(classes.contains(&safety), "missing {safety:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn lighting_status_is_read_only_and_deny_policy_refuses_light_control() {
+        let harness = Harness::new(HarnessConfig {
+            policy_mode: PolicyMode::Deny,
+            ..HarnessConfig::default()
+        }).unwrap();
+        let registry = harness.capability_registry();
+        let status = registry.invoke_value("camera_lights_status", json!({})).unwrap();
+        assert_eq!(status["physical_state_known"], false);
+        assert_eq!(status["physical_feedback"], "unknown");
+        assert_eq!(status["enabled"], false);
+        assert!(registry.invoke_value("camera_lights", json!({
+            "mode": "manual", "camera_pwm": 180, "token": "test-only"
+        })).unwrap_err().to_string().contains("policy deny"));
+        assert!(!status.to_string().contains("test-only"));
+        assert!(!harness.operator_token_status().active);
     }
 
     #[cfg(feature = "physical-navigation")]

@@ -17,9 +17,11 @@ pub mod config;
 mod cuda_voxel;
 pub mod daemon;
 pub mod gateway;
+pub mod head;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod localization;
+pub mod lighting;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 #[cfg(feature = "mcp")]

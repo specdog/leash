@@ -172,6 +172,14 @@ pub struct GimbalCommand {
     pub acceleration: u32,
 }
 
+/// Auxiliary PWM outputs; u8 keeps each published T132 field in 0..=255.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LightsCommand {
+    pub id: CommandId,
+    pub chassis_pwm: u8,
+    pub camera_pwm: u8,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GimbalError {
     NonFinite,
@@ -378,6 +386,10 @@ enum ControllerCommand {
         command: GimbalCommand,
         reply: mpsc::Sender<CommandAck>,
     },
+    Lights {
+        command: LightsCommand,
+        reply: mpsc::Sender<CommandAck>,
+    },
     RequestTelemetry {
         id: CommandId,
         reply: mpsc::Sender<CommandAck>,
@@ -423,8 +435,17 @@ impl ControllerHandle {
     }
 
     pub fn submit_gimbal(&self, command: GimbalCommand) -> Result<AckTicket, SubmitError> {
+        if self.shared.estopped.load(Ordering::Acquire) { return Err(SubmitError::EStopped); }
         let (reply, receiver) = mpsc::channel();
         self.enqueue(ControllerCommand::Gimbal { command, reply })?;
+        Ok(AckTicket { receiver })
+    }
+
+    /// Queue a light-only write on the same serial owner as every other frame.
+    /// Applied acknowledges host write/flush, not physical lamp feedback.
+    pub fn submit_lights(&self, command: LightsCommand) -> Result<AckTicket, SubmitError> {
+        let (reply, receiver) = mpsc::channel();
+        self.enqueue(ControllerCommand::Lights { command, reply })?;
         Ok(AckTicket { receiver })
     }
 
@@ -1001,7 +1022,14 @@ fn process_command(
             )
         }
         ControllerCommand::Gimbal { command, reply } => {
+            if shared.estopped.load(Ordering::Acquire) {
+                reply_rejected(ControllerCommand::Gimbal { command, reply }, AckOutcome::EStopped, clock.now(), None);
+                return;
+            }
             (encode_gimbal(command), command.id, None, false, reply)
+        }
+        ControllerCommand::Lights { command, reply } => {
+            (encode_lights(command), command.id, None, false, reply)
         }
         ControllerCommand::RequestTelemetry { id, reply } => {
             (encode_telemetry_request(), id, None, false, reply)
@@ -1053,6 +1081,7 @@ fn reply_rejected(
             (command.command_id(), Some(command.evidence_id()), reply)
         }
         ControllerCommand::Gimbal { command, reply } => (command.id, None, reply),
+        ControllerCommand::Lights { command, reply } => (command.id, None, reply),
         ControllerCommand::RequestTelemetry { id, reply } => (id, None, reply),
         ControllerCommand::EnableTelemetry { id, reply } => (id, None, reply),
     };
@@ -1157,6 +1186,14 @@ fn read_telemetry(
             .fetch_add(1, Ordering::Relaxed);
     }
     Ok(())
+}
+
+pub fn encode_lights(command: LightsCommand) -> Vec<u8> {
+    let mut frame = serde_json::to_vec(&json!({
+        "T": 132, "IO4": command.chassis_pwm, "IO5": command.camera_pwm,
+    })).expect("light frame contains only integer fields");
+    frame.push(b'\n');
+    frame
 }
 
 pub fn encode_drive(command: DifferentialDrive, invert: bool, swap: bool) -> Vec<u8> {
@@ -1361,6 +1398,39 @@ mod tests {
                 assert_eq!(encoded.last(), Some(&b'\n'));
             }
         }
+    }
+
+    #[test]
+    fn light_commands_use_only_t132_and_acknowledge_write_not_feedback() {
+        let transcript = Arc::new(Mutex::new(Transcript { maximum_write: 2, ..Transcript::default() }));
+        let owner = owner(Arc::clone(&transcript));
+        let handle = owner.handle();
+        wait_connected(&handle);
+        lock(&transcript).writes.clear();
+        let ack = handle.submit_lights(LightsCommand {
+            id: command_id(20), chassis_pwm: 0, camera_pwm: 255,
+        }).unwrap().wait_timeout(Duration::from_secs(1)).unwrap().unwrap();
+        assert_eq!(ack.command_id, command_id(20));
+        assert_eq!(ack.outcome, AckOutcome::Applied);
+        assert!(!ack.verified_zero);
+        assert!(ack.evidence_id.is_none());
+        let frames: Vec<serde_json::Value> = String::from_utf8(lock(&transcript).writes.clone()).unwrap()
+            .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(frames, vec![json!({"T":132,"IO4":0,"IO5":255})]);
+    }
+
+    #[test]
+    fn a_failed_light_write_is_not_an_applied_lamp_state() {
+        let transcript = Arc::new(Mutex::new(Transcript::default()));
+        let owner = owner(Arc::clone(&transcript));
+        let handle = owner.handle();
+        wait_connected(&handle);
+        lock(&transcript).fail_writes = true;
+        let ack = handle.submit_lights(LightsCommand {id:command_id(21),chassis_pwm:1,camera_pwm:180})
+            .unwrap().wait_timeout(Duration::from_secs(1)).unwrap().unwrap();
+        assert_eq!(ack.outcome,AckOutcome::IoFailed);
+        assert!(ack.applied_sequence.is_none());
+        assert!(!ack.verified_zero);
     }
 
     #[test]
