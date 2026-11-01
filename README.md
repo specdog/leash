@@ -275,3 +275,7 @@ Current code, tests, schemas, and merged documentation define current behavior. 
 ## License
 
 MIT
+
+## Author
+
+A specdog project by **[Justin DiClemente](https://github.com/logohere)**.
