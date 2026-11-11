@@ -19,6 +19,6 @@
   },
   "homepage": "https://github.com/specdog/leash#readme",
   "dependencies": {
-    "dotdog": "^0.8.4"
+    "dotdog": "0.9.0"
   }
 }
